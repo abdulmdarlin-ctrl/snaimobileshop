@@ -1,5 +1,5 @@
 
-import { 
+import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc
 } from 'firebase/firestore';
 import { dbInstance, createSecondaryUser } from './firebaseConfig';
@@ -19,7 +19,8 @@ const COLLECTIONS = {
   settings: 'settings',
   users: 'users',
   suppliers: 'suppliers',
-  purchases: 'purchases'
+  purchases: 'purchases',
+  customers: 'customers'
 };
 
 // --- SAFE JSON UTILS ---
@@ -28,8 +29,8 @@ export const safeStringify = (obj: any) => {
   return JSON.stringify(obj, (key, value) => {
     if (typeof value === 'object' && value !== null) {
       if (
-        value.nodeType || 
-        value === window || 
+        value.nodeType ||
+        value === window ||
         (value.$$typeof && Symbol.keyFor && Symbol.keyFor(value.$$typeof) === 'react.element')
       ) {
         return;
@@ -51,10 +52,10 @@ const sanitizeData = (data: any) => {
 
 // --- FIRESTORE ADAPTER ---
 function createCollectionHelper<T extends { id?: string }>(collectionName: string) {
-  
+
   const getColRef = () => {
-     if (!dbInstance) throw new Error("Database not initialized");
-     return collection(dbInstance, collectionName);
+    if (!dbInstance) throw new Error("Database not initialized");
+    return collection(dbInstance, collectionName);
   };
 
   return {
@@ -67,7 +68,7 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
         throw e;
       }
     },
-    
+
     add: async (data: T) => {
       const cleanData = sanitizeData(data);
       const docRef = await addDoc(getColRef(), cleanData);
@@ -89,26 +90,26 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
     toCollection: () => ({
       first: async () => {
         try {
-            const snapshot = await getDocs(getColRef());
-            return snapshot.empty ? null : { ...snapshot.docs[0].data(), id: snapshot.docs[0].id } as T;
+          const snapshot = await getDocs(getColRef());
+          return snapshot.empty ? null : { ...snapshot.docs[0].data(), id: snapshot.docs[0].id } as T;
         } catch (e) {
-            console.error(`Error fetching first ${collectionName}:`, e);
-            return null;
+          console.error(`Error fetching first ${collectionName}:`, e);
+          return null;
         }
       }
     }),
-    
+
     // For Settings upsert
     put: async (data: T) => {
-       const snapshot = await getDocs(getColRef());
-       if (!snapshot.empty) {
-          const id = snapshot.docs[0].id;
-          await updateDoc(doc(dbInstance!, collectionName, id), sanitizeData(data));
-          return id;
-       } else {
-          const docRef = await addDoc(getColRef(), sanitizeData(data));
-          return docRef.id;
-       }
+      const snapshot = await getDocs(getColRef());
+      if (!snapshot.empty) {
+        const id = snapshot.docs[0].id;
+        await updateDoc(doc(dbInstance!, collectionName, id), sanitizeData(data));
+        return id;
+      } else {
+        const docRef = await addDoc(getColRef(), sanitizeData(data));
+        return docRef.id;
+      }
     }
   };
 }
@@ -127,89 +128,90 @@ export const db = {
   settings: createCollectionHelper<AppSettings>(COLLECTIONS.settings),
   suppliers: createCollectionHelper<Supplier>(COLLECTIONS.suppliers),
   purchases: createCollectionHelper<Purchase>(COLLECTIONS.purchases),
+  customers: createCollectionHelper<any>(COLLECTIONS.customers),
   users: {
     ...createCollectionHelper<User>(COLLECTIONS.users),
     create: async (user: User, password?: string) => {
-       if (!password) throw new Error("Password is required for new users");
-       if (!user.username) throw new Error("Username is required");
+      if (!password) throw new Error("Password is required for new users");
+      if (!user.username) throw new Error("Username is required");
 
-       // 1. Create User in Firebase Auth
-       // If username is simple string (e.g. 'john'), append domain to make it a valid email for Auth
-       const email = user.username.includes('@') ? user.username : `${user.username}@sna.erp`;
-       
-       // Use secondary app to avoid signing out the current admin
-       const uid = await createSecondaryUser(email, password);
+      // 1. Create User in Firebase Auth
+      // If username is simple string (e.g. 'john'), append domain to make it a valid email for Auth
+      const email = user.username.includes('@') ? user.username : `${user.username}@sna.erp`;
 
-       // 2. Create User Profile in Firestore
-       // We use setDoc with the Auth UID to ensure they match
-       const cleanData = sanitizeData({ ...user, id: uid });
-       const docRef = doc(dbInstance!, COLLECTIONS.users, uid);
-       await setDoc(docRef, cleanData);
+      // Use secondary app to avoid signing out the current admin
+      const uid = await createSecondaryUser(email, password);
 
-       return { ...user, id: uid };
+      // 2. Create User Profile in Firestore
+      // We use setDoc with the Auth UID to ensure they match
+      const cleanData = sanitizeData({ ...user, id: uid });
+      const docRef = doc(dbInstance!, COLLECTIONS.users, uid);
+      await setDoc(docRef, cleanData);
+
+      return { ...user, id: uid };
     }
   },
-  
+
   // System Methods
   getStatus: () => 'live',
   resetSystem: async () => {
-      console.warn("System reset requires manual Cloud Firestore deletion.");
-      alert("Please contact administrator to reset cloud database.");
+    console.warn("System reset requires manual Cloud Firestore deletion.");
+    alert("Please contact administrator to reset cloud database.");
   }
 };
 
 // --- SEEDING ---
 export const seedInitialData = async () => {
   try {
-      const settings = await db.settings.toCollection().first();
-      if (!settings) {
-         await db.settings.add({
-            businessName: 'SNA! MOBILE SHOP',
-            tagline: 'ERP Operations',
-            address: 'Kampala, Uganda',
-            phone: '+256 700 000 000',
-            currency: 'UGX',
-            taxEnabled: true,
-            taxPercentage: 18,
-            receiptHeader: 'SNA! SHOP',
-            receiptFooter: 'Thank you for shopping with us!',
-            receiptFooterFontSize: 10,
-            receiptFooterAlign: 'center',
-            receiptFormat: 'thermal',
-            receiptShowLogo: true,
-            theme: 'light',
-            themeColor: '#ef4444',
-            invoicePrefix: 'INV',
-            enableNegativeStock: false,
-            globalLowStockThreshold: 5,
-            dateFormat: 'dd/MM/yyyy',
-            hardware: {
-               printerPaperWidth: '80mm',
-               autoPrintReceipt: true
-            }
-         });
-      }
-      
-      const cats = await db.expenseCategories.toArray();
-      if (cats.length === 0) {
-          const defaults = ['Rent', 'Utilities', 'Staff Lunch', 'Transport', 'Supplies', 'Taxes', 'Maintenance', 'Others'];
-          for (const name of defaults) await db.expenseCategories.add({ name });
-      }
+    const settings = await db.settings.toCollection().first();
+    if (!settings) {
+      await db.settings.add({
+        businessName: 'SNA! MOBILE SHOP',
+        tagline: 'ERP Operations',
+        address: 'Kampala, Uganda',
+        phone: '+256 700 000 000',
+        currency: 'UGX',
+        taxEnabled: true,
+        taxPercentage: 18,
+        receiptHeader: 'SNA! SHOP',
+        receiptFooter: 'Thank you for shopping with us!',
+        receiptFooterFontSize: 10,
+        receiptFooterAlign: 'center',
+        receiptFormat: 'thermal',
+        receiptShowLogo: true,
+        theme: 'light',
+        themeColor: '#ef4444',
+        invoicePrefix: 'INV',
+        enableNegativeStock: false,
+        globalLowStockThreshold: 5,
+        dateFormat: 'dd/MM/yyyy',
+        hardware: {
+          printerPaperWidth: '80mm',
+          autoPrintReceipt: true
+        }
+      });
+    }
 
-      // Ensure Admin
-      const users = await db.users.toArray();
-      if (users.length === 0) {
-         // This only creates the Firestore record for initial seed
-         // The Auth account must be created via the Auth component logic or manually first time
-         await db.users.add({
-             username: 'admin',
-             fullName: 'System Admin',
-             role: UserRole.ADMIN,
-             isActive: true,
-             lastLogin: Date.now()
-         });
-      }
+    const cats = await db.expenseCategories.toArray();
+    if (cats.length === 0) {
+      const defaults = ['Rent', 'Utilities', 'Staff Lunch', 'Transport', 'Supplies', 'Taxes', 'Maintenance', 'Others'];
+      for (const name of defaults) await db.expenseCategories.add({ name });
+    }
+
+    // Ensure Admin
+    const users = await db.users.toArray();
+    if (users.length === 0) {
+      // This only creates the Firestore record for initial seed
+      // The Auth account must be created via the Auth component logic or manually first time
+      await db.users.add({
+        username: 'admin',
+        fullName: 'System Admin',
+        role: UserRole.ADMIN,
+        isActive: true,
+        lastLogin: Date.now()
+      });
+    }
   } catch (e) {
-      console.error("Initial seeding failed (likely network issue):", e);
+    console.error("Initial seeding failed (likely network issue):", e);
   }
 };

@@ -319,7 +319,7 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
 
          {/* --- JOB ENTRY MODAL --- */}
          {isModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
+            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in !mt-0">
                <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
 
                   {/* Modal Header */}
@@ -431,7 +431,7 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
 
          {/* --- RECEIPT / JOB CARD MODAL --- */}
          {isReceiptOpen && activeRepairForReceipt && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
+            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in !mt-0">
                <div className="bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[95vh] flex flex-col w-full max-w-lg border border-white/20 m-auto">
 
                   {/* Print Preview Controls */}
@@ -553,7 +553,7 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
 
          {/* DELETE CONFIRMATION MODAL */}
          {repairToDelete && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
+            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in !mt-0">
                <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6 border border-white/20">
                   <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
                      <AlertTriangle size={40} strokeWidth={2} />

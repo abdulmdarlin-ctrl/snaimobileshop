@@ -50,7 +50,9 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
       category: '',
       costPrice: 0,
       wholesalePrice: 0,
+      minWholesalePrice: 0,
       selling_price: 0,
+      minSellingPrice: 0,
       stockQuantity: 0,
       reorderLevel: 5,
       inventoryType: 'Cash',
@@ -556,13 +558,23 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                            </div>
                            <div>
                               <label className="block text-xs font-bold text-blue-600 mb-1.5">Wholesale Price</label>
-                              <input type="number" min="0" className="w-full p-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                              <input type="number" min="0" placeholder="Preferred" className="w-full p-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
                                  value={formData.wholesalePrice} onChange={e => setFormData({ ...formData, wholesalePrice: Number(e.target.value) })} />
+                              <div className="mt-2">
+                                 <label className="block text-[10px] font-bold text-blue-400 mb-1">Min Wholesale</label>
+                                 <input type="number" min="0" className="w-full p-2 bg-white border border-blue-100 text-blue-600 rounded-md text-xs font-bold outline-none"
+                                    value={formData.minWholesalePrice || 0} onChange={e => setFormData({ ...formData, minWholesalePrice: Number(e.target.value) })} />
+                              </div>
                            </div>
                            <div>
                               <label className="block text-xs font-bold text-emerald-600 mb-1.5">Retail Price</label>
-                              <input type="number" min="0" required className="w-full p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
+                              <input type="number" min="0" required placeholder="Preferred" className="w-full p-3 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none transition-all"
                                  value={formData.selling_price} onChange={e => setFormData({ ...formData, selling_price: Number(e.target.value) })} />
+                              <div className="mt-2">
+                                 <label className="block text-[10px] font-bold text-emerald-400 mb-1">Min Retail</label>
+                                 <input type="number" min="0" className="w-full p-2 bg-white border border-emerald-100 text-emerald-600 rounded-md text-xs font-bold outline-none"
+                                    value={formData.minSellingPrice || 0} onChange={e => setFormData({ ...formData, minSellingPrice: Number(e.target.value) })} />
+                              </div>
                            </div>
                         </div>
                      </div>

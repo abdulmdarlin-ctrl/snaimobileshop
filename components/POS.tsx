@@ -8,7 +8,7 @@ import {
    User as UserIcon, AlertCircle, Package, Receipt, Edit,
    ChevronRight, Smartphone, Headphones, Battery, Box, Filter,
    Loader2, AlertTriangle, ScanBarcode, Download, FileText, Calendar,
-   Eraser, Store, LayoutGrid, List as ListIcon, TrendingUp, DollarSign
+   Eraser, Store, LayoutGrid, List as ListIcon, TrendingUp, DollarSign, UserPlus, MapPin, Mail, Phone
 } from 'lucide-react';
 import { printSection, exportSectionToPDF } from '../utils/printExport';
 import { useToast } from './Toast';
@@ -20,18 +20,28 @@ interface POSProps {
 const POS: React.FC<POSProps> = ({ user }) => {
    const { showToast } = useToast();
    const [products, setProducts] = useState<Product[]>([]);
+   const [customers, setCustomers] = useState<any[]>([]);
    const [salesHistory, setSalesHistory] = useState<Sale[]>([]);
    const [cart, setCart] = useState<SaleItem[]>([]);
    const [loading, setLoading] = useState(true);
    const [searchTerm, setSearchTerm] = useState('');
    const [settings, setSettings] = useState<AppSettings | null>(null);
    const [clearingHistory, setClearingHistory] = useState(false);
+   const [pricingMode, setPricingMode] = useState<'Retail' | 'Wholesale'>('Retail');
 
    // Report Filters
-   const [reportStartDate, setReportStartDate] = useState(new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split('T')[0]);
-   const [reportEndDate, setReportEndDate] = useState(new Date().toISOString().split('T')[0]);
+   const [reportStartDate, setReportStartDate] = useState(() => {
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+   });
+   const [reportEndDate, setReportEndDate] = useState(() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+   });
    const [reportCategory, setReportCategory] = useState('All');
    const [reportCashier, setReportCashier] = useState('All');
+   const [reportType, setReportType] = useState<'All' | 'Retail' | 'Wholesale'>('All');
    const [reportViewMode, setReportViewMode] = useState<'list' | 'statement'>('list');
 
    // Modals
@@ -48,6 +58,13 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [isDeleting, setIsDeleting] = useState(false);
    const [isUpdating, setIsUpdating] = useState(false);
 
+   // Cart Item Edit State
+   const [editingCartItem, setEditingCartItem] = useState<{ index: number, item: SaleItem, product: Product } | null>(null);
+   const [editItemForm, setEditItemForm] = useState({
+      price: 0,
+      quantity: 1
+   });
+
    // Checkout State
    const [checkoutForm, setCheckoutForm] = useState({
       amountPaid: 0,
@@ -56,6 +73,12 @@ const POS: React.FC<POSProps> = ({ user }) => {
       customerPhone: '',
       customerType: 'Retail' as const
    });
+
+   // Customer Search State in POS
+   const [customerSearch, setCustomerSearch] = useState('');
+   const [showCustomerResults, setShowCustomerResults] = useState(false);
+   const [newCustomerForm, setNewCustomerForm] = useState({ name: '', phone: '', email: '', address: '' });
+   const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
 
    const [lastSale, setLastSale] = useState<Sale | null>(null);
    const searchInputRef = useRef<HTMLInputElement>(null);
@@ -66,13 +89,15 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
    const fetchData = async () => {
       setLoading(true);
-      const [p, s, sets] = await Promise.all([
+      const [p, s, sets, cust] = await Promise.all([
          db.products.toArray(),
          db.sales.toArray(),
-         db.settings.toCollection().first()
+         db.settings.toCollection().first(),
+         db.customers.toArray()
       ]);
       // Only show active products with stock or if negative stock is enabled (checked later)
       setProducts(p.filter(x => x.inventoryType !== 'Loan'));
+      setCustomers(cust);
       setSalesHistory(s.sort((a, b) => b.timestamp - a.timestamp));
       setSettings(sets || null);
       setLoading(false);
@@ -100,12 +125,17 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
    const filteredHistory = useMemo(() => {
       return salesHistory.filter(s => {
-         const date = new Date(s.timestamp);
-         const start = new Date(reportStartDate);
-         const end = new Date(reportEndDate);
-         end.setHours(23, 59, 59, 999); // End of day
+         // Robust local date parsing to avoid timezone offsets shifting the day
+         const parseTime = (dateStr: string, isEnd: boolean) => {
+            if (!dateStr) return isEnd ? 8640000000000000 : 0;
+            const [y, m, d] = dateStr.split('-').map(Number);
+            return new Date(y, m - 1, d, isEnd ? 23 : 0, isEnd ? 59 : 0, isEnd ? 59 : 0).getTime();
+         };
 
-         const matchesDate = date >= start && date <= end;
+         const start = parseTime(reportStartDate, false);
+         const end = parseTime(reportEndDate, true);
+
+         const matchesDate = s.timestamp >= start && s.timestamp <= end;
          const matchesCashier = reportCashier === 'All' || s.cashierName === reportCashier;
 
          // Category match: If 'All', match. If specific, check if ANY item in sale belongs to that category
@@ -114,9 +144,10 @@ const POS: React.FC<POSProps> = ({ user }) => {
             return prod?.category === reportCategory;
          });
 
-         return matchesDate && matchesCashier && matchesCategory;
+         const matchesType = reportType === 'All' || s.customerType === reportType;
+         return matchesDate && matchesCashier && matchesCategory && matchesType;
       });
-   }, [salesHistory, reportStartDate, reportEndDate, reportCashier, reportCategory, products]);
+   }, [salesHistory, reportStartDate, reportEndDate, reportCashier, reportCategory, reportType, products]);
 
    const reportTotals = useMemo(() => {
       const revenue = filteredHistory.reduce((sum, s) => sum + s.total, 0);
@@ -125,6 +156,36 @@ const POS: React.FC<POSProps> = ({ user }) => {
       return { revenue, count, avgTicket };
    }, [filteredHistory]);
 
+   const filteredCustomers = useMemo(() => {
+      if (!customerSearch) return [];
+      const term = customerSearch.toLowerCase();
+      return customers.filter(c =>
+         c.name.toLowerCase().includes(term) ||
+         (c.phone && c.phone.includes(term)) ||
+         (c.email && c.email.toLowerCase().includes(term)) ||
+         (c.address && c.address.toLowerCase().includes(term))
+      ).slice(0, 5);
+   }, [customers, customerSearch]);
+
+   // --- PRICING MODE EFFECT ---
+   useEffect(() => {
+      setCart(prevCart => prevCart.map(item => {
+         const product = products.find(p => p.id === item.productId);
+         if (product) {
+            const newPrice = pricingMode === 'Retail'
+               ? product.selling_price
+               : (product.wholesalePrice || product.selling_price);
+            return {
+               ...item,
+               price: newPrice,
+               total: newPrice * item.quantity,
+               originalPrice: newPrice // Reset negotiation on mode switch
+            };
+         }
+         return item;
+      }));
+   }, [pricingMode, products]);
+
    // --- CART ACTIONS ---
 
    const addToCart = (product: Product) => {
@@ -132,6 +193,10 @@ const POS: React.FC<POSProps> = ({ user }) => {
          showToast("Out of stock!", 'error');
          return;
       }
+
+      const price = pricingMode === 'Retail'
+         ? product.selling_price
+         : (product.wholesalePrice || product.selling_price);
 
       setCart(prev => {
          const existing = prev.find(item => item.productId === product.id);
@@ -149,8 +214,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
             productId: product.id!,
             name: product.name,
             quantity: 1,
-            price: product.selling_price,
-            total: product.selling_price
+            price: price,
+            total: price,
+            originalPrice: price // Store preferred price for discount calc
          }];
       });
 
@@ -185,15 +251,56 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
    const clearCart = () => setCart([]);
 
+   // --- CART EDITING ---
+   const openEditCartItem = (item: SaleItem, index: number) => {
+      const product = products.find(p => p.id === item.productId);
+      if (!product) return;
+      setEditingCartItem({ index, item, product });
+      setEditItemForm({ price: item.price, quantity: item.quantity });
+   };
+
+   const saveCartItemEdit = () => {
+      if (!editingCartItem) return;
+
+      const { product } = editingCartItem;
+      const minPrice = pricingMode === 'Retail'
+         ? (product.minSellingPrice || product.selling_price)
+         : (product.minWholesalePrice || product.wholesalePrice || product.selling_price);
+
+      if (editItemForm.price < minPrice) {
+         showToast(`Price cannot be lower than minimum: ${minPrice.toLocaleString()}`, 'error');
+         return;
+      }
+
+      setCart(prev => prev.map((item, idx) => {
+         if (idx === editingCartItem.index) {
+            return {
+               ...item,
+               price: editItemForm.price,
+               quantity: editItemForm.quantity,
+               total: editItemForm.price * editItemForm.quantity
+            };
+         }
+         return item;
+      }));
+      setEditingCartItem(null);
+   };
+
    // --- CHECKOUT ---
 
    const subtotal = cart.reduce((acc, item) => acc + item.total, 0);
+   const totalDiscount = cart.reduce((acc, item) => acc + ((item.originalPrice || item.price) - item.price) * item.quantity, 0);
    const tax = settings?.taxEnabled ? (subtotal * (settings.taxPercentage || 18) / 100) : 0;
    const total = subtotal + tax;
 
    const handleCheckout = () => {
       if (cart.length === 0) return;
-      setCheckoutForm(prev => ({ ...prev, amountPaid: total }));
+      setCheckoutForm(prev => ({ ...prev, amountPaid: total, customerName: '', customerPhone: '' }));
+      // Reset Customer Search State
+      setCustomerSearch('');
+      setShowCustomerResults(false);
+      setIsCreatingCustomer(false);
+      setNewCustomerForm({ name: '', phone: '', email: '', address: '' });
       setIsCheckoutOpen(true);
    };
 
@@ -210,14 +317,14 @@ const POS: React.FC<POSProps> = ({ user }) => {
             items: cart,
             subtotal,
             tax,
-            discount: 0,
+            discount: totalDiscount,
             total,
             amountPaid: 0,
             balance: 0,
             paymentMethod: checkoutForm.paymentMethod,
             customerName: checkoutForm.customerName,
             customerPhone: checkoutForm.customerPhone,
-            customerType: checkoutForm.customerType,
+            customerType: pricingMode,
             cashierName: user.username,
             timestamp: Date.now()
          };
@@ -256,6 +363,35 @@ const POS: React.FC<POSProps> = ({ user }) => {
          showToast("Transaction failed.", 'error');
       } finally {
          setProcessingPayment(false);
+      }
+   };
+
+   const handleSelectCustomer = (c: any) => {
+      setCheckoutForm(prev => ({
+         ...prev,
+         customerName: c.name,
+         customerPhone: c.phone || ''
+      }));
+      setCustomerSearch(c.name);
+      setShowCustomerResults(false);
+   };
+
+   const handleCreateCustomer = async () => {
+      if (!newCustomerForm.name) return showToast("Customer Name is required", 'error');
+
+      try {
+         const newC = await db.customers.add({
+            ...newCustomerForm,
+            joinedDate: Date.now()
+         });
+         const createdCustomer = { ...newCustomerForm, id: newC.id };
+
+         setCustomers(prev => [...prev, createdCustomer]);
+         handleSelectCustomer(createdCustomer);
+         setIsCreatingCustomer(false);
+         showToast("Customer created & selected", 'success');
+      } catch (e) {
+         showToast("Failed to create customer", 'error');
       }
    };
 
@@ -539,6 +675,19 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{cart.length} Items</p>
                   </div>
                </div>
+
+               {/* Pricing Mode Toggle */}
+               <div className="flex bg-slate-100 p-1 rounded-lg mx-2">
+                  <button
+                     onClick={() => setPricingMode('Retail')}
+                     className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all ${pricingMode === 'Retail' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+                  >Retail</button>
+                  <button
+                     onClick={() => setPricingMode('Wholesale')}
+                     className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all ${pricingMode === 'Wholesale' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+                  >Wholesale</button>
+               </div>
+
                <button
                   onClick={clearCart}
                   className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
@@ -558,7 +707,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </div>
                ) : (
                   cart.map((item, idx) => (
-                     <div key={idx} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center gap-3 animate-in slide-in-from-right-2">
+                     <div key={idx} onClick={() => openEditCartItem(item, idx)} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center gap-3 animate-in slide-in-from-right-2 cursor-pointer hover:border-blue-300 transition-colors group">
                         <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 font-bold text-[10px]">
                            {idx + 1}
                         </div>
@@ -566,16 +715,19 @@ const POS: React.FC<POSProps> = ({ user }) => {
                            <p className="text-xs font-bold text-slate-800 truncate">{item.name}</p>
                            <p className="text-[10px] font-bold text-slate-400">
                               {item.price.toLocaleString()} x {item.quantity}
+                              {(item.originalPrice && item.originalPrice > item.price) && (
+                                 <span className="text-emerald-600 ml-1">(-{(item.originalPrice - item.price).toLocaleString()})</span>
+                              )}
                            </p>
                         </div>
-                        <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-1">
-                           <button onClick={() => updateQuantity(item.productId, -1)} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 hover:text-red-500"><Minus size={12} /></button>
+                        <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-1" onClick={e => e.stopPropagation()}>
+                           <button onClick={() => updateQuantity(item.productId, -1)} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 hover:text-red-500 disabled:opacity-50"><Minus size={12} /></button>
                            <span className="text-xs font-bold w-6 text-center">{item.quantity}</span>
-                           <button onClick={() => updateQuantity(item.productId, 1)} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 hover:text-emerald-500"><Plus size={12} /></button>
+                           <button onClick={() => updateQuantity(item.productId, 1)} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 hover:text-emerald-500 disabled:opacity-50"><Plus size={12} /></button>
                         </div>
                         <div className="text-right min-w-[70px]">
                            <p className="text-xs font-bold text-slate-900">{item.total.toLocaleString()}</p>
-                           <button onClick={() => removeFromCart(item.productId)} className="text-[9px] text-red-400 hover:text-red-600 underline">Remove</button>
+                           <button onClick={(e) => { e.stopPropagation(); removeFromCart(item.productId); }} className="text-[9px] text-red-400 hover:text-red-600 underline">Remove</button>
                         </div>
                      </div>
                   ))
@@ -589,6 +741,12 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      <span>Subtotal</span>
                      <span className="font-bold">{subtotal.toLocaleString()}</span>
                   </div>
+                  {totalDiscount > 0 && (
+                     <div className="flex justify-between text-xs font-medium text-emerald-600">
+                        <span>Discount Applied</span>
+                        <span className="font-bold">-{totalDiscount.toLocaleString()}</span>
+                     </div>
+                  )}
                   {settings?.taxEnabled && (
                      <div className="flex justify-between text-xs font-medium text-slate-500">
                         <span>Tax ({settings.taxPercentage}%)</span>
@@ -685,27 +843,109 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         )}
                      </div>
 
-                     {/* Optional Customer Info */}
-                     <details className="group">
-                        <summary className="list-none flex items-center gap-2 text-xs font-bold text-slate-500 cursor-pointer hover:text-slate-800 transition-colors py-2">
-                           <ChevronRight size={14} className="group-open:rotate-90 transition-transform" />
-                           Add Customer Details (Optional)
-                        </summary>
-                        <div className="space-y-3 pt-2 animate-in slide-in-from-top-2">
-                           <input
-                              className="w-full h-10 bg-slate-50 rounded-xl px-4 text-xs font-bold outline-none focus:ring-2 focus:ring-slate-200"
-                              placeholder="Customer Name"
-                              value={checkoutForm.customerName}
-                              onChange={e => setCheckoutForm(prev => ({ ...prev, customerName: e.target.value }))}
-                           />
-                           <input
-                              className="w-full h-10 bg-slate-50 rounded-xl px-4 text-xs font-bold outline-none focus:ring-2 focus:ring-slate-200"
-                              placeholder="Phone Number"
-                              value={checkoutForm.customerPhone}
-                              onChange={e => setCheckoutForm(prev => ({ ...prev, customerPhone: e.target.value }))}
-                           />
+                     {/* Customer Search & Create */}
+                     <div className="space-y-3 pt-2 border-t border-slate-100">
+                        <div className="flex justify-between items-center">
+                           <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide ml-1">Customer Details</label>
+                           {!isCreatingCustomer && (
+                              <button onClick={() => setIsCreatingCustomer(true)} className="text-[10px] font-bold text-blue-600 hover:underline flex items-center gap-1">
+                                 <UserPlus size={12} /> New Customer
+                              </button>
+                           )}
                         </div>
-                     </details>
+
+                        {!isCreatingCustomer ? (
+                           <div className="relative">
+                              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                              <input
+                                 className="w-full h-10 bg-slate-50 rounded-xl pl-9 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-slate-200"
+                                 placeholder="Search Name, Phone, Email or Address..."
+                                 value={customerSearch}
+                                 onChange={e => {
+                                    setCustomerSearch(e.target.value);
+                                    setShowCustomerResults(true);
+                                    if (checkoutForm.customerName && e.target.value !== checkoutForm.customerName) {
+                                       setCheckoutForm(prev => ({ ...prev, customerName: '', customerPhone: '' }));
+                                    }
+                                 }}
+                                 onFocus={() => setShowCustomerResults(true)}
+                              />
+                              {showCustomerResults && customerSearch && (
+                                 <div className="absolute top-full left-0 right-0 bg-white border border-slate-100 shadow-xl rounded-xl mt-1 z-20 max-h-48 overflow-y-auto">
+                                    {filteredCustomers.map(c => (
+                                       <button
+                                          key={c.id}
+                                          onClick={() => handleSelectCustomer(c)}
+                                          className="w-full text-left px-4 py-2 hover:bg-slate-50 border-b border-slate-50 last:border-0"
+                                       >
+                                          <p className="text-xs font-bold text-slate-800">{c.name}</p>
+                                          <div className="flex gap-2 text-[10px] text-slate-400">
+                                             {c.phone && <span>{c.phone}</span>}
+                                             {c.address && <span>• {c.address}</span>}
+                                          </div>
+                                       </button>
+                                    ))}
+                                    {filteredCustomers.length === 0 && (
+                                       <div className="p-3 text-center">
+                                          <p className="text-[10px] text-slate-400 mb-2">No customer found</p>
+                                          <button onClick={() => setIsCreatingCustomer(true)} className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-[10px] font-bold uppercase">Create New</button>
+                                       </div>
+                                    )}
+                                 </div>
+                              )}
+                           </div>
+                        ) : (
+                           <div className="bg-slate-50 p-3 rounded-xl space-y-2 animate-in slide-in-from-right-5">
+                              <div className="flex justify-between items-center mb-1">
+                                 <span className="text-[10px] font-bold text-slate-400 uppercase">New Customer Profile</span>
+                                 <button onClick={() => setIsCreatingCustomer(false)} className="text-[10px] text-red-500 hover:underline">Cancel</button>
+                              </div>
+                              <input
+                                 className="w-full h-9 bg-white border border-slate-200 rounded-lg px-3 text-xs font-bold outline-none focus:border-blue-400"
+                                 placeholder="Full Name (Required)"
+                                 value={newCustomerForm.name}
+                                 onChange={e => setNewCustomerForm({ ...newCustomerForm, name: e.target.value })}
+                              />
+                              <div className="grid grid-cols-2 gap-2">
+                                 <input
+                                    className="w-full h-9 bg-white border border-slate-200 rounded-lg px-3 text-xs outline-none focus:border-blue-400"
+                                    placeholder="Phone (Optional)"
+                                    value={newCustomerForm.phone}
+                                    onChange={e => setNewCustomerForm({ ...newCustomerForm, phone: e.target.value })}
+                                 />
+                                 <input
+                                    className="w-full h-9 bg-white border border-slate-200 rounded-lg px-3 text-xs outline-none focus:border-blue-400"
+                                    placeholder="Email (Optional)"
+                                    value={newCustomerForm.email}
+                                    onChange={e => setNewCustomerForm({ ...newCustomerForm, email: e.target.value })}
+                                 />
+                              </div>
+                              <input
+                                 className="w-full h-9 bg-white border border-slate-200 rounded-lg px-3 text-xs outline-none focus:border-blue-400"
+                                 placeholder="Address (Optional)"
+                                 value={newCustomerForm.address}
+                                 onChange={e => setNewCustomerForm({ ...newCustomerForm, address: e.target.value })}
+                              />
+                              <button onClick={handleCreateCustomer} className="w-full py-2 bg-blue-600 text-white rounded-lg text-[10px] font-bold uppercase hover:bg-blue-700 transition-colors">
+                                 Save & Select Customer
+                              </button>
+                           </div>
+                        )}
+
+                        {/* Selected Customer Display */}
+                        {checkoutForm.customerName && !isCreatingCustomer && (
+                           <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg border border-blue-100">
+                              <UserIcon size={14} />
+                              <div className="flex-1 min-w-0">
+                                 <p className="text-xs font-bold truncate">{checkoutForm.customerName}</p>
+                                 {checkoutForm.customerPhone && <p className="text-[10px] opacity-80">{checkoutForm.customerPhone}</p>}
+                              </div>
+                              <button onClick={() => { setCheckoutForm(prev => ({ ...prev, customerName: '', customerPhone: '' })); setCustomerSearch(''); }} className="p-1 hover:bg-blue-100 rounded">
+                                 <X size={14} />
+                              </button>
+                           </div>
+                        )}
+                     </div>
 
                      <button
                         onClick={processPayment}
@@ -715,6 +955,58 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         {processingPayment ? <Loader2 className="animate-spin" /> : <Check size={20} strokeWidth={4} />}
                         Complete Sale
                      </button>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* --- EDIT CART ITEM MODAL --- */}
+         {editingCartItem && (
+            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
+               <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden border border-white/20">
+                  <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                     <h3 className="text-sm font-bold text-slate-900">Adjust Item</h3>
+                     <button onClick={() => setEditingCartItem(null)}><X size={18} className="text-slate-400" /></button>
+                  </div>
+                  <div className="p-6 space-y-4">
+                     <div>
+                        <p className="text-xs font-bold text-slate-500 uppercase mb-1">Product</p>
+                        <p className="font-bold text-slate-900">{editingCartItem.item.name}</p>
+                        <p className="text-[10px] text-slate-400">
+                           Preferred: {(editingCartItem.item.originalPrice || editingCartItem.item.price).toLocaleString()} |
+                           Min: {(pricingMode === 'Retail' ? editingCartItem.product.minSellingPrice : editingCartItem.product.minWholesalePrice)?.toLocaleString() || 0}
+                        </p>
+                     </div>
+
+                     <div className="grid grid-cols-2 gap-4">
+                        <div>
+                           <label className="text-[10px] font-bold text-slate-400 uppercase">Unit Price</label>
+                           <input
+                              type="number"
+                              className="w-full h-10 border border-slate-200 rounded-lg px-3 font-bold text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
+                              value={editItemForm.price}
+                              onChange={e => setEditItemForm({ ...editItemForm, price: Number(e.target.value) })}
+                           />
+                        </div>
+                        <div>
+                           <label className="text-[10px] font-bold text-slate-400 uppercase">Quantity</label>
+                           <input
+                              type="number"
+                              className="w-full h-10 border border-slate-200 rounded-lg px-3 font-bold text-sm focus:ring-2 focus:ring-blue-500/20 outline-none"
+                              value={editItemForm.quantity}
+                              onChange={e => setEditItemForm({ ...editItemForm, quantity: Number(e.target.value) })}
+                           />
+                        </div>
+                     </div>
+
+                     <div className="pt-2">
+                        <button
+                           onClick={saveCartItemEdit}
+                           className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase tracking-wider hover:bg-black transition-all"
+                        >
+                           Update Item
+                        </button>
+                     </div>
                   </div>
                </div>
             </div>
@@ -760,24 +1052,43 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         <div className="border-b border-black border-dashed mb-2"></div>
 
                         <div className="mb-2">
-                           {lastSale.items.map((item, i) => (
-                              <div key={i} className="mb-1">
-                                 <div>{item.name}</div>
-                                 <div className="flex justify-between pl-2">
-                                    <span>{item.quantity} x {item.price.toLocaleString()}</span>
-                                    <span className="font-bold">{item.total.toLocaleString()}</span>
+                           {lastSale.items.map((item, i) => {
+                              const itemPrice = item.originalPrice || item.price;
+                              const itemTotal = item.quantity * itemPrice;
+                              return (
+                                 <div key={i} className="mb-1">
+                                    <div>{item.name}</div>
+                                    <div className="flex justify-between pl-2">
+                                       <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
+                                       <span className="font-bold">{itemTotal.toLocaleString()}</span>
+                                    </div>
                                  </div>
-                              </div>
-                           ))}
+                              );
+                           })}
                         </div>
 
                         <div className="border-b border-black border-dashed mb-2"></div>
 
                         <div className="space-y-1 mb-2">
-                           <div className="flex justify-between font-bold">
-                              <span>SUBTOTAL</span>
-                              <span>{lastSale.subtotal.toLocaleString()}</span>
-                           </div>
+                           {(() => {
+                              const grossSubtotal = lastSale.items.reduce((acc, item) => acc + ((item.originalPrice || item.price) * item.quantity), 0);
+                              const discountPercent = grossSubtotal > 0 ? (lastSale.discount / grossSubtotal) * 100 : 0;
+
+                              return (
+                                 <>
+                                    <div className="flex justify-between font-bold">
+                                       <span>SUBTOTAL</span>
+                                       <span>{grossSubtotal.toLocaleString()}</span>
+                                    </div>
+                                    {lastSale.discount > 0 && (
+                                       <div className="flex justify-between">
+                                          <span>DISCOUNT ({discountPercent.toFixed(1)}%)</span>
+                                          <span>-{lastSale.discount.toLocaleString()}</span>
+                                       </div>
+                                    )}
+                                 </>
+                              );
+                           })()}
                            {lastSale.tax > 0 && (
                               <div className="flex justify-between">
                                  <span>TAX</span>
@@ -869,10 +1180,31 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">End Date</label>
                         <input type="date" className="win-input h-10 bg-white" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} />
                      </div>
+                     <div className="space-y-1 pb-1">
+                        <button
+                           onClick={() => {
+                              const today = new Date();
+                              const str = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+                              setReportStartDate(str);
+                              setReportEndDate(str);
+                           }}
+                           className="h-9 px-3 bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold uppercase hover:bg-slate-300 transition-colors"
+                        >
+                           Today
+                        </button>
+                     </div>
                      <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Category</label>
                         <select className="win-input h-10 bg-white" value={reportCategory} onChange={e => setReportCategory(e.target.value)}>
                            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                     </div>
+                     <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Sale Type</label>
+                        <select className="win-input h-10 bg-white" value={reportType} onChange={e => setReportType(e.target.value as any)}>
+                           <option value="All">All Types</option>
+                           <option value="Retail">Retail</option>
+                           <option value="Wholesale">Wholesale</option>
                         </select>
                      </div>
                      <div className="space-y-1">
@@ -901,6 +1233,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cashier</th>
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Customer</th>
+                                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Type</th>
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Total</th>
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right no-print">Action</th>
                                  </tr>
@@ -915,6 +1248,11 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        </td>
                                        <td className="px-6 py-3 text-xs font-medium text-slate-600">{sale.cashierName}</td>
                                        <td className="px-6 py-3 text-xs font-bold text-slate-900">{sale.customerName || 'Walk-in'}</td>
+                                       <td className="px-6 py-3">
+                                          <span className={`px-2 py-1 rounded text-[9px] font-bold uppercase ${sale.customerType === 'Wholesale' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
+                                             {sale.customerType || 'Retail'}
+                                          </span>
+                                       </td>
                                        <td className="px-6 py-3 text-xs font-bold text-slate-900 text-right">{sale.total.toLocaleString()}</td>
                                        <td className="px-6 py-3 text-right no-print">
                                           <button
@@ -1001,6 +1339,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        <th className="py-2 font-bold text-slate-500 uppercase">Date</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase">Receipt #</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase">Customer</th>
+                                       <th className="py-2 font-bold text-slate-500 uppercase">Type</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase">Cashier</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase text-right">Method</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase text-right">Amount</th>
@@ -1012,6 +1351,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                           <td className="py-3 font-mono text-slate-600">{new Date(sale.timestamp).toLocaleDateString()}</td>
                                           <td className="py-3 font-bold text-slate-900">{sale.receiptNo}</td>
                                           <td className="py-3 text-slate-700">{sale.customerName || '-'}</td>
+                                          <td className="py-3 text-slate-500 uppercase text-[10px]">{sale.customerType || 'Retail'}</td>
                                           <td className="py-3 text-slate-500">{sale.cashierName}</td>
                                           <td className="py-3 text-right text-slate-500">{sale.paymentMethod}</td>
                                           <td className="py-3 text-right font-bold text-slate-900">{sale.total.toLocaleString()}</td>
@@ -1020,7 +1360,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                  </tbody>
                                  <tfoot className="border-t-2 border-slate-200">
                                     <tr>
-                                       <td colSpan={5} className="py-3 text-right font-black text-sm uppercase">Grand Total</td>
+                                       <td colSpan={6} className="py-3 text-right font-black text-sm uppercase">Grand Total</td>
                                        <td className="py-3 text-right font-black text-sm">{reportTotals.revenue.toLocaleString()}</td>
                                     </tr>
                                  </tfoot>

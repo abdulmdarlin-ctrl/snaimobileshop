@@ -12,11 +12,12 @@ import Reports from './components/Reports';
 import Settings from './components/Settings';
 import Expenses from './components/Expenses';
 import Loans from './components/Loans';
+import Customers from './components/Customers';
 import Auth from './components/Auth';
 import { Database, WifiOff, RefreshCw } from 'lucide-react';
 import { ToastProvider } from './components/Toast';
 
-export type Page = 'dashboard' | 'inventory' | 'sales' | 'repairs' | 'reports' | 'expenses' | 'settings' | 'loans';
+export type Page = 'dashboard' | 'inventory' | 'sales' | 'repairs' | 'reports' | 'expenses' | 'settings' | 'loans' | 'customers';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -104,6 +105,7 @@ const App: React.FC = () => {
       case 'repairs': return <Repairs user={user} />;
       case 'reports': return <Reports />;
       case 'expenses': return <Expenses user={user} />;
+      case 'customers': return <Customers user={user} />;
       case 'settings': return <Settings user={user} onNavigate={setCurrentPage} onSettingsChange={fetchSettings} />;
       default: return <Dashboard onNavigate={setCurrentPage} />;
     }
