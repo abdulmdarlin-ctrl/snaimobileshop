@@ -1,149 +1,190 @@
-
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SNA! Mobile ERP</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        :root {
-            --sna-primary: #ef4444; /* Rose-500/Red-500 */
-            --sna-slate-900: #0f172a;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNA! MOBILE SHOP</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --sna-primary: #ef4444;
+      /* Rose-500/Red-500 */
+      --sna-slate-900: #0f172a;
+    }
 
-        body { 
-          font-family: 'Inter', sans-serif;
-          background-color: #f8fafc;
-          color: #334155;
-          font-size: 14px;
-          -webkit-font-smoothing: antialiased;
-        }
-        
-        /* Specialized Print Engine Rules */
-        @media print {
-            body.is-printing-active > *:not(#print-isolation-mount) {
-                display: none !important;
-            }
-            #print-isolation-mount .no-print {
-                display: none !important;
-            }
-            #print-isolation-mount {
-                display: block !important;
-                position: absolute !important;
-                top: 0 !important;
-                left: 0 !important;
-                width: 100% !important;
-                background: white !important;
-            }
-            body { background: white !important; }
-            .receipt-mode {
-                width: 80mm !important;
-                max-width: 80mm !important;
-                margin: 0 auto !important;
-                padding: 4mm !important;
-                font-family: 'Courier New', Courier, monospace !important;
-            }
-            .report-mode {
-                width: 210mm !important;
-                max-width: 210mm !important;
-                margin: 0 auto !important;
-                padding: 15mm !important;
-            }
-            .no-print { display: none !important; }
-        }
-        
-        @page {
-            margin: 0;
-            size: auto;
-        }
-        
-        .print-only { display: none; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8fafc;
+      color: #334155;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
 
-        .backdrop-blur-sm, .backdrop-blur-md, .backdrop-blur-lg, .backdrop-blur-xl, .backdrop-blur-2xl {
-            backdrop-filter: none !important;
-            -webkit-backdrop-filter: none !important;
-        }
+    /* Specialized Print Engine Rules */
+    @media print {
+      body.is-printing-active>*:not(#print-isolation-mount) {
+        display: none !important;
+      }
 
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+      #print-isolation-mount .no-print {
+        display: none !important;
+      }
 
-        .animate-in {
-          animation: enter 0.3s ease-out;
-        }
-        @keyframes enter {
-          from { opacity: 0; transform: translateY(10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        
-        /* Clean UI Utilities */
-        .win-card {
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
-          border-radius: 0.75rem;
-          box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-        }
+      #print-isolation-mount {
+        display: block !important;
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100% !important;
+        background: white !important;
+      }
 
-        .win-button-primary {
-          background-color: var(--sna-primary);
-          color: white;
-          border-radius: 0.5rem;
-          font-weight: 600;
-          padding: 0.6rem 1.25rem;
-          transition: all 0.2s;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.5rem;
-        }
-        .win-button-primary:hover {
-            opacity: 0.9;
-        }
+      body {
+        background: white !important;
+      }
 
-        .win-input {
-          width: 100%;
-          padding: 0.6rem 1rem;
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
-          border-radius: 0.5rem;
-          font-weight: 500;
-          font-size: 0.875rem;
-          outline: none;
-          transition: border-color 0.2s;
-        }
-        .win-input:focus {
-            border-color: var(--sna-primary);
-            box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1);
-        }
+      .receipt-mode {
+        width: 80mm !important;
+        max-width: 80mm !important;
+        margin: 0 auto !important;
+        padding: 4mm !important;
+        font-family: 'Courier New', Courier, monospace !important;
+      }
 
-        .win-label {
-          display: block;
-          font-size: 0.75rem;
-          font-weight: 600;
-          color: #64748b;
-          margin-bottom: 0.375rem;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-        }
+      .report-mode {
+        width: 210mm !important;
+        max-width: 210mm !important;
+        margin: 0 auto !important;
+        padding: 15mm !important;
+      }
 
-        .sna-table th {
-          font-size: 0.75rem;
-          font-weight: 700;
-          text-transform: uppercase;
-          color: #64748b;
-          padding: 0.75rem 1.5rem;
-          background-color: #f8fafc;
-          border-bottom: 1px solid #e2e8f0;
-        }
-        .sna-table td {
-          padding: 1rem 1.5rem;
-          border-bottom: 1px solid #f1f5f9;
-        }
-    </style>
-<script type="importmap">
+      .no-print {
+        display: none !important;
+      }
+    }
+
+    @page {
+      margin: 0;
+      size: auto;
+    }
+
+    .print-only {
+      display: none;
+    }
+
+    .backdrop-blur-sm,
+    .backdrop-blur-md,
+    .backdrop-blur-lg,
+    .backdrop-blur-xl,
+    .backdrop-blur-2xl {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 10px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+
+    .animate-in {
+      animation: enter 0.3s ease-out;
+    }
+
+    @keyframes enter {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Clean UI Utilities */
+    .win-card {
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 0.75rem;
+      box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    }
+
+    .win-button-primary {
+      background-color: var(--sna-primary);
+      color: white;
+      border-radius: 0.5rem;
+      font-weight: 600;
+      padding: 0.6rem 1.25rem;
+      transition: all 0.2s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .win-button-primary:hover {
+      opacity: 0.9;
+    }
+
+    .win-input {
+      width: 100%;
+      padding: 0.6rem 1rem;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 0.5rem;
+      font-weight: 500;
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .win-input:focus {
+      border-color: var(--sna-primary);
+      box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1);
+    }
+
+    .win-label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #64748b;
+      margin-bottom: 0.375rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .sna-table th {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #64748b;
+      padding: 0.75rem 1.5rem;
+      background-color: #f8fafc;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .sna-table td {
+      padding: 1rem 1.5rem;
+      border-bottom: 1px solid #f1f5f9;
+    }
+  </style>
+  <script type="importmap">
 {
   "imports": {
     "react": "https://esm.sh/react@^19.2.3",
@@ -168,11 +209,13 @@
   }
 }
 </script>
-<link rel="stylesheet" href="/index.css">
+  <link rel="stylesheet" href="/index.css">
 </head>
+
 <body>
-    <div id="root"></div>
-    <div id="print-isolation-mount" class="print-only"></div>
-<script type="module" src="/index.tsx"></script>
+  <div id="root"></div>
+  <div id="print-isolation-mount" class="print-only"></div>
+  <script type="module" src="/index.tsx"></script>
 </body>
+
 </html>

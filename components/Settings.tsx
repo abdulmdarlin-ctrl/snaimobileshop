@@ -159,27 +159,6 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
       }
    };
 
-   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-
-      // Size limit check (e.g., 300KB)
-      if (file.size > 300 * 1024) {
-         showToast("Image too large. Max 300KB.", 'error');
-         return;
-      }
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-         setSettings(s => s ? { ...s, logo: reader.result as string } : null);
-      };
-      reader.readAsDataURL(file);
-   };
-
-   const handleRemoveLogo = () => {
-      setSettings(s => s ? { ...s, logo: undefined } : null);
-   };
-
    const loadAuditLogs = async () => {
       try {
          const allLogs = await db.auditLogs.toArray();
@@ -666,38 +645,6 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                           {/* LOGO UPLOAD SECTION */}
-                           <div className="col-span-full">
-                              <label className="win-label mb-2">Company Logo</label>
-                              <div className="flex items-center gap-6">
-                                 <div className="w-24 h-24 rounded-2xl bg-slate-50 border-2 border-dashed border-slate-200 flex items-center justify-center overflow-hidden relative group">
-                                    {settings.logo ? (
-                                       <>
-                                          <img src={settings.logo} alt="Logo" className="w-full h-full object-contain p-2" />
-                                          <button
-                                             onClick={handleRemoveLogo}
-                                             className="absolute inset-0 bg-red-500/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                                          >
-                                             <Trash2 className="text-white" size={20} />
-                                          </button>
-                                       </>
-                                    ) : (
-                                       <ImageIcon className="text-slate-300" size={32} />
-                                    )}
-                                 </div>
-                                 <div className="space-y-2">
-                                    <label className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold uppercase tracking-wide hover:bg-slate-50 cursor-pointer shadow-sm">
-                                       <Upload size={14} /> Upload Logo
-                                       <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
-                                    </label>
-                                    <p className="text-[10px] text-slate-400 font-medium">
-                                       Max size 300KB. PNG or JPG preferred. <br />
-                                       Visible on Receipts & Headers.
-                                    </p>
-                                 </div>
-                              </div>
-                           </div>
-
                            <div className="space-y-2">
                               <label className="win-label">Business Name</label>
                               <input className="win-input h-12" value={settings.businessName} onChange={e => setSettings(s => s ? { ...s, businessName: e.target.value } : null)} />
