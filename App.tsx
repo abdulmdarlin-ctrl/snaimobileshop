@@ -17,13 +17,14 @@ import Auth from './components/Auth';
 import { Database, WifiOff, RefreshCw, Loader2 } from 'lucide-react';
 import brandLogo from './assets/SNAI-LOGO.png';
 import { ToastProvider } from './components/Toast';
+import ErrorBoundary from './components/ErrorBoundary';
 
 export type Page = 'dashboard' | 'inventory' | 'sales' | 'repairs' | 'reports' | 'expenses' | 'settings' | 'loans' | 'customers';
 
 const App: React.FC = () => {
   // Initialize user from localStorage immediately to prevent login flash
   const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('sna_user');
+    const saved = localStorage.getItem('sna_user') || sessionStorage.getItem('sna_user');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -58,7 +59,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      const minLoad = new Promise(resolve => setTimeout(resolve, 2500));
+      const minLoad = new Promise(resolve => setTimeout(resolve, 1000));
       const boot = async () => {
         try {
           await seedInitialData();
@@ -85,10 +86,11 @@ const App: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const handleLogin = (u: User) => {
+  const handleLogin = (u: User, rememberMe: boolean = true) => {
     setUser(u);
     // Use safeStringify to prevent circular reference errors if User object contains Firestore/DOM refs
-    localStorage.setItem('sna_user', safeStringify(u));
+    const storage = rememberMe ? localStorage : sessionStorage;
+    storage.setItem('sna_user', safeStringify(u));
     if (u.role === UserRole.CASHIER) {
       setCurrentPage('sales');
     } else {
@@ -99,7 +101,9 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem('sna_user');
+    sessionStorage.removeItem('sna_user');
     localStorage.removeItem('sna_token');
+    sessionStorage.removeItem('sna_token');
     setCurrentPage('dashboard');
   };
 
@@ -133,7 +137,7 @@ const App: React.FC = () => {
 
   const renderPage = () => {
     switch (currentPage) {
-      case 'dashboard': return <Dashboard onNavigate={setCurrentPage} />;
+      case 'dashboard': return <Dashboard onNavigate={setCurrentPage} user={user} />;
       case 'inventory': return <Inventory user={user} />;
       case 'sales': return <POS user={user} />;
       case 'loans': return <Loans user={user} />;
@@ -176,7 +180,11 @@ const App: React.FC = () => {
             settings={settings}
           />
           <main className="flex-1 overflow-y-auto p-4 lg:p-10 scrollbar-hide">
-            <div className="max-w-[1600px] mx-auto w-full h-full">{renderPage()}</div>
+            <div className="max-w-[1600px] mx-auto w-full h-full">
+              <ErrorBoundary>
+                {renderPage()}
+              </ErrorBoundary>
+            </div>
           </main>
         </div>
       </div>

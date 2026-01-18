@@ -1,15 +1,15 @@
 
 import React, { useState, useEffect } from 'react';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, dbInstance } from '../firebaseConfig';
 import { db } from '../db';
 import { User, UserRole } from '../types';
-import { Lock, ArrowRight, Mail, AlertTriangle, Loader2, CheckCircle2 } from 'lucide-react';
+import { Lock, ArrowRight, Mail, AlertTriangle, Loader2, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import brandLogo from '../assets/SNAI-LOGO.png';
 import loginBg from '../assets/image (23).png';
 
-interface AuthProps { onLogin: (user: User) => void; }
+interface AuthProps { onLogin: (user: User, rememberMe: boolean) => void; }
 
 const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const [identifier, setIdentifier] = useState(''); // Can be email or username
@@ -17,6 +17,30 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [logo] = useState<string>(brandLogo);
+  const [isResetMode, setIsResetMode] = useState(false);
+  const [resetMessage, setResetMessage] = useState('');
+  const [rememberMe, setRememberMe] = useState(() => {
+    return localStorage.getItem('sna_remember_pref') === 'true';
+  });
+  const [showPassword, setShowPassword] = useState(false);
+  const [shake, setShake] = useState(false);
+
+  const getPasswordStrength = (pwd: string) => {
+    if (!pwd) return 0;
+    let score = 0;
+    if (pwd.length > 6) score++;
+    if (pwd.length > 10) score++;
+    if (/[A-Z]/.test(pwd)) score++;
+    if (/[0-9]/.test(pwd)) score++;
+    if (/[^A-Za-z0-9]/.test(pwd)) score++;
+    return score;
+  };
+
+  const strength = getPasswordStrength(password);
+
+  useEffect(() => {
+    localStorage.setItem('sna_remember_pref', String(rememberMe));
+  }, [rememberMe]);
 
   const getFriendlyErrorMessage = (errorCode: string) => {
     switch (errorCode) {
@@ -54,6 +78,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       }
 
       let firebaseUser;
+
       try {
         // Attempt Login
         const userCredential = await signInWithEmailAndPassword(auth, loginEmail, password);
@@ -132,8 +157,9 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         }
 
         // Session Token
-        localStorage.setItem('sna_token', await firebaseUser.getIdToken());
-        onLogin(appUser);
+        const storage = rememberMe ? localStorage : sessionStorage;
+        storage.setItem('sna_token', await firebaseUser.getIdToken());
+        onLogin(appUser, rememberMe);
       }
 
     } catch (err: any) {
@@ -145,6 +171,33 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         msg = err.message;
       }
       setError(msg);
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!identifier) {
+      setError("Please enter your email address.");
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setResetMessage('');
+
+    try {
+      await sendPasswordResetEmail(auth, identifier);
+      setResetMessage("Password reset link sent! Check your email.");
+    } catch (err: any) {
+      console.error("Reset Error:", err);
+      setError(getFriendlyErrorMessage(err.code) || "Failed to send reset link.");
+      setShake(true);
+      setTimeout(() => setShake(false), 500);
     } finally {
       setLoading(false);
     }
@@ -157,8 +210,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
       {/* Left Side - Visuals */}
       <div className="hidden lg:flex w-1/2 relative overflow-hidden bg-[#0b0d14] items-center justify-center border-r border-white/5">
         <div className="absolute inset-0 z-0">
-          <img src={loginBg} alt="Background" className="w-full h-full object-cover opacity-20" />
-          <div className="absolute inset-0 bg-gradient-to-b from-[#0b0d14]/30 via-[#0b0d14]/80 to-[#0b0d14]"></div>
+          <img src={loginBg} alt="Background" className="w-full h-full object-cover scale-150 blur-sm" loading="eager" />
+          <div className="absolute inset-0 bg-black/80"></div>
         </div>
 
         <div className="relative z-10 p-16 max-w-xl">
@@ -167,10 +220,10 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             <div className="w-24 h-24 bg-gradient-to-br from-rose-500/10 to-rose-500/5 rounded-3xl border border-rose-500/20 flex items-center justify-center backdrop-blur-sm mb-8 shadow-2xl shadow-rose-500/10">
               <img src={logo} alt="Logo" className="w-16 h-16 object-contain" />
             </div>
-            <h1 className="text-5xl font-bold text-white tracking-tight mb-6 leading-tight">
+            <h1 className="text-5xl font-bold text-white tracking-tight mb-6 leading-tight drop-shadow-lg">
               Manage your shop with <span className="text-transparent bg-clip-text bg-gradient-to-r from-rose-400 to-orange-400">confidence.</span>
             </h1>
-            <p className="text-lg text-slate-400 leading-relaxed">
+            <p className="text-lg text-slate-300 leading-relaxed drop-shadow-md">
               ABiTECH Systems provides the tools you need to track inventory, manage sales, and grow your business efficiently.
             </p>
           </div>
@@ -200,13 +253,27 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
           <img src={logo} alt="Logo" className="w-16 h-16 object-contain" />
         </div>
 
-        <div className="w-full max-w-[400px] space-y-8">
+        <div className={`w-full max-w-[400px] space-y-8 ${shake ? 'animate-shake' : ''}`}>
+          <style>{`
+            @keyframes shake {
+              0%, 100% { transform: translateX(0); }
+              10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
+              20%, 40%, 60%, 80% { transform: translateX(4px); }
+            }
+            .animate-shake {
+              animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+            }
+          `}</style>
           <div className="text-center lg:text-left">
-            <h2 className="text-3xl font-bold text-white tracking-tight">Welcome back</h2>
-            <p className="text-slate-400 mt-2 text-sm">Please enter your details to sign in.</p>
+            <h2 className="text-3xl font-bold text-white tracking-tight">
+              {isResetMode ? 'Reset Password' : 'Welcome back'}
+            </h2>
+            <p className="text-slate-400 mt-2 text-sm">
+              {isResetMode ? 'Enter your email to receive a reset link.' : 'Please enter your details to sign in.'}
+            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={isResetMode ? handlePasswordReset : handleSubmit} className="space-y-6">
             {/* Error Alert */}
             {error && (
               <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-sm flex items-start gap-3">
@@ -214,10 +281,16 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                 <span className="leading-relaxed">{error}</span>
               </div>
             )}
+            {resetMessage && (
+              <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 p-4 rounded-xl text-sm flex items-start gap-3">
+                <CheckCircle2 size={18} className="shrink-0 mt-0.5" />
+                <span className="leading-relaxed">{resetMessage}</span>
+              </div>
+            )}
 
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-xs font-semibold text-slate-400 ml-1">Email or Username</label>
+                <label className="text-xs font-semibold text-slate-400 ml-1">{isResetMode ? 'Email Address' : 'Email or Username'}</label>
                 <div className="relative group">
                   <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-rose-500 transition-colors" size={18} />
                   <input
@@ -225,30 +298,56 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                     required
                     autoFocus
                     className="w-full bg-white/5 border border-white/10 text-white rounded-xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500/50 outline-none transition-all placeholder:text-slate-600 text-sm font-medium"
-                    placeholder="Enter your identifier"
+                    placeholder={isResetMode ? "Enter your email" : "Enter your identifier"}
                     value={identifier}
                     onChange={e => setIdentifier(e.target.value)}
                   />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between items-center ml-1">
-                  <label className="text-xs font-semibold text-slate-400">Password</label>
-                  <button type="button" className="text-xs font-medium text-rose-400 hover:text-rose-300 transition-colors">Forgot password?</button>
+              {!isResetMode && (
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center ml-1">
+                    <label className="text-xs font-semibold text-slate-400">Password</label>
+                    <button type="button" onClick={() => { setIsResetMode(true); setError(''); setResetMessage(''); }} className="text-xs font-medium text-rose-400 hover:text-rose-300 transition-colors">Forgot password?</button>
+                  </div>
+                  <div className="relative group">
+                    <Lock className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${!password ? "text-slate-500 group-focus-within:text-rose-500" : strength <= 2 ? "text-slate-500 group-focus-within:text-rose-500" : strength <= 3 ? "text-slate-500 group-focus-within:text-amber-500" : "text-slate-500 group-focus-within:text-emerald-500"}`} size={18} />
+                    <input
+                      type={showPassword ? "text" : "password"}
+                      required
+                      className={`w-full bg-white/5 border text-white rounded-xl py-3.5 pl-11 pr-10 focus:ring-2 outline-none transition-all placeholder:text-slate-600 text-sm font-medium ${!password ? "border-white/10 focus:ring-rose-500/20 focus:border-rose-500/50" : strength <= 2 ? "border-rose-500/50 focus:ring-rose-500/20 focus:border-rose-500" : strength <= 3 ? "border-amber-500/50 focus:ring-amber-500/20 focus:border-amber-500" : "border-emerald-500/50 focus:ring-emerald-500/20 focus:border-emerald-500"}`}
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={e => setPassword(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                    >
+                      {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2 pt-1">
+                    {loading ? (
+                      <Loader2 size={16} className="animate-spin text-rose-600" />
+                    ) : (
+                      <input
+                        type="checkbox"
+                        id="remember-me"
+                        checked={rememberMe}
+                        onChange={e => setRememberMe(e.target.checked)}
+                        className="w-4 h-4 rounded border-white/10 bg-white/5 text-rose-600 focus:ring-rose-500/20 focus:ring-offset-0 cursor-pointer accent-rose-600"
+                      />
+                    )}
+                    <label htmlFor="remember-me" className={`text-xs text-slate-400 select-none ${loading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:text-slate-300'}`}>
+                      Remember me
+                    </label>
+                  </div>
                 </div>
-                <div className="relative group">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-rose-500 transition-colors" size={18} />
-                  <input
-                    type="password"
-                    required
-                    className="w-full bg-white/5 border border-white/10 text-white rounded-xl py-3.5 pl-11 pr-4 focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500/50 outline-none transition-all placeholder:text-slate-600 text-sm font-medium"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={e => setPassword(e.target.value)}
-                  />
-                </div>
-              </div>
+              )}
             </div>
 
             <button
@@ -256,14 +355,26 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
               disabled={loading}
               className="w-full bg-rose-600 hover:bg-rose-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg shadow-rose-600/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
             >
-              {loading ? <Loader2 size={20} className="animate-spin" /> : <><span>Sign in</span><ArrowRight size={18} /></>}
+              {loading ? <Loader2 size={20} className="animate-spin" /> : (isResetMode ? <span>Send Reset Link</span> : <><span>Sign in</span><ArrowRight size={18} /></>)}
             </button>
+
+            {isResetMode && (
+              <button
+                type="button"
+                onClick={() => { setIsResetMode(false); setError(''); setResetMessage(''); }}
+                className="w-full text-slate-400 text-sm font-medium hover:text-white transition-colors"
+              >
+                Back to Login
+              </button>
+            )}
           </form>
 
           <div className="pt-6 text-center border-t border-white/5">
-            <p className="text-xs text-slate-500">
-              Don't have an account? <span className="text-slate-400">Contact your administrator.</span>
-            </p>
+            {!isResetMode && (
+              <p className="text-xs text-slate-500">
+                Don't have an account? <span className="text-slate-400">Contact your administrator.</span>
+              </p>
+            )}
             <p className="mt-8 text-[10px] font-bold text-slate-500 tracking-[0.2em] opacity-0 animate-in" style={{ animationDelay: '1s', animationFillMode: 'forwards', animationDuration: '0.7s' }}>
               Crafted by ABiTECH
             </p>

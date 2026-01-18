@@ -1,5 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { initializeApp, getApp, deleteApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { db } from '../db';
 import { AppSettings, User, UserRole, ProductType, AuditLog } from '../types';
 import { Page } from '../App';
@@ -476,8 +478,26 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
             await db.users.update(editingUser.id, userForm);
             await logAudit('USER_UPDATE', `Updated user: ${userForm.username}`);
          } else {
-            // Create new user (Create Auth + Firestore)
-            await db.users.create(userForm as User, userForm.password);
+            // Create new user using a secondary app to avoid logging out the admin
+            const secondaryApp = initializeApp(getApp().options, 'Secondary');
+            const secondaryAuth = getAuth(secondaryApp);
+
+            // Construct email from username if needed
+            let loginEmail = userForm.username!.trim();
+            if (!loginEmail.includes('@')) {
+               loginEmail = `${loginEmail}@sna.erp`;
+            }
+
+            const userCredential = await createUserWithEmailAndPassword(secondaryAuth, loginEmail, userForm.password!);
+            const newUser = { ...userForm, id: userCredential.user.uid, lastLogin: 0 };
+
+            // Save to Firestore using main app's db connection
+            await db.users.add(newUser as User);
+
+            // Cleanup secondary app
+            await signOut(secondaryAuth);
+            await deleteApp(secondaryApp);
+
             await logAudit('USER_CREATE', `Created user: ${userForm.username}`);
          }
          setIsUserModalOpen(false);

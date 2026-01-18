@@ -320,7 +320,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                   </div>
                   <div className="flex-1 w-full min-h-0 -ml-2 relative h-40">
                      <div className="absolute inset-0">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                            <LineChart data={filteredStats.trendData}>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                               <XAxis
@@ -414,7 +414,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                   <div className="flex-1 flex flex-col lg:flex-row items-center gap-8 min-h-0">
                      {/* Pie Chart - Enforce Container Size */}
                      <div className="w-full lg:w-1/3 aspect-square relative shrink-0 max-h-[240px] h-60">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                            <PieChart>
                               <Pie
                                  data={filteredStats.categoryData}
@@ -494,7 +494,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                      {/* Gauge 1 */}
                      <div className="flex items-center gap-4 w-full justify-center">
                         <div className="w-24 h-12 relative flex justify-center">
-                           <ResponsiveContainer width="100%" height={100}>
+                           <ResponsiveContainer width="100%" height={100} minWidth={0} minHeight={0}>
                               <PieChart>
                                  <Pie
                                     data={[{ value: filteredStats.remaining }, { value: filteredStats.totalExpenditure }]}
