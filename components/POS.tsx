@@ -42,6 +42,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [reportCategory, setReportCategory] = useState('All');
    const [reportCashier, setReportCashier] = useState('All');
    const [reportType, setReportType] = useState<'All' | 'Retail' | 'Wholesale'>('All');
+   const [reportPaymentMethod, setReportPaymentMethod] = useState('All');
    const [reportViewMode, setReportViewMode] = useState<'list' | 'statement'>('list');
 
    // Modals
@@ -50,6 +51,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [isReceiptOpen, setIsReceiptOpen] = useState(false);
    const [isClearHistoryConfirmOpen, setIsClearHistoryConfirmOpen] = useState(false);
    const [processingPayment, setProcessingPayment] = useState(false);
+   const [printConfig, setPrintConfig] = useState({ showLogo: true });
 
    // Admin Actions State
    const [saleToEdit, setSaleToEdit] = useState<Sale | null>(null);
@@ -95,13 +97,20 @@ const POS: React.FC<POSProps> = ({ user }) => {
          db.settings.toCollection().first(),
          db.customers.toArray()
       ]);
-      // Only show active products with stock or if negative stock is enabled (checked later)
-      setProducts(p.filter(x => x.inventoryType !== 'Loan'));
+      setProducts(p);
       setCustomers(cust);
       setSalesHistory(s.sort((a, b) => b.timestamp - a.timestamp));
       setSettings(sets || null);
       setLoading(false);
    };
+
+   useEffect(() => {
+      if (isReceiptOpen && settings) {
+         setPrintConfig({
+            showLogo: settings.receiptShowLogo ?? true
+         });
+      }
+   }, [isReceiptOpen, settings]);
 
    const categories = useMemo(() => {
       const cats = new Set(products.map(p => p.category));
@@ -145,9 +154,10 @@ const POS: React.FC<POSProps> = ({ user }) => {
          });
 
          const matchesType = reportType === 'All' || s.customerType === reportType;
-         return matchesDate && matchesCashier && matchesCategory && matchesType;
+         const matchesPaymentMethod = reportPaymentMethod === 'All' || s.paymentMethod === reportPaymentMethod;
+         return matchesDate && matchesCashier && matchesCategory && matchesType && matchesPaymentMethod;
       });
-   }, [salesHistory, reportStartDate, reportEndDate, reportCashier, reportCategory, reportType, products]);
+   }, [salesHistory, reportStartDate, reportEndDate, reportCashier, reportCategory, reportType, reportPaymentMethod, products]);
 
    const reportTotals = useMemo(() => {
       const revenue = filteredHistory.reduce((sum, s) => sum + s.total, 0);
@@ -419,8 +429,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          setSaleToDelete(null);
 
          // Refresh products to show restored stock
-         const p = await db.products.toArray();
-         setProducts(p.filter(x => x.inventoryType !== 'Loan'));
+         setProducts(await db.products.toArray());
          showToast("Sale record deleted", 'success');
       } catch (e) {
          console.error("Delete Error:", e);
@@ -466,8 +475,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          setSaleToEdit(null);
 
          // Refresh products
-         const p = await db.products.toArray();
-         setProducts(p.filter(x => x.inventoryType !== 'Loan'));
+         setProducts(await db.products.toArray());
          showToast("Sale updated successfully", 'success');
 
       } catch (e) {
@@ -542,7 +550,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          new Date(s.timestamp).toLocaleDateString(),
          new Date(s.timestamp).toLocaleTimeString(),
          s.cashierName,
-         s.customerName || 'Walk-in',
+         s.customerName || '',
          `"${s.items.map(i => `${i.name} (x${i.quantity})`).join(', ')}"`,
          s.paymentMethod,
          s.total
@@ -555,6 +563,19 @@ const POS: React.FC<POSProps> = ({ user }) => {
       link.download = `Sales_Report_${reportStartDate}_to_${reportEndDate}.csv`;
       link.click();
       URL.revokeObjectURL(url);
+   };
+
+   const handleEmailReceipt = () => {
+      if (!lastSale) return;
+
+      const customer = customers.find(c => c.name === lastSale.customerName);
+      const email = customer?.email || '';
+
+      const subject = `Receipt #${lastSale.receiptNo} - ${settings?.businessName || 'SNA SHOP'}`;
+      const body = `Here is your receipt from ${settings?.businessName || 'SNA SHOP'}.\n\nReceipt No: ${lastSale.receiptNo}\nDate: ${new Date(lastSale.timestamp).toLocaleDateString()}\nTotal: UGX ${lastSale.total.toLocaleString()}\n\nThank you for your business!`;
+
+      window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      showToast("Opening email client...", 'info');
    };
 
    const getProductIcon = (type: ProductType) => {
@@ -1018,18 +1039,28 @@ const POS: React.FC<POSProps> = ({ user }) => {
                <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
                   <div className="p-4 border-b border-slate-100 flex justify-between items-center no-print">
                      <h3 className="text-sm font-bold text-slate-900 uppercase">Receipt Preview</h3>
-                     <button onClick={() => setIsReceiptOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg"><X size={18} /></button>
+                     <div className="flex gap-2 items-center">
+                        <button
+                           onClick={() => setPrintConfig(c => ({ ...c, showLogo: !c.showLogo }))}
+                           className={`px-3 py-1 rounded-lg border text-[10px] font-bold uppercase transition-all ${printConfig.showLogo ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-400 border-slate-200'}`}
+                        >
+                           Logo {printConfig.showLogo ? 'ON' : 'OFF'}
+                        </button>
+                        <button onClick={() => setIsReceiptOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg"><X size={18} /></button>
+                     </div>
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-4 bg-slate-200 flex justify-center">
                      <div id="pos-receipt" className="receipt-mode bg-white p-4 shadow-xl text-black font-mono text-[11px] leading-tight w-full max-w-[80mm]">
                         <div className="text-center mb-4">
-                           {settings?.logo ? (
-                              <img src={settings.logo} className="h-16 mx-auto mb-2 object-contain grayscale" alt="Logo" />
-                           ) : (
-                              <div className="h-16 w-16 mx-auto mb-2 border-2 border-black border-dashed rounded-full flex items-center justify-center">
-                                 <Store size={24} className="text-black" />
-                              </div>
+                           {printConfig.showLogo && (
+                              settings?.logo ? (
+                                 <img src={settings.logo} className="h-16 mx-auto mb-2 object-contain" alt="Logo" />
+                              ) : (
+                                 <div className="h-16 w-16 mx-auto mb-2 border-2 border-black border-dashed rounded-full flex items-center justify-center">
+                                    <Store size={24} className="text-black" />
+                                 </div>
+                              )
                            )}
                            <h2 className="font-bold text-sm uppercase">{settings?.businessName || 'SNA SHOP'}</h2>
                            <div className="text-[10px]">{settings?.address}</div>
@@ -1046,7 +1077,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         <div className="mb-2">
                            <div>Receipt #: {lastSale.receiptNo}</div>
                            <div>Cashier: {lastSale.cashierName}</div>
-                           {lastSale.customerName && <div>Cust: {lastSale.customerName}</div>}
+                           {lastSale.customerName && lastSale.customerName.trim() !== '' && lastSale.customerName !== 'Walk-in' && (
+                              <div>Cust: {lastSale.customerName}</div>
+                           )}
                         </div>
 
                         <div className="border-b border-black border-dashed mb-2"></div>
@@ -1109,6 +1142,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
                   <div className="p-4 bg-white border-t border-slate-100 flex gap-3 no-print">
                      <button onClick={() => setIsReceiptOpen(false)} className="flex-1 py-3 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold uppercase hover:bg-slate-200">Close</button>
+                     <button onClick={handleEmailReceipt} className="flex-1 py-3 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl text-xs font-bold uppercase hover:bg-blue-100 flex items-center justify-center gap-2 transition-colors">
+                        <Mail size={16} /> Email
+                     </button>
                      <button onClick={() => printSection('#pos-receipt')} className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase hover:bg-black flex items-center justify-center gap-2">
                         <Printer size={16} /> Print
                      </button>
@@ -1208,6 +1244,15 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         </select>
                      </div>
                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Payment</label>
+                        <select className="win-input h-10 bg-white" value={reportPaymentMethod} onChange={e => setReportPaymentMethod(e.target.value)}>
+                           <option value="All">All Methods</option>
+                           <option value="Cash">Cash</option>
+                           <option value="Mobile Money">Mobile Money</option>
+                           <option value="Bank">Bank</option>
+                        </select>
+                     </div>
+                     <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Cashier</label>
                         <select className="win-input h-10 bg-white" value={reportCashier} onChange={e => setReportCashier(e.target.value)}>
                            {cashiers.map(c => <option key={c} value={c}>{c}</option>)}
@@ -1247,7 +1292,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                           <div className="text-[9px] text-slate-400">{new Date(sale.timestamp).toLocaleTimeString()}</div>
                                        </td>
                                        <td className="px-6 py-3 text-xs font-medium text-slate-600">{sale.cashierName}</td>
-                                       <td className="px-6 py-3 text-xs font-bold text-slate-900">{sale.customerName || 'Walk-in'}</td>
+                                       <td className="px-6 py-3 text-xs font-bold text-slate-900">{sale.customerName || '-'}</td>
                                        <td className="px-6 py-3">
                                           <span className={`px-2 py-1 rounded text-[9px] font-bold uppercase ${sale.customerType === 'Wholesale' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
                                              {sale.customerType || 'Retail'}
@@ -1292,6 +1337,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">SNA Mobile ERP System</p>
                               </div>
                               <div className="text-right">
+                                 {settings?.logo && (
+                                    <img src={settings.logo} className="h-20 object-contain ml-auto mb-3" alt="Logo" />
+                                 )}
                                  <h2 className="text-lg font-bold text-slate-900 uppercase">{settings?.businessName || 'SNA SHOP'}</h2>
                                  <p className="text-xs text-slate-500">{settings?.address}</p>
                                  <p className="text-xs text-slate-500">Tel: {settings?.phone}</p>

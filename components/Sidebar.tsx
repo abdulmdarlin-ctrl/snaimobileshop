@@ -33,7 +33,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
         { id: 'sales', label: 'Sales (POS)', icon: ShoppingCart, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER] },
         { id: 'inventory', label: 'Inventory', icon: Box, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.AUDITOR, UserRole.CASHIER] }, // Cashiers need to see stock, but not edit
         { id: 'customers', label: 'Customers', icon: UserIcon, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER] },
-        { id: 'loans', label: 'Agent Stock', icon: Users, roles: [UserRole.ADMIN, UserRole.MANAGER] },
+        { id: 'loans', label: 'Consignment', icon: Users, roles: [UserRole.ADMIN, UserRole.MANAGER] },
         { id: 'repairs', label: 'Repairs', icon: Wrench, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.TECHNICIAN] },
         { id: 'expenses', label: 'Expenses', icon: Wallet, roles: [UserRole.ADMIN, UserRole.MANAGER] },
       ]
@@ -53,9 +53,18 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
       className={`fixed lg:static inset-y-0 left-0 z-50 flex flex-col bg-[#0f172a] text-slate-300 transition-all duration-300 shadow-2xl lg:shadow-none border-r border-slate-800 ${isOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-20 lg:translate-x-0'
         }`}
     >
-      <div className="p-6 border-b border-slate-800 flex items-center gap-3 h-20">
-        <span className={`font-black text-xs text-white tracking-widest leading-tight transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 lg:hidden'}`}>
-          BUSINESS MANAGEMENT SYSTEM
+      <div className={`flex items-center h-20 border-b border-slate-800 transition-all duration-300 ${isOpen ? 'px-6 gap-3' : 'justify-center'}`}>
+        {settings?.logo ? (
+          <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center overflow-hidden shrink-0">
+            <img src={settings.logo} alt="Logo" className="w-full h-full object-contain" />
+          </div>
+        ) : (
+          <div className="w-8 h-8 bg-rose-600 rounded-lg flex items-center justify-center text-white font-bold text-xs shrink-0">
+            {(settings?.businessName || 'S').charAt(0)}
+          </div>
+        )}
+        <span className={`font-black text-xs text-white tracking-widest leading-tight whitespace-nowrap transition-all duration-300 ${isOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}>
+          {settings?.businessName || 'BUSINESS SYSTEM'}
         </span>
       </div>
 

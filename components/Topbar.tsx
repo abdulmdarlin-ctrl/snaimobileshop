@@ -25,14 +25,14 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lowStockItems, setLowStockItems] = useState<Product[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
-  
+
   const [searchTerm, setSearchTerm] = useState('');
   const [results, setResults] = useState<SearchResults>({ products: [], sales: [], repairs: [] });
   const [isSearching, setIsSearching] = useState(false);
   const [showResults, setShowResults] = useState(false);
   const [dbStatus, setDbStatus] = useState<'live' | 'mock'>('live');
   const [isRefreshing, setIsRefreshing] = useState(false);
-  
+
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -55,7 +55,7 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
 
   useEffect(() => {
     fetchMeta();
-    const interval = setInterval(fetchMeta, 10000); 
+    const interval = setInterval(fetchMeta, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -76,17 +76,17 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
           db.repairs.toArray()
         ]);
 
-        const filteredProducts = allProducts.filter(p => 
+        const filteredProducts = allProducts.filter(p =>
           p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query)
         ).slice(0, 5);
 
-        const filteredSales = allSales.filter(s => 
-          s.receiptNo.toLowerCase().includes(query) || 
+        const filteredSales = allSales.filter(s =>
+          s.receiptNo.toLowerCase().includes(query) ||
           (s.customerName && s.customerName.toLowerCase().includes(query))
         ).slice(0, 3);
 
-        const filteredRepairs = allRepairs.filter(r => 
-          r.jobCardNo.toLowerCase().includes(query) || 
+        const filteredRepairs = allRepairs.filter(r =>
+          r.jobCardNo.toLowerCase().includes(query) ||
           r.customerName.toLowerCase().includes(query) ||
           r.deviceModel.toLowerCase().includes(query)
         ).slice(0, 3);
@@ -119,14 +119,14 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
         setIsNotificationsOpen(false);
       }
     };
-    
+
     const handleGlobalShortcuts = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
         inputRef.current?.focus();
         setShowResults(true);
       }
-      
+
       if (e.key === 'Escape') {
         setShowResults(false);
         setIsProfileOpen(false);
@@ -154,37 +154,36 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
   return (
     <header className="h-16 bg-white flex items-center justify-between px-4 lg:px-8 z-40 shrink-0 border-b border-slate-200 sticky top-0 shadow-sm gap-2 sm:gap-4">
       <div className="flex items-center gap-2 sm:gap-4">
-        <button 
+        <button
           onClick={onMenuToggle}
-          className="p-2 rounded-xl text-slate-500 hover:bg-slate-50 lg:hidden"
+          className="p-2 rounded-xl text-slate-500 hover:bg-slate-50"
         >
           <Menu size={20} />
         </button>
         <div className="flex items-center gap-3 hidden sm:flex">
           {settings?.logo && (
-             <div className="w-8 h-8 rounded-lg overflow-hidden border border-slate-100 flex items-center justify-center bg-white shadow-sm">
-                <img src={settings.logo} alt="Logo" className="w-full h-full object-contain" />
-             </div>
+            <div className="w-8 h-8 rounded-lg overflow-hidden border border-slate-100 flex items-center justify-center bg-white shadow-sm">
+              <img src={settings.logo} alt="Logo" className="w-full h-full object-contain" />
+            </div>
           )}
           <div className="flex flex-col">
             <h2 className="text-sm font-black text-slate-900 leading-none truncate uppercase italic tracking-tighter">
               {settings?.businessName || 'SNA! MOBILE HUB'}
             </h2>
             <div className="flex items-center gap-2 mt-1">
-               <button 
-                  onClick={fetchMeta}
-                  className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all ${
-                    dbStatus === 'live' 
-                      ? 'bg-emerald-50 text-emerald-600 border-emerald-100' 
-                      : 'bg-orange-50 text-orange-600 border-orange-100'
+              <button
+                onClick={fetchMeta}
+                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all ${dbStatus === 'live'
+                    ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
+                    : 'bg-orange-50 text-orange-600 border-orange-100'
                   }`}
-               >
-                  {dbStatus === 'live' ? <Globe size={10} /> : <WifiOff size={10} />}
-                  <span className="text-[8px] font-black uppercase tracking-tighter">
-                    {dbStatus === 'live' ? 'ONLINE NODE (CLOUD)' : 'OFFLINE NODE (LOCAL)'}
-                  </span>
-                  <RefreshCw size={8} className={isRefreshing ? 'animate-spin' : ''} />
-               </button>
+              >
+                {dbStatus === 'live' ? <Globe size={10} /> : <WifiOff size={10} />}
+                <span className="text-[8px] font-black uppercase tracking-tighter">
+                  {dbStatus === 'live' ? 'ONLINE NODE (CLOUD)' : 'OFFLINE NODE (LOCAL)'}
+                </span>
+                <RefreshCw size={8} className={isRefreshing ? 'animate-spin' : ''} />
+              </button>
             </div>
           </div>
         </div>
@@ -192,10 +191,10 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
 
       <div className="flex-1 max-w-lg relative" ref={searchRef}>
         <div className="relative group">
-          <input 
+          <input
             ref={inputRef}
-            type="text" 
-            placeholder="Search catalog... (Ctrl+K)" 
+            type="text"
+            placeholder="Search catalog... (Ctrl+K)"
             className="win-input pl-10 pr-4 bg-slate-50 border-transparent focus:bg-white focus:ring-2 focus:ring-orange-500/10 transition-all text-xs h-10 shadow-sm rounded-lg"
             value={searchTerm}
             onChange={(e) => {
@@ -245,7 +244,7 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
 
       <div className="flex items-center justify-end">
         <div className="relative" ref={notifRef}>
-          <button 
+          <button
             onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
             className={`p-2 rounded-xl transition-all relative ${isNotificationsOpen ? 'bg-orange-50 text-orange-600' : 'text-slate-500 hover:text-orange-600 hover:bg-orange-50'}`}
           >
@@ -259,49 +258,49 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
 
           {isNotificationsOpen && (
             <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden animate-in z-50">
-               <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
-                  <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Notifications</span>
-                  {lowStockCount > 0 && <span className="text-[9px] font-bold text-white bg-orange-600 px-2 py-0.5 rounded-full">{lowStockCount} Alerts</span>}
-               </div>
-               <div className="max-h-[300px] overflow-y-auto">
-                  {lowStockItems.length > 0 ? (
-                     <div className="divide-y divide-slate-50">
-                        {lowStockItems.map(item => (
-                           <div key={item.id} onClick={() => { onNavigate('inventory'); setIsNotificationsOpen(false); }} className="p-4 hover:bg-slate-50 cursor-pointer transition-colors group">
-                              <div className="flex items-start gap-3">
-                                 <div className={`p-2 rounded-lg shrink-0 ${item.stockQuantity === 0 ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'}`}>
-                                    {item.stockQuantity === 0 ? <PackageX size={16}/> : <AlertTriangle size={16}/>}
-                                 </div>
-                                 <div>
-                                    <p className="text-xs font-bold text-slate-800 group-hover:text-orange-600 transition-colors">{item.name}</p>
-                                    <p className="text-[10px] text-slate-400 mt-1 font-medium">
-                                       Stock: <span className={item.stockQuantity === 0 ? 'text-red-600 font-bold' : 'text-orange-600 font-bold'}>{item.stockQuantity}</span> 
-                                       <span className="mx-1">•</span> 
-                                       Reorder: {item.reorderLevel}
-                                    </p>
-                                 </div>
-                              </div>
-                           </div>
-                        ))}
-                     </div>
-                  ) : (
-                     <div className="p-8 text-center flex flex-col items-center">
-                        <div className="w-10 h-10 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-3">
-                           <Database size={18} />
+              <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Notifications</span>
+                {lowStockCount > 0 && <span className="text-[9px] font-bold text-white bg-orange-600 px-2 py-0.5 rounded-full">{lowStockCount} Alerts</span>}
+              </div>
+              <div className="max-h-[300px] overflow-y-auto">
+                {lowStockItems.length > 0 ? (
+                  <div className="divide-y divide-slate-50">
+                    {lowStockItems.map(item => (
+                      <div key={item.id} onClick={() => { onNavigate('inventory'); setIsNotificationsOpen(false); }} className="p-4 hover:bg-slate-50 cursor-pointer transition-colors group">
+                        <div className="flex items-start gap-3">
+                          <div className={`p-2 rounded-lg shrink-0 ${item.stockQuantity === 0 ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'}`}>
+                            {item.stockQuantity === 0 ? <PackageX size={16} /> : <AlertTriangle size={16} />}
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-slate-800 group-hover:text-orange-600 transition-colors">{item.name}</p>
+                            <p className="text-[10px] text-slate-400 mt-1 font-medium">
+                              Stock: <span className={item.stockQuantity === 0 ? 'text-red-600 font-bold' : 'text-orange-600 font-bold'}>{item.stockQuantity}</span>
+                              <span className="mx-1">•</span>
+                              Reorder: {item.reorderLevel}
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-xs font-bold text-slate-900">All Systems Nominal</p>
-                        <p className="text-[10px] text-slate-400 mt-1">Inventory levels are healthy.</p>
-                     </div>
-                  )}
-               </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="p-8 text-center flex flex-col items-center">
+                    <div className="w-10 h-10 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-3">
+                      <Database size={18} />
+                    </div>
+                    <p className="text-xs font-bold text-slate-900">All Systems Nominal</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Inventory levels are healthy.</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
-        
+
         <div className="h-6 w-px bg-slate-200 mx-1 sm:mx-2"></div>
-        
+
         <div className="relative" ref={dropdownRef}>
-          <button 
+          <button
             onClick={() => setIsProfileOpen(!isProfileOpen)}
             className="flex items-center gap-1 p-1 rounded-xl hover:bg-slate-50 transition-all"
           >

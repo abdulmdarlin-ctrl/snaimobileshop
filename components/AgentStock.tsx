@@ -1,13 +1,13 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../db';
-import { Loan, User, UserRole, Product, Agent } from '../types';
+import { Loan, User, UserRole, Product, Agent, AppSettings } from '../types';
 import {
    Plus, Search, Edit2, Trash2, X, Users,
    User as UserIcon, Calendar, CheckCircle2, AlertOctagon,
    Loader2, Filter, ChevronDown, Check, XCircle, CreditCard,
    FileText, Box, ArrowLeft, Phone, MapPin, Briefcase, RefreshCw, DollarSign,
-   History, AlertTriangle, Printer, Download
+   History, AlertTriangle, Printer, Download, Mail
 } from 'lucide-react';
 import { printSection, exportSectionToPDF } from '../utils/printExport';
 import { useToast } from './Toast';
@@ -21,6 +21,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
    const [agents, setAgents] = useState<Agent[]>([]);
    const [loans, setLoans] = useState<Loan[]>([]);
    const [products, setProducts] = useState<Product[]>([]);
+   const [settings, setSettings] = useState<AppSettings | null>(null);
 
    const { showToast } = useToast();
    // Use ID to track selected agent for robust updates
@@ -47,7 +48,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
    const [isDeleting, setIsDeleting] = useState(false);
 
    // Forms
-   const agentFormInitial: Partial<Agent> = { name: '', phone: '', nin: '', location: '', status: 'Active' };
+   const agentFormInitial: Partial<Agent> = { name: '', phone: '', email: '', nin: '', location: '', status: 'Active' };
    const [agentForm, setAgentForm] = useState<Partial<Agent>>(agentFormInitial);
 
    const stockFormInitial: Partial<Loan> = {
@@ -78,14 +79,16 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
    }, []);
 
    const fetchData = async () => {
-      const [a, l, p] = await Promise.all([
+      const [a, l, p, s] = await Promise.all([
          db.agents.toArray(),
          db.loans.toArray(),
-         db.products.toArray()
+         db.products.toArray(),
+         db.settings.toCollection().first()
       ]);
       setAgents(a.sort((x, y) => x.name.localeCompare(y.name)));
       setLoans(l.sort((x, y) => y.timestamp - x.timestamp));
-      setProducts(p.filter(prod => prod.inventoryType === 'Loan' && prod.stockQuantity > 0));
+      setProducts(p.filter(prod => prod.stockQuantity > 0));
+      setSettings(s || null);
    };
 
    // --- ACTIONS ---
@@ -100,6 +103,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
          const payload: Partial<Agent> = {
             name: agentForm.name,
             phone: agentForm.phone,
+            email: agentForm.email || '',
             nin: agentForm.nin || '',
             location: agentForm.location || '',
             status: agentForm.status || 'Active'
@@ -246,6 +250,17 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
       }
    };
 
+   const handleEmailReport = () => {
+      if (!selectedAgent?.email) {
+         showToast("Agent email not found. Please update profile.", 'error');
+         return;
+      }
+      const subject = `Account Statement - ${selectedAgent.name}`;
+      const body = `Dear ${selectedAgent.name},\n\nPlease find attached your account statement.\n\nRegards,\n${settings?.businessName || 'Management'}`;
+      window.location.href = `mailto:${selectedAgent.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      showToast("Opening email client...", 'info');
+   };
+
    const handleProductSelect = (pid: string) => {
       if (!pid) {
          // Manual Entry Mode - Clear fields but enable editing
@@ -327,8 +342,8 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
          <div className="space-y-6 pb-20 font-sans">
             <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 no-print">
                <div>
-                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Agent Management</h1>
-                  <p className="text-sm text-slate-500 mt-1">Manage field agents and issue stock.</p>
+                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Consignment Management</h1>
+                  <p className="text-sm text-slate-500 mt-1">Manage field agents and consignment stock.</p>
                </div>
                <button
                   onClick={() => { setEditingId(null); setAgentForm(agentFormInitial); setIsAgentModalOpen(true); }}
@@ -457,7 +472,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                      {selectedAgent?.status}
                   </span>
                </div>
-               <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">{selectedAgent?.location || 'No Location'} • {selectedAgent?.phone}</p>
+               <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">{selectedAgent?.location || 'No Location'} • {selectedAgent?.phone} {selectedAgent?.email && `• ${selectedAgent.email}`}</p>
             </div>
             <div className="ml-auto flex gap-2">
                <button
@@ -475,6 +490,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                         setAgentForm({
                            name: selectedAgent.name,
                            phone: selectedAgent.phone,
+                           email: selectedAgent.email,
                            nin: selectedAgent.nin,
                            location: selectedAgent.location,
                            status: selectedAgent.status
@@ -628,13 +644,23 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                            <div>
                               <h1 className="text-2xl font-black uppercase tracking-tight mb-2">Account Statement</h1>
                               <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Generated: {new Date().toLocaleDateString()}</p>
-                              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">SNA Mobile ERP</p>
+
+                              <div className="mt-6">
+                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Statement For:</p>
+                                 <h2 className="text-xl font-bold text-slate-900">{selectedAgent.name}</h2>
+                                 <p className="text-sm text-slate-600">{selectedAgent.phone}</p>
+                                 {selectedAgent.email && <p className="text-xs text-slate-500">{selectedAgent.email}</p>}
+                                 <p className="text-xs text-slate-500 uppercase">{selectedAgent.location || 'N/A'}</p>
+                                 {selectedAgent.nin && <p className="text-xs text-slate-500 font-mono mt-1">ID: {selectedAgent.nin}</p>}
+                              </div>
                            </div>
                            <div className="text-right">
-                              <h2 className="text-lg font-bold text-slate-900">{selectedAgent.name}</h2>
-                              <p className="text-xs text-slate-500">{selectedAgent.phone}</p>
-                              <p className="text-xs text-slate-500 uppercase">{selectedAgent.location || 'N/A'}</p>
-                              {selectedAgent.nin && <p className="text-xs text-slate-500 font-mono mt-1">ID: {selectedAgent.nin}</p>}
+                              {settings?.logo && (
+                                 <img src={settings.logo} className="h-20 object-contain ml-auto mb-3" alt="Logo" />
+                              )}
+                              <h2 className="text-lg font-bold text-slate-900 uppercase">{settings?.businessName || 'SNA Mobile ERP'}</h2>
+                              <p className="text-xs text-slate-500">{settings?.address}</p>
+                              <p className="text-xs text-slate-500">{settings?.phone}</p>
                            </div>
                         </div>
 
@@ -715,6 +741,9 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                      <button onClick={handlePrintReport} disabled={isPrinting} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase hover:bg-slate-50 transition-colors flex items-center gap-2">
                         {isPrinting ? <Loader2 size={16} className="animate-spin" /> : <Printer size={16} />} Print
                      </button>
+                     <button onClick={handleEmailReport} className="px-6 py-2.5 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl font-bold text-xs uppercase hover:bg-blue-100 transition-colors flex items-center gap-2">
+                        <Mail size={16} /> Email
+                     </button>
                      <button onClick={handleDownloadReport} disabled={isDownloading} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase hover:bg-black transition-colors flex items-center gap-2">
                         {isDownloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Download PDF
                      </button>
@@ -740,7 +769,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                         {/* Inventory Picker */}
                         <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                              <Box size={14} className="text-slate-400" /> SELECT FROM INVENTORY (LOAN STOCK)
+                              <Box size={14} className="text-slate-400" /> SELECT FROM INVENTORY (CONSIGNMENT)
                            </label>
                            <select
                               className="w-full h-12 bg-white border border-slate-200 rounded-xl px-4 text-xs font-bold text-slate-700 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all"
@@ -915,6 +944,10 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                      <div className="space-y-1.5">
                         <label className="win-label">Full Name</label>
                         <input required className="win-input h-10 font-bold" value={agentForm.name} onChange={e => setAgentForm({ ...agentForm, name: e.target.value })} placeholder="e.g. John Doe" />
+                     </div>
+                     <div className="space-y-1.5">
+                        <label className="win-label">Email Address</label>
+                        <input type="email" className="win-input h-10" value={agentForm.email || ''} onChange={e => setAgentForm({ ...agentForm, email: e.target.value })} placeholder="agent@example.com" />
                      </div>
                      <div className="space-y-1.5">
                         <label className="win-label">Phone Number</label>

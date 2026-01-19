@@ -44,7 +44,9 @@ export interface Product {
   supplierId?: string;
   costPrice: number;
   wholesalePrice?: number;
+  minWholesalePrice?: number;
   selling_price: number;
+  minSellingPrice?: number;
   inventoryType?: 'Cash' | 'Loan';
   loanProvider?: 'TAKE NOW' | 'MOGO' | 'MOBI BUY' | 'Other';
   loanDetails?: string;

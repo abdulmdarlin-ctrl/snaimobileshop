@@ -5,7 +5,7 @@ import { Product, User, UserRole, ProductType, AppSettings } from '../types';
 import {
    Plus, Search, Edit2, Trash2, X, Package,
    Filter, ChevronDown, Check, XCircle, AlertCircle,
-   Box, Smartphone, Headphones, Battery, Wallet, Banknote, Landmark,
+   Box, Smartphone, Headphones, Battery,
    Loader2, ArrowRight, MapPin, Tag, RefreshCw, Layers, AlertTriangle, AlertOctagon,
    MoreHorizontal
 } from 'lucide-react';
@@ -17,7 +17,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
    const [products, setProducts] = useState<Product[]>([]);
    const [loading, setLoading] = useState(true);
    const [searchTerm, setSearchTerm] = useState('');
-   const [filterType, setFilterType] = useState<'All' | 'Cash' | 'Loan' | 'Low Stock'>('All');
+   const [filterType, setFilterType] = useState<'All' | 'Low Stock'>('All');
    const [settings, setSettings] = useState<AppSettings | null>(null);
 
    const { showToast } = useToast();
@@ -87,11 +87,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          if (!formData.name) throw new Error("Product Name Required");
          if (!formData.sku) throw new Error("SKU Required");
 
-         // Validation for Loan Stock
-         if (formData.inventoryType === 'Loan' && !formData.loanProvider) {
-            throw new Error("Please select a Financing Provider for Loan Stock");
-         }
-
          // Auto-generate SKU if empty (though handled by validation above, good to have logic)
          if (!formData.sku) {
             formData.sku = `SKU-${Date.now()}`;
@@ -100,7 +95,8 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          // Default category if missing (since field is hidden)
          const dataToSave = {
             ...formData,
-            category: formData.category || 'General'
+            category: formData.category || 'General',
+            inventoryType: 'Cash'
          };
 
          if (editingProduct?.id) {
@@ -216,8 +212,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          let matchesType = true;
          if (filterType === 'Low Stock') {
             matchesType = p.stockQuantity <= p.reorderLevel;
-         } else if (filterType !== 'All') {
-            matchesType = p.inventoryType === filterType;
          }
 
          return matchesSearch && matchesType;
@@ -238,8 +232,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          default: return <Box size={16} />;
       }
    };
-
-   const isLoanLocked = editingProduct && editingProduct.inventoryType === 'Loan';
 
    return (
       <div className="h-full flex flex-col font-sans pb-6">
@@ -274,7 +266,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
                {/* Inventory Type Filter Buttons */}
                <div className="flex p-1 bg-slate-100 rounded-xl">
-                  {['All', 'Cash', 'Loan', 'Low Stock'].map(t => (
+                  {['All', 'Low Stock'].map(t => (
                      <button
                         key={t}
                         onClick={() => setFilterType(t as any)}
@@ -344,9 +336,8 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                  {/* Product Info */}
                                  <td className="px-6 py-4">
                                     <div className="flex items-center gap-3">
-                                       <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${product.inventoryType === 'Loan' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-500'
-                                          }`}>
-                                          {product.inventoryType === 'Loan' ? <Banknote size={16} /> : <Box size={16} />}
+                                       <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-slate-100 text-slate-500">
+                                          <Box size={16} />
                                        </div>
                                        <div>
                                           <p className="text-sm font-bold text-slate-900 truncate max-w-[200px]">{product.name}</p>
@@ -480,75 +471,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                      {/* Section 2: Financials & Categorization */}
                      <div className="space-y-4">
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Pricing & Categorization</h3>
-
-                        {/* Inventory Type Selector */}
-                        <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
-                           <label className="block text-xs font-bold text-slate-600 mb-2">Inventory Source / Category</label>
-                           <div className="flex gap-2 mb-2">
-                              {['Cash', 'Loan'].map(type => {
-                                 // If product is existing and locked to Loan, hide Cash option
-                                 if (isLoanLocked && type === 'Cash') return null;
-
-                                 return (
-                                    <button
-                                       key={type}
-                                       type="button"
-                                       disabled={isLoanLocked && type === 'Loan'} // Visual disable but selected
-                                       onClick={() => setFormData({ ...formData, inventoryType: type as any })}
-                                       className={`flex-1 py-3 px-2 rounded-lg text-xs font-bold uppercase tracking-wide border transition-all flex items-center justify-center gap-2 ${formData.inventoryType === type
-                                          ? 'bg-slate-900 text-white border-slate-900 shadow-md'
-                                          : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                                          } ${isLoanLocked ? 'opacity-80 cursor-not-allowed' : ''}`}
-                                    >
-                                       {type === 'Cash' && <Wallet size={14} />}
-                                       {type === 'Loan' && <Banknote size={14} />}
-                                       {type} Stock
-                                    </button>
-                                 );
-                              })}
-                           </div>
-
-                           {/* CONDITIONAL LOAN DETAILS */}
-                           {formData.inventoryType === 'Loan' && (
-                              <>
-                                 <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-100 grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-1">
-                                    <div className="col-span-full mb-1">
-                                       <p className="text-[10px] font-black text-purple-600 uppercase tracking-widest flex items-center gap-2">
-                                          <Landmark size={12} /> Loan Stock Details
-                                       </p>
-                                    </div>
-                                    <div>
-                                       <label className="block text-[10px] font-bold text-purple-700 mb-1.5 uppercase">Provider</label>
-                                       <div className="relative">
-                                          <select
-                                             className="w-full p-2.5 bg-white border border-purple-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500/20 appearance-none"
-                                             value={formData.loanProvider}
-                                             onChange={e => setFormData({ ...formData, loanProvider: e.target.value as any })}
-                                          >
-                                             <option value="TAKE NOW">TAKE NOW</option>
-                                             <option value="MOGO">MOGO</option>
-                                             <option value="MOBI BUY">MOBI BUY</option>
-                                             <option value="Other">Other</option>
-                                          </select>
-                                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-purple-400 pointer-events-none" size={14} />
-                                       </div>
-                                    </div>
-                                    <div>
-                                       <label className="block text-[10px] font-bold text-purple-700 mb-1.5 uppercase">Terms / Description</label>
-                                       <input
-                                          className="w-full p-2.5 bg-white border border-purple-200 rounded-lg text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-                                          placeholder="e.g. 30% Upfront, Locked"
-                                          value={formData.loanDetails}
-                                          onChange={e => setFormData({ ...formData, loanDetails: e.target.value })}
-                                       />
-                                    </div>
-                                 </div>
-                                 <p className="text-[10px] text-slate-400 mt-2 ml-1">
-                                    * <b>Loan:</b> Financed inventory. Ensure provider is selected.
-                                 </p>
-                              </>
-                           )}
-                        </div>
 
                         <div className="grid grid-cols-3 gap-6">
                            <div>
