@@ -47,9 +47,6 @@ export interface Product {
   minWholesalePrice?: number;
   selling_price: number;
   minSellingPrice?: number;
-  inventoryType?: 'Cash' | 'Loan';
-  loanProvider?: 'TAKE NOW' | 'MOGO' | 'MOBI BUY' | 'Other';
-  loanDetails?: string;
   stockQuantity: number;
   reorderLevel: number;
   warrantyPeriod?: string;

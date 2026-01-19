@@ -55,9 +55,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
       minSellingPrice: 0,
       stockQuantity: 0,
       reorderLevel: 5,
-      inventoryType: 'Cash',
-      loanProvider: 'TAKE NOW',
-      loanDetails: '',
       location: ''
    };
 
@@ -96,7 +93,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          const dataToSave = {
             ...formData,
             category: formData.category || 'General',
-            inventoryType: 'Cash'
          };
 
          if (editingProduct?.id) {
