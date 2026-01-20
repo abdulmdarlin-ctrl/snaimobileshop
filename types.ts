@@ -20,7 +20,8 @@ export enum RepairStatus {
 export enum ProductType {
   PHONE = 'Phone',
   ACCESSORY = 'Accessory',
-  SPARE_PART = 'Spare Part'
+  SPARE_PART = 'Spare Part',
+  OTHERS = 'Others'
 }
 
 export interface User {
@@ -40,11 +41,10 @@ export interface Product {
   sku: string;
   name: string;
   type: ProductType;
+  brand?: string;
   category: string;
   supplierId?: string;
   costPrice: number;
-  wholesalePrice?: number;
-  minWholesalePrice?: number;
   selling_price: number;
   minSellingPrice?: number;
   stockQuantity: number;
@@ -57,6 +57,7 @@ export interface Agent {
   id?: string;
   name: string;
   phone: string;
+  email?: string;
   nin?: string;
   location?: string;
   status: 'Active' | 'Inactive';
@@ -130,6 +131,7 @@ export interface SaleItem {
   price: number;
   discount?: number;
   total: number;
+  warrantyEndDate?: number;
   sn?: string;
 }
 

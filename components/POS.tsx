@@ -4,7 +4,7 @@ import { db } from '../db';
 import { Product, Sale, SaleItem, User, AppSettings, ProductType, UserRole } from '../types';
 import {
    Search, ShoppingCart, Trash2, Plus, Minus, CreditCard,
-   Printer, History, RotateCcw, X, Check, Calculator,
+   Printer, History, RotateCcw, X, Check, Calculator, ChevronDown,
    User as UserIcon, AlertCircle, Package, Receipt, Edit,
    ChevronRight, Smartphone, Headphones, Battery, Box, Filter,
    Loader2, AlertTriangle, ScanBarcode, Download, FileText, Calendar,
@@ -12,6 +12,32 @@ import {
 } from 'lucide-react';
 import { printSection, exportSectionToPDF } from '../utils/printExport';
 import { useToast } from './Toast';
+
+const calculateWarrantyEndDate = (warrantyString: string): Date | null => {
+   const now = new Date();
+   const parts = warrantyString.toLowerCase().split(' ');
+   if (parts.length < 2) return null;
+
+   const value = parseInt(parts[0]);
+   const unit = parts[1];
+
+   if (isNaN(value)) return null;
+
+   if (unit.startsWith('year')) {
+      now.setFullYear(now.getFullYear() + value);
+      return now;
+   }
+   if (unit.startsWith('month')) {
+      now.setMonth(now.getMonth() + value);
+      return now;
+   }
+   if (unit.startsWith('day')) {
+      now.setDate(now.getDate() + value);
+      return now;
+   }
+
+   return null;
+};
 
 interface POSProps {
    user: User;
@@ -27,7 +53,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [searchTerm, setSearchTerm] = useState('');
    const [settings, setSettings] = useState<AppSettings | null>(null);
    const [clearingHistory, setClearingHistory] = useState(false);
-   const [pricingMode, setPricingMode] = useState<'Retail' | 'Wholesale'>('Retail');
 
    // Report Filters
    const [reportStartDate, setReportStartDate] = useState(() => {
@@ -177,25 +202,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
       ).slice(0, 5);
    }, [customers, customerSearch]);
 
-   // --- PRICING MODE EFFECT ---
-   useEffect(() => {
-      setCart(prevCart => prevCart.map(item => {
-         const product = products.find(p => p.id === item.productId);
-         if (product) {
-            const newPrice = pricingMode === 'Retail'
-               ? product.selling_price
-               : (product.wholesalePrice || product.selling_price);
-            return {
-               ...item,
-               price: newPrice,
-               total: newPrice * item.quantity,
-               originalPrice: newPrice // Reset negotiation on mode switch
-            };
-         }
-         return item;
-      }));
-   }, [pricingMode, products]);
-
    // --- CART ACTIONS ---
 
    const addToCart = (product: Product) => {
@@ -204,9 +210,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          return;
       }
 
-      const price = pricingMode === 'Retail'
-         ? product.selling_price
-         : (product.wholesalePrice || product.selling_price);
+      const price = product.selling_price;
 
       setCart(prev => {
          const existing = prev.find(item => item.productId === product.id);
@@ -273,9 +277,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       if (!editingCartItem) return;
 
       const { product } = editingCartItem;
-      const minPrice = pricingMode === 'Retail'
-         ? (product.minSellingPrice || product.selling_price)
-         : (product.minWholesalePrice || product.wholesalePrice || product.selling_price);
+      const minPrice = product.minSellingPrice || product.selling_price;
 
       if (editItemForm.price < minPrice) {
          showToast(`Price cannot be lower than minimum: ${minPrice.toLocaleString()}`, 'error');
@@ -322,19 +324,29 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
       setProcessingPayment(true);
       try {
+         const cartWithWarranty = cart.map(item => {
+            const product = products.find(p => p.id === item.productId);
+            if (product?.warrantyPeriod) {
+               const endDate = calculateWarrantyEndDate(product.warrantyPeriod);
+               if (endDate) {
+                  return { ...item, warrantyEndDate: endDate.getTime() };
+               }
+            }
+            return item;
+         });
          const sale: Sale = {
             receiptNo: `${settings?.invoicePrefix || 'INV'}-${Date.now().toString().slice(-6)}`,
-            items: cart,
+            items: cartWithWarranty,
             subtotal,
             tax,
             discount: totalDiscount,
             total,
-            amountPaid: 0,
-            balance: 0,
+            amountPaid: checkoutForm.amountPaid,
+            balance: checkoutForm.amountPaid - total,
             paymentMethod: checkoutForm.paymentMethod,
             customerName: checkoutForm.customerName,
             customerPhone: checkoutForm.customerPhone,
-            customerType: pricingMode,
+            customerType: 'Retail',
             cashierName: user.username,
             timestamp: Date.now()
          };
@@ -663,7 +675,10 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     </span>
                                  </div>
                                  <h3 className="text-sm font-bold text-slate-800 line-clamp-2 leading-tight group-hover:text-blue-600 transition-colors">{product.name}</h3>
-                                 <p className="text-[10px] text-slate-400 font-mono mt-1">{product.sku}</p>
+                                 <p className="text-[10px] text-slate-400 mt-1">
+                                    {product.brand && <span className="font-bold uppercase">{product.brand}</span>}
+                                    <span className="font-mono">{product.brand && ' • '}{product.sku}</span>
+                                 </p>
                               </div>
 
                               <div className="mt-2 pt-3 border-t border-slate-50 flex items-center justify-between">
@@ -695,18 +710,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      <h2 className="text-base font-bold text-slate-900 uppercase">Current Order</h2>
                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{cart.length} Items</p>
                   </div>
-               </div>
-
-               {/* Pricing Mode Toggle */}
-               <div className="flex bg-slate-100 p-1 rounded-lg mx-2">
-                  <button
-                     onClick={() => setPricingMode('Retail')}
-                     className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all ${pricingMode === 'Retail' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                  >Retail</button>
-                  <button
-                     onClick={() => setPricingMode('Wholesale')}
-                     className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase transition-all ${pricingMode === 'Wholesale' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                  >Wholesale</button>
                </div>
 
                <button
@@ -995,7 +998,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         <p className="font-bold text-slate-900">{editingCartItem.item.name}</p>
                         <p className="text-[10px] text-slate-400">
                            Preferred: {(editingCartItem.item.originalPrice || editingCartItem.item.price).toLocaleString()} |
-                           Min: {(pricingMode === 'Retail' ? editingCartItem.product.minSellingPrice : editingCartItem.product.minWholesalePrice)?.toLocaleString() || 0}
+                           Min: {(editingCartItem.product.minSellingPrice)?.toLocaleString() || 0}
                         </p>
                      </div>
 
@@ -1095,6 +1098,11 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
                                        <span className="font-bold">{itemTotal.toLocaleString()}</span>
                                     </div>
+                                    {item.warrantyEndDate && (
+                                       <div className="pl-2 text-[9px] text-slate-500">
+                                          Warranty valid until: {new Date(item.warrantyEndDate).toLocaleDateString()}
+                                       </div>
+                                    )}
                                  </div>
                               );
                            })}
@@ -1236,14 +1244,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         </select>
                      </div>
                      <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Sale Type</label>
-                        <select className="win-input h-10 bg-white" value={reportType} onChange={e => setReportType(e.target.value as any)}>
-                           <option value="All">All Types</option>
-                           <option value="Retail">Retail</option>
-                           <option value="Wholesale">Wholesale</option>
-                        </select>
-                     </div>
-                     <div className="space-y-1">
                         <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Payment</label>
                         <select className="win-input h-10 bg-white" value={reportPaymentMethod} onChange={e => setReportPaymentMethod(e.target.value)}>
                            <option value="All">All Methods</option>
@@ -1277,8 +1277,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Receipt #</th>
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cashier</th>
-                                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Customer</th>
-                                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Type</th>
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Total</th>
                                     <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right no-print">Action</th>
                                  </tr>
@@ -1293,11 +1291,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        </td>
                                        <td className="px-6 py-3 text-xs font-medium text-slate-600">{sale.cashierName}</td>
                                        <td className="px-6 py-3 text-xs font-bold text-slate-900">{sale.customerName || '-'}</td>
-                                       <td className="px-6 py-3">
-                                          <span className={`px-2 py-1 rounded text-[9px] font-bold uppercase ${sale.customerType === 'Wholesale' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
-                                             {sale.customerType || 'Retail'}
-                                          </span>
-                                       </td>
                                        <td className="px-6 py-3 text-xs font-bold text-slate-900 text-right">{sale.total.toLocaleString()}</td>
                                        <td className="px-6 py-3 text-right no-print">
                                           <button
@@ -1321,7 +1314,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     </tr>
                                  ))}
                                  {filteredHistory.length === 0 && (
-                                    <tr><td colSpan={6} className="py-12 text-center text-slate-400 font-medium">No sales records found for selected criteria.</td></tr>
+                                    <tr><td colSpan={5} className="py-12 text-center text-slate-400 font-medium">No sales records found for selected criteria.</td></tr>
                                  )}
                               </tbody>
                            </table>
@@ -1387,7 +1380,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        <th className="py-2 font-bold text-slate-500 uppercase">Date</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase">Receipt #</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase">Customer</th>
-                                       <th className="py-2 font-bold text-slate-500 uppercase">Type</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase">Cashier</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase text-right">Method</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase text-right">Amount</th>
@@ -1399,7 +1391,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                           <td className="py-3 font-mono text-slate-600">{new Date(sale.timestamp).toLocaleDateString()}</td>
                                           <td className="py-3 font-bold text-slate-900">{sale.receiptNo}</td>
                                           <td className="py-3 text-slate-700">{sale.customerName || '-'}</td>
-                                          <td className="py-3 text-slate-500 uppercase text-[10px]">{sale.customerType || 'Retail'}</td>
                                           <td className="py-3 text-slate-500">{sale.cashierName}</td>
                                           <td className="py-3 text-right text-slate-500">{sale.paymentMethod}</td>
                                           <td className="py-3 text-right font-bold text-slate-900">{sale.total.toLocaleString()}</td>
@@ -1408,7 +1399,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                  </tbody>
                                  <tfoot className="border-t-2 border-slate-200">
                                     <tr>
-                                       <td colSpan={6} className="py-3 text-right font-black text-sm uppercase">Grand Total</td>
+                                       <td colSpan={5} className="py-3 text-right font-black text-sm uppercase">Grand Total</td>
                                        <td className="py-3 text-right font-black text-sm">{reportTotals.revenue.toLocaleString()}</td>
                                     </tr>
                                  </tfoot>

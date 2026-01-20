@@ -279,7 +279,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
             setStockForm(prev => ({
                 ...prev,
                 productId: p.id,
-                deviceModel: p.name,
+                deviceModel: p.brand ? `${p.brand} ${p.name}` : p.name,
                 provider: 'TAKE NOW',
                 totalLoanAmount: p.selling_price
             }));
@@ -778,8 +778,8 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                                     >
                                         <option value="">-- Manual Entry / Select Stock --</option>
                                         {products.map(p => (
-                                            <option key={p.id} value={p.id}>
-                                                {p.name} ({p.stockQuantity} avail)
+                                            <option key={p.id} value={p.id!}>
+                                                {p.brand ? `[${p.brand}] ` : ''}{p.name} ({p.stockQuantity} avail)
                                             </option>
                                         ))}
                                     </select>

@@ -208,12 +208,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
       const inventoryValue = rawProducts.reduce((sum, p) => sum + (p.stockQuantity * p.costPrice), 0);
 
       // --- Calculate Top Products for this time range ---
-      const productMap = new Map<string, number>();
+      const productMap = new Map<string, { product: Product, count: number }>();
       currentSales.forEach(s => s.items.forEach(i => {
-         productMap.set(i.name, (productMap.get(i.name) || 0) + i.quantity);
+         const existing = productMap.get(i.productId);
+         if (existing) {
+            existing.count += i.quantity;
+         } else {
+            const product = rawProducts.find(p => p.id === i.productId);
+            if (product) {
+               productMap.set(i.productId, { product, count: i.quantity });
+            }
+         }
       }));
-      const topProds = Array.from(productMap.entries())
-         .map(([name, count]) => ({ name, count }))
+      const topProds = Array.from(productMap.values())
          .sort((a, b) => b.count - a.count)
          .slice(0, 5);
 
@@ -718,13 +725,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                <div className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
                   <h3 className="text-lg font-bold text-slate-900 mb-4">Top Selling ({timeRange})</h3>
                   <div className="space-y-4">
-                     {topProducts.length > 0 ? topProducts.map((item, idx) => (
-                        <div key={idx} className="flex items-center gap-3">
+                     {topProducts.length > 0 ? topProducts.map((item: { product: Product; count: number }, idx) => (
+                        <div key={item.product.id} className="flex items-center gap-3">
                            <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-500 font-bold text-sm">
                               {idx + 1}
                            </div>
                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-bold text-slate-900 truncate">{item.name}</p>
+                              <p className="text-sm font-bold text-slate-900 truncate">{item.product.name}</p>
+                              {item.product.brand && (
+                                 <p className="text-[10px] font-bold text-slate-400 uppercase">{item.product.brand}</p>
+                              )}
                               <div className="w-full bg-slate-100 h-1.5 rounded-full mt-1.5 overflow-hidden">
                                  <div className="bg-rose-500 h-full rounded-full" style={{ width: `${Math.min((item.count / (topProducts[0]?.count || 1)) * 100, 100)}%` }}></div>
                               </div>

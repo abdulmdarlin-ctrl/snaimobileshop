@@ -20,7 +20,7 @@ const initDb = async () => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
+
     // Users Table
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
@@ -43,13 +43,16 @@ const initDb = async () => {
         sku VARCHAR(50) UNIQUE NOT NULL,
         name VARCHAR(255) NOT NULL,
         type VARCHAR(50) NOT NULL,
+        brand VARCHAR(100),
         category VARCHAR(100),
         cost_price DECIMAL(15,2) DEFAULT 0,
         selling_price DECIMAL(15,2) DEFAULT 0,
+        min_selling_price DECIMAL(15,2) DEFAULT 0,
         stock_quantity INT DEFAULT 0,
         reorder_level INT DEFAULT 5,
         supplier_id INT,
-        location VARCHAR(100)
+        location VARCHAR(100),
+        warranty_period VARCHAR(50)
       )
     `);
 
@@ -113,6 +116,7 @@ const initDb = async () => {
         cashier_name VARCHAR(100),
         customer_name VARCHAR(100),
         customer_phone VARCHAR(50),
+        customer_type VARCHAR(50),
         timestamp BIGINT NOT NULL
       )
     `);
@@ -128,10 +132,12 @@ const initDb = async () => {
         issue TEXT,
         accessories_left JSONB,
         status VARCHAR(50),
+        technician_id VARCHAR(100),
         estimated_cost DECIMAL(15,2) DEFAULT 0,
         deposit_paid DECIMAL(15,2) DEFAULT 0,
         parts_used JSONB,
         timestamp BIGINT NOT NULL,
+        completion_date BIGINT,
         is_paid BOOLEAN DEFAULT FALSE
       )
     `);
@@ -186,23 +192,23 @@ app.use(express.json() as any);
 app.get('/api/v1/products', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, sku, name, type, category, cost_price as "costPrice", 
-      selling_price, stock_quantity as "stockQuantity", reorder_level as "reorderLevel",
-      supplier_id as "supplierId" 
+      SELECT id, sku, name, type, brand, category, cost_price as "costPrice", 
+      selling_price, min_selling_price as "minSellingPrice", stock_quantity as "stockQuantity", 
+      reorder_level as "reorderLevel", supplier_id as "supplierId", location, warranty_period as "warrantyPeriod"
       FROM products ORDER BY id ASC
     `);
-    const products = result.rows.map(p => ({ ...p, id: p.id.toString(), costPrice: Number(p.costPrice), selling_price: Number(p.selling_price) }));
+    const products = result.rows.map(p => ({ ...p, id: p.id.toString(), costPrice: Number(p.costPrice), selling_price: Number(p.selling_price), minSellingPrice: Number(p.minSellingPrice) }));
     res.json(products);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/v1/products', async (req, res) => {
-  const { sku, name, type, category, costPrice, selling_price, stockQuantity, reorderLevel, supplierId } = req.body;
+  const { sku, name, type, brand, category, costPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
   try {
     const result = await pool.query(
-      `INSERT INTO products (sku, name, type, category, cost_price, selling_price, stock_quantity, reorder_level, supplier_id) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-      [sku, name, type, category, costPrice, selling_price, stockQuantity, reorderLevel, supplierId || null]
+      `INSERT INTO products (sku, name, type, brand, category, cost_price, selling_price, min_selling_price, stock_quantity, reorder_level, supplier_id, location, warranty_period) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+      [sku, name, type, brand, category, costPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod]
     );
     res.json({ id: result.rows[0].id.toString(), ...req.body });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -210,22 +216,26 @@ app.post('/api/v1/products', async (req, res) => {
 
 app.put('/api/v1/products/:id', async (req, res) => {
   const { id } = req.params;
-  const { sku, name, type, category, costPrice, selling_price, stockQuantity, reorderLevel, supplierId } = req.body;
+  const { sku, name, type, brand, category, costPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
   try {
     // Build dynamic query
     const fields = [];
     const values = [];
     let idx = 1;
-    if(sku !== undefined) { fields.push(`sku=$${idx++}`); values.push(sku); }
-    if(name !== undefined) { fields.push(`name=$${idx++}`); values.push(name); }
-    if(type !== undefined) { fields.push(`type=$${idx++}`); values.push(type); }
-    if(category !== undefined) { fields.push(`category=$${idx++}`); values.push(category); }
-    if(costPrice !== undefined) { fields.push(`cost_price=$${idx++}`); values.push(costPrice); }
-    if(selling_price !== undefined) { fields.push(`selling_price=$${idx++}`); values.push(selling_price); }
-    if(stockQuantity !== undefined) { fields.push(`stock_quantity=$${idx++}`); values.push(stockQuantity); }
-    if(reorderLevel !== undefined) { fields.push(`reorder_level=$${idx++}`); values.push(reorderLevel); }
-    if(supplierId !== undefined) { fields.push(`supplier_id=$${idx++}`); values.push(supplierId); }
-    
+    if (sku !== undefined) { fields.push(`sku=$${idx++}`); values.push(sku); }
+    if (name !== undefined) { fields.push(`name=$${idx++}`); values.push(name); }
+    if (type !== undefined) { fields.push(`type=$${idx++}`); values.push(type); }
+    if (brand !== undefined) { fields.push(`brand=$${idx++}`); values.push(brand); }
+    if (category !== undefined) { fields.push(`category=$${idx++}`); values.push(category); }
+    if (costPrice !== undefined) { fields.push(`cost_price=$${idx++}`); values.push(costPrice); }
+    if (selling_price !== undefined) { fields.push(`selling_price=$${idx++}`); values.push(selling_price); }
+    if (minSellingPrice !== undefined) { fields.push(`min_selling_price=$${idx++}`); values.push(minSellingPrice); }
+    if (stockQuantity !== undefined) { fields.push(`stock_quantity=$${idx++}`); values.push(stockQuantity); }
+    if (reorderLevel !== undefined) { fields.push(`reorder_level=$${idx++}`); values.push(reorderLevel); }
+    if (supplierId !== undefined) { fields.push(`supplier_id=$${idx++}`); values.push(supplierId); }
+    if (location !== undefined) { fields.push(`location=$${idx++}`); values.push(location); }
+    if (warrantyPeriod !== undefined) { fields.push(`warranty_period=$${idx++}`); values.push(warrantyPeriod); }
+
     values.push(id);
     await pool.query(`UPDATE products SET ${fields.join(', ')} WHERE id=$${idx}`, values);
     res.json({ success: true });
@@ -244,12 +254,12 @@ app.get('/api/v1/sales', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, receipt_no as "receiptNo", items, subtotal, discount, tax, total, 
-      amount_paid as "amountPaid", balance, payment_method as "paymentMethod", 
-      cashier_name as "cashierName", customer_name as "customerName", 
+      amount_paid as "amountPaid", balance, payment_method as "paymentMethod",
+      cashier_name as "cashierName", customer_name as "customerName", customer_type as "customerType",
       customer_phone as "customerPhone", timestamp 
       FROM sales ORDER BY timestamp DESC
     `);
-    const sales = result.rows.map(s => ({...s, id: s.id.toString(), subtotal: Number(s.subtotal), total: Number(s.total) }));
+    const sales = result.rows.map(s => ({ ...s, id: s.id.toString(), subtotal: Number(s.subtotal), total: Number(s.total) }));
     res.json(sales);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -258,9 +268,9 @@ app.post('/api/v1/sales', async (req, res) => {
   const s = req.body;
   try {
     const result = await pool.query(`
-      INSERT INTO sales (receipt_no, items, subtotal, discount, tax, total, amount_paid, balance, payment_method, cashier_name, customer_name, customer_phone, timestamp)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id
-    `, [s.receiptNo, JSON.stringify(s.items), s.subtotal, s.discount, s.tax, s.total, s.amountPaid, s.balance, s.paymentMethod, s.cashierName, s.customerName, s.customerPhone, s.timestamp]);
+      INSERT INTO sales (receipt_no, items, subtotal, discount, tax, total, amount_paid, balance, payment_method, cashier_name, customer_name, customer_phone, customer_type, timestamp)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id
+    `, [s.receiptNo, JSON.stringify(s.items), s.subtotal, s.discount, s.tax, s.total, s.amountPaid, s.balance, s.paymentMethod, s.cashierName, s.customerName, s.customerPhone, s.customerType, s.timestamp]);
     res.json({ id: result.rows[0].id.toString(), ...s });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -270,9 +280,9 @@ app.get('/api/v1/repairs', async (req, res) => {
   try {
     const result = await pool.query(`
       SELECT id, job_card_no as "jobCardNo", customer_name as "customerName", customer_phone as "customerPhone",
-      device_model as "deviceModel", issue, accessories_left as "accessoriesLeft", status,
+      device_model as "deviceModel", issue, accessories_left as "accessoriesLeft", status, technician_id as "technicianId",
       estimated_cost as "estimatedCost", deposit_paid as "depositPaid", parts_used as "partsUsed",
-      timestamp, is_paid as "isPaid"
+      timestamp, completion_date as "completionDate", is_paid as "isPaid"
       FROM repairs ORDER BY timestamp DESC
     `);
     const repairs = result.rows.map(r => ({ ...r, id: r.id.toString(), estimatedCost: Number(r.estimatedCost), depositPaid: Number(r.depositPaid) }));
@@ -284,9 +294,9 @@ app.post('/api/v1/repairs', async (req, res) => {
   const r = req.body;
   try {
     const result = await pool.query(`
-      INSERT INTO repairs (job_card_no, customer_name, customer_phone, device_model, issue, accessories_left, status, estimated_cost, deposit_paid, timestamp, is_paid)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id
-    `, [r.jobCardNo, r.customerName, r.customerPhone, r.deviceModel, r.issue, JSON.stringify(r.accessoriesLeft), r.status, r.estimatedCost, r.depositPaid, r.timestamp, r.isPaid]);
+      INSERT INTO repairs (job_card_no, customer_name, customer_phone, device_model, issue, accessories_left, status, technician_id, estimated_cost, deposit_paid, timestamp, completion_date, is_paid)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id
+    `, [r.jobCardNo, r.customerName, r.customerPhone, r.deviceModel, r.issue, JSON.stringify(r.accessoriesLeft), r.status, r.technicianId, r.estimatedCost, r.depositPaid, r.timestamp, r.completionDate, r.isPaid]);
     res.json({ id: result.rows[0].id.toString(), ...r });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -296,9 +306,9 @@ app.put('/api/v1/repairs/:id', async (req, res) => {
   const r = req.body;
   try {
     await pool.query(`
-      UPDATE repairs SET customer_name=$1, customer_phone=$2, device_model=$3, issue=$4, status=$5, 
-      estimated_cost=$6, deposit_paid=$7, accessories_left=$8, is_paid=$9 WHERE id=$10
-    `, [r.customerName, r.customerPhone, r.deviceModel, r.issue, r.status, r.estimatedCost, r.depositPaid, JSON.stringify(r.accessoriesLeft), r.isPaid, id]);
+      UPDATE repairs SET customer_name=$1, customer_phone=$2, device_model=$3, issue=$4, status=$5, technician_id=$6,
+      estimated_cost=$7, deposit_paid=$8, accessories_left=$9, is_paid=$10, completion_date=$11 WHERE id=$12
+    `, [r.customerName, r.customerPhone, r.deviceModel, r.issue, r.status, r.technicianId, r.estimatedCost, r.depositPaid, JSON.stringify(r.accessoriesLeft), r.isPaid, r.completionDate, id]);
     res.json({ success: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -314,7 +324,7 @@ app.get('/api/v1/suppliers', async (req, res) => {
 app.post('/api/v1/suppliers', async (req, res) => {
   const { name, contactPerson, phone, email, address } = req.body;
   try {
-    const result = await pool.query(`INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES ($1, $2, $3, $4, $5) RETURNING id`, 
+    const result = await pool.query(`INSERT INTO suppliers (name, contact_person, phone, email, address) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
       [name, contactPerson, phone, email, address]);
     res.json({ id: result.rows[0].id.toString(), ...req.body });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -397,17 +407,17 @@ app.post('/api/v1/expenses', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Insert error' }); }
 });
 app.put('/api/v1/expenses/:id', async (req, res) => {
-    const { category, description, amount, date } = req.body;
-    try {
-        await pool.query('UPDATE expenses SET category=$1, description=$2, amount=$3, date=$4 WHERE id=$5', [category, description, amount, date, req.params.id]);
-        res.json({ success: true });
-    } catch(err) { res.status(500).json({error: err.message}); }
+  const { category, description, amount, date } = req.body;
+  try {
+    await pool.query('UPDATE expenses SET category=$1, description=$2, amount=$3, date=$4 WHERE id=$5', [category, description, amount, date, req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 app.delete('/api/v1/expenses/:id', async (req, res) => {
-    try {
-        await pool.query('DELETE FROM expenses WHERE id=$1', [req.params.id]);
-        res.json({ success: true });
-    } catch(err) { res.status(500).json({error: err.message}); }
+  try {
+    await pool.query('DELETE FROM expenses WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/v1/stock-logs', async (req, res) => {
@@ -450,14 +460,14 @@ app.post('/api/v1/auth/login', async (req, res) => {
         const { password: _, ...safeUser } = user;
         // Map snake to camel
         const mappedUser = {
-            id: safeUser.id.toString(),
-            username: safeUser.username,
-            fullName: safeUser.full_name,
-            phone: safeUser.phone,
-            role: safeUser.role,
-            fingerprintId: safeUser.fingerprint_id,
-            lastLogin: Number(safeUser.last_login),
-            isActive: safeUser.is_active
+          id: safeUser.id.toString(),
+          username: safeUser.username,
+          fullName: safeUser.full_name,
+          phone: safeUser.phone,
+          role: safeUser.role,
+          fingerprintId: safeUser.fingerprint_id,
+          lastLogin: Number(safeUser.last_login),
+          isActive: safeUser.is_active
         };
         return res.json({ user: mappedUser, token: `sna-${Date.now()}` });
       }
@@ -469,54 +479,54 @@ app.post('/api/v1/auth/login', async (req, res) => {
 app.get('/api/v1/users', async (req, res) => {
   try {
     const result = await pool.query('SELECT id, username, full_name, phone, role, fingerprint_id, last_login, is_active FROM users ORDER BY id ASC');
-    const users = result.rows.map(u => ({ 
-        id: u.id.toString(),
-        username: u.username,
-        fullName: u.full_name,
-        phone: u.phone,
-        role: u.role,
-        fingerprintId: u.fingerprint_id,
-        lastLogin: Number(u.last_login),
-        isActive: u.is_active
+    const users = result.rows.map(u => ({
+      id: u.id.toString(),
+      username: u.username,
+      fullName: u.full_name,
+      phone: u.phone,
+      role: u.role,
+      fingerprintId: u.fingerprint_id,
+      lastLogin: Number(u.last_login),
+      isActive: u.is_active
     }));
     res.json(users);
   } catch (err) { res.status(500).json({ error: 'Read error' }); }
 });
 
 app.post('/api/v1/users', async (req, res) => {
-    const { username, fullName, phone, role, password, fingerprintId, isActive } = req.body;
-    try {
-      const result = await pool.query(
-        'INSERT INTO users (username, full_name, phone, role, password, fingerprint_id, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
-        [username, fullName, phone, role, password, fingerprintId, isActive]
-      );
-      res.json({ id: result.rows[0].id.toString(), ...req.body });
-    } catch (err) { res.status(500).json({ error: 'Create failed' }); }
+  const { username, fullName, phone, role, password, fingerprintId, isActive } = req.body;
+  try {
+    const result = await pool.query(
+      'INSERT INTO users (username, full_name, phone, role, password, fingerprint_id, is_active) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+      [username, fullName, phone, role, password, fingerprintId, isActive]
+    );
+    res.json({ id: result.rows[0].id.toString(), ...req.body });
+  } catch (err) { res.status(500).json({ error: 'Create failed' }); }
 });
 
 app.put('/api/v1/users/:id', async (req, res) => {
-    const { id } = req.params;
-    const { username, fullName, phone, role, password, fingerprintId, isActive } = req.body;
-    try {
-        const fields = []; const vals = []; let idx=1;
-        if(fullName) { fields.push(`full_name=$${idx++}`); vals.push(fullName); }
-        if(phone) { fields.push(`phone=$${idx++}`); vals.push(phone); }
-        if(role) { fields.push(`role=$${idx++}`); vals.push(role); }
-        if(password) { fields.push(`password=$${idx++}`); vals.push(password); }
-        if(fingerprintId !== undefined) { fields.push(`fingerprint_id=$${idx++}`); vals.push(fingerprintId); }
-        if(isActive !== undefined) { fields.push(`is_active=$${idx++}`); vals.push(isActive); }
-        
-        vals.push(id);
-        await pool.query(`UPDATE users SET ${fields.join(', ')} WHERE id=$${idx}`, vals);
-        res.json({ success: true });
-    } catch(err) { res.status(500).json({error: err.message}); }
+  const { id } = req.params;
+  const { username, fullName, phone, role, password, fingerprintId, isActive } = req.body;
+  try {
+    const fields = []; const vals = []; let idx = 1;
+    if (fullName) { fields.push(`full_name=$${idx++}`); vals.push(fullName); }
+    if (phone) { fields.push(`phone=$${idx++}`); vals.push(phone); }
+    if (role) { fields.push(`role=$${idx++}`); vals.push(role); }
+    if (password) { fields.push(`password=$${idx++}`); vals.push(password); }
+    if (fingerprintId !== undefined) { fields.push(`fingerprint_id=$${idx++}`); vals.push(fingerprintId); }
+    if (isActive !== undefined) { fields.push(`is_active=$${idx++}`); vals.push(isActive); }
+
+    vals.push(id);
+    await pool.query(`UPDATE users SET ${fields.join(', ')} WHERE id=$${idx}`, vals);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.delete('/api/v1/users/:id', async (req, res) => {
-    try {
-        await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
-        res.json({ success: true });
-    } catch(err) { res.status(500).json({error: err.message}); }
+  try {
+    await pool.query('DELETE FROM users WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.listen(port, () => {
