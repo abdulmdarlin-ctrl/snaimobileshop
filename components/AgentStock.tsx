@@ -44,6 +44,9 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
    const [statusUpdateId, setStatusUpdateId] = useState<string | null>(null);
 
    // Delete State
+   const [currentPage, setCurrentPage] = useState(1);
+   const ITEMS_PER_PAGE = 10;
+
    const [agentToDelete, setAgentToDelete] = useState<Agent | null>(null);
    const [isDeleting, setIsDeleting] = useState(false);
 
@@ -305,7 +308,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
       return loans.filter(l => l.agentId === selectedAgent.id || l.customerName === selectedAgent.name);
    }, [loans, selectedAgent]);
 
-   const filteredAgentLoans = useMemo(() => {
+   const allFilteredAgentLoans = useMemo(() => {
       let data = agentLoans;
 
       // Tab Filter
@@ -316,12 +319,25 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
       if (!loanSearchTerm) return data;
       const term = loanSearchTerm.toLowerCase();
-      return data.filter(l =>
+      data = data.filter(l =>
          l.deviceModel.toLowerCase().includes(term) ||
          l.imei.toLowerCase().includes(term) ||
          l.status.toLowerCase().includes(term)
       );
+      return data;
    }, [agentLoans, loanSearchTerm, profileTab]);
+
+   const paginatedAgentLoans = useMemo(() => {
+      const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+      return allFilteredAgentLoans.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+   }, [allFilteredAgentLoans, currentPage]);
+
+   const totalPages = useMemo(() => Math.ceil(allFilteredAgentLoans.length / ITEMS_PER_PAGE), [allFilteredAgentLoans]);
+
+   // Reset page on filter change
+   useEffect(() => {
+      setCurrentPage(1);
+   }, [loanSearchTerm, profileTab]);
 
    const agentStats = useMemo(() => {
       if (!selectedAgent) return { totalValue: 0, paid: 0, items: 0 };
@@ -582,7 +598,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                      </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                     {filteredAgentLoans.map(l => (
+                     {paginatedAgentLoans.map(l => (
                         <tr key={l.id} className="hover:bg-slate-50 transition-colors">
                            <td className="px-6 py-3">
                               <p className="text-xs font-bold text-slate-900">{l.deviceModel}</p>

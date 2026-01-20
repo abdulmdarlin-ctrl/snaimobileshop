@@ -4,9 +4,9 @@ import { db } from '../db';
 import { Product, Sale, SaleItem, User, AppSettings, ProductType, UserRole } from '../types';
 import {
    Search, ShoppingCart, Trash2, Plus, Minus, CreditCard,
-   Printer, History, RotateCcw, X, Check, Calculator, ChevronDown,
+   Printer, History, RotateCcw, X, Check, Calculator, ChevronDown, ChevronUp, Users as UsersIcon,
    User as UserIcon, AlertCircle, Package, Receipt, Edit,
-   ChevronRight, Smartphone, Headphones, Battery, Box, Filter,
+   ChevronRight, Smartphone, Headphones, Battery, Box, Filter, TrendingUp as TrendingUpIcon,
    Loader2, AlertTriangle, ScanBarcode, Download, FileText, Calendar,
    Eraser, Store, LayoutGrid, List as ListIcon, TrendingUp, DollarSign, UserPlus, MapPin, Mail, Phone
 } from 'lucide-react';
@@ -50,6 +50,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [salesHistory, setSalesHistory] = useState<Sale[]>([]);
    const [cart, setCart] = useState<SaleItem[]>([]);
    const [loading, setLoading] = useState(true);
+   const [pricingMode, setPricingMode] = useState<'Retail' | 'Wholesale' | 'Middle Man'>('Retail');
    const [searchTerm, setSearchTerm] = useState('');
    const [settings, setSettings] = useState<AppSettings | null>(null);
    const [clearingHistory, setClearingHistory] = useState(false);
@@ -68,13 +69,12 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [reportCashier, setReportCashier] = useState('All');
    const [reportType, setReportType] = useState<'All' | 'Retail' | 'Wholesale'>('All');
    const [reportPaymentMethod, setReportPaymentMethod] = useState('All');
-   const [reportViewMode, setReportViewMode] = useState<'list' | 'statement'>('list');
 
    // Modals
    const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
    const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+   const [isStatementModalOpen, setIsStatementModalOpen] = useState(false);
    const [isReceiptOpen, setIsReceiptOpen] = useState(false);
-   const [isClearHistoryConfirmOpen, setIsClearHistoryConfirmOpen] = useState(false);
    const [processingPayment, setProcessingPayment] = useState(false);
    const [printConfig, setPrintConfig] = useState({ showLogo: true });
 
@@ -87,6 +87,14 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
    // Cart Item Edit State
    const [editingCartItem, setEditingCartItem] = useState<{ index: number, item: SaleItem, product: Product } | null>(null);
+   const statementPageRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+   // Sales History UI State
+   const [historyPage, setHistoryPage] = useState(1);
+   const HISTORY_ITEMS_PER_PAGE = 20;
+   const [statementCurrentPage, setStatementCurrentPage] = useState(1);
+   const [isPrintingStatement, setIsPrintingStatement] = useState(false);
+   const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
    const [editItemForm, setEditItemForm] = useState({
       price: 0,
       quantity: 1
@@ -98,8 +106,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
       paymentMethod: 'Cash' as const,
       customerName: '',
       customerPhone: '',
-      customerType: 'Retail' as const
    });
+   const [hasManuallyAdjustedPayment, setHasManuallyAdjustedPayment] = useState(false);
 
    // Customer Search State in POS
    const [customerSearch, setCustomerSearch] = useState('');
@@ -136,6 +144,59 @@ const POS: React.FC<POSProps> = ({ user }) => {
          });
       }
    }, [isReceiptOpen, settings]);
+
+   // Effect to handle printing the full statement from a paginated view
+   useEffect(() => {
+      if (isPrintingStatement) {
+         printSection('#sales-statement', () => {
+            setIsPrintingStatement(false); // Reset state after print dialog closes
+         });
+      }
+   }, [isPrintingStatement]);
+
+   // Effect to scroll to the top of the relevant page in the statement modal
+   useEffect(() => {
+      if (isStatementModalOpen) {
+         // A small timeout ensures the DOM has updated (e.g., 'hidden' class removed) before scrolling
+         setTimeout(() => {
+            const pageElement = statementPageRefs.current[statementCurrentPage - 1];
+            pageElement?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+         }, 50);
+      }
+   }, [statementCurrentPage, isStatementModalOpen]);
+
+   const calculatePrice = (product: Product, mode: typeof pricingMode) => {
+      switch (mode) {
+         case 'Wholesale':
+            return product.costPrice;
+         case 'Middle Man':
+            // Use middleManPrice if available, otherwise fallback to retail price
+            return product.middleManPrice || product.selling_price;
+         case 'Retail':
+         default:
+            return product.selling_price;
+      }
+   };
+
+   // --- PRICING MODE EFFECT ---
+   useEffect(() => {
+      if (cart.length === 0) return;
+
+      const newCart = cart.map(item => {
+         const product = products.find(p => p.id === item.productId);
+         if (product) {
+            const newPrice = calculatePrice(product, pricingMode);
+            return {
+               ...item,
+               price: newPrice,
+               total: newPrice * item.quantity,
+               originalPrice: newPrice // Reset negotiation on mode switch
+            };
+         }
+         return item;
+      });
+      setCart(newCart);
+   }, [pricingMode]);
 
    const categories = useMemo(() => {
       const cats = new Set(products.map(p => p.category));
@@ -178,18 +239,57 @@ const POS: React.FC<POSProps> = ({ user }) => {
             return prod?.category === reportCategory;
          });
 
-         const matchesType = reportType === 'All' || s.customerType === reportType;
          const matchesPaymentMethod = reportPaymentMethod === 'All' || s.paymentMethod === reportPaymentMethod;
-         return matchesDate && matchesCashier && matchesCategory && matchesType && matchesPaymentMethod;
+         return matchesDate && matchesCashier && matchesCategory && matchesPaymentMethod;
       });
-   }, [salesHistory, reportStartDate, reportEndDate, reportCashier, reportCategory, reportType, reportPaymentMethod, products]);
+   }, [salesHistory, reportStartDate, reportEndDate, reportCashier, reportCategory, reportPaymentMethod, products]);
 
-   const reportTotals = useMemo(() => {
-      const revenue = filteredHistory.reduce((sum, s) => sum + s.total, 0);
-      const count = filteredHistory.length;
+   const reportData = useMemo(() => {
+      const salesWithProfit = filteredHistory.map(sale => {
+         const profit = sale.items.reduce((acc, item) => {
+            const product = products.find(p => p.id === item.productId);
+            const cost = product ? product.costPrice * item.quantity : 0;
+            return acc + (item.total - cost);
+         }, 0);
+         return { ...sale, profit };
+      });
+
+      const revenue = salesWithProfit.reduce((sum, s) => sum + s.total, 0);
+      const profit = salesWithProfit.reduce((sum, s) => sum + s.profit, 0);
+      const count = salesWithProfit.length;
       const avgTicket = count > 0 ? revenue / count : 0;
-      return { revenue, count, avgTicket };
+
+      const totalPages = Math.ceil(count / HISTORY_ITEMS_PER_PAGE);
+      const startIndex = (historyPage - 1) * HISTORY_ITEMS_PER_PAGE;
+      const paginatedSales = salesWithProfit.slice(startIndex, startIndex + HISTORY_ITEMS_PER_PAGE);
+
+      return {
+         totals: { revenue, count, avgTicket, profit },
+         paginatedSales,
+         totalPages
+      };
+   }, [filteredHistory, products, historyPage]);
+
+   // Reset page on filter change
+   useEffect(() => {
+      setHistoryPage(1);
+      setStatementCurrentPage(1);
+   }, [reportStartDate, reportEndDate, reportCategory, reportCashier, reportPaymentMethod]);
+
+   const statementPages = useMemo(() => {
+      const STATEMENT_ITEMS_PER_PAGE = 30; // Adjust as needed for A4 layout
+      const chunks: Sale[][] = [];
+      // Create a copy to avoid mutating the original filteredHistory
+      const data = [...filteredHistory];
+      while (data.length > 0) {
+         chunks.push(data.splice(0, STATEMENT_ITEMS_PER_PAGE));
+      }
+      return chunks;
    }, [filteredHistory]);
+
+   useEffect(() => {
+      statementPageRefs.current = statementPageRefs.current.slice(0, statementPages.length);
+   }, [statementPages]);
 
    const filteredCustomers = useMemo(() => {
       if (!customerSearch) return [];
@@ -210,7 +310,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          return;
       }
 
-      const price = product.selling_price;
+      const price = calculatePrice(product, pricingMode);
 
       setCart(prev => {
          const existing = prev.find(item => item.productId === product.id);
@@ -267,6 +367,10 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
    // --- CART EDITING ---
    const openEditCartItem = (item: SaleItem, index: number) => {
+      if (pricingMode === 'Wholesale') {
+         showToast("Price negotiation is not available for Wholesale.", 'info');
+         return;
+      }
       const product = products.find(p => p.id === item.productId);
       if (!product) return;
       setEditingCartItem({ index, item, product });
@@ -277,7 +381,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
       if (!editingCartItem) return;
 
       const { product } = editingCartItem;
-      const minPrice = product.minSellingPrice || product.selling_price;
+      const minPrice = pricingMode === 'Retail'
+         ? (product.minSellingPrice || product.selling_price)
+         : product.costPrice; // Middle Man cannot sell below cost
 
       if (editItemForm.price < minPrice) {
          showToast(`Price cannot be lower than minimum: ${minPrice.toLocaleString()}`, 'error');
@@ -305,9 +411,18 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const tax = settings?.taxEnabled ? (subtotal * (settings.taxPercentage || 18) / 100) : 0;
    const total = subtotal + tax;
 
-   const handleCheckout = () => {
+   const handleCheckout = (mode?: typeof pricingMode) => {
       if (cart.length === 0) return;
-      setCheckoutForm(prev => ({ ...prev, amountPaid: total, customerName: '', customerPhone: '' }));
+      if (mode) setPricingMode(mode);
+
+      setCheckoutForm({
+         amountPaid: 0, // Will be synced via useEffect
+         paymentMethod: 'Cash',
+         customerName: '',
+         customerPhone: '',
+      });
+      setHasManuallyAdjustedPayment(false);
+
       // Reset Customer Search State
       setCustomerSearch('');
       setShowCustomerResults(false);
@@ -315,6 +430,13 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setNewCustomerForm({ name: '', phone: '', email: '', address: '' });
       setIsCheckoutOpen(true);
    };
+
+   // Sync amount paid with total when checkout opens or total changes
+   useEffect(() => {
+      if (isCheckoutOpen && !hasManuallyAdjustedPayment) {
+         setCheckoutForm(prev => ({ ...prev, amountPaid: total }));
+      }
+   }, [isCheckoutOpen, total, hasManuallyAdjustedPayment]);
 
    const processPayment = async () => {
       if (checkoutForm.amountPaid < total) {
@@ -346,7 +468,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             paymentMethod: checkoutForm.paymentMethod,
             customerName: checkoutForm.customerName,
             customerPhone: checkoutForm.customerPhone,
-            customerType: 'Retail',
+            customerType: pricingMode,
             cashierName: user.username,
             timestamp: Date.now()
          };
@@ -372,8 +494,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             amountPaid: 0,
             paymentMethod: 'Cash',
             customerName: '',
-            customerPhone: '',
-            customerType: 'Retail'
+            customerPhone: ''
          });
 
          // Auto Print or Open Receipt
@@ -527,31 +648,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
          total,
          balance: total - saleToEdit.amountPaid
       });
-   };
-
-   const initiateClearHistory = () => {
-      if (user.role !== UserRole.ADMIN) {
-         showToast("Action Denied: Only Administrators can clear sales history.", 'error');
-         return;
-      }
-      setIsClearHistoryConfirmOpen(true);
-   };
-
-   const performClearHistory = async () => {
-      setClearingHistory(true);
-      try {
-         const allSales = await db.sales.toArray();
-         const deletePromises = allSales.map(sale => sale.id ? db.sales.delete(sale.id) : Promise.resolve());
-         await Promise.all(deletePromises);
-
-         setSalesHistory([]);
-         setIsClearHistoryConfirmOpen(false);
-         showToast("Sales history cleared", 'success');
-      } catch (e: any) {
-         showToast(`System Error: ${e.message}`, 'error');
-      } finally {
-         setClearingHistory(false);
-      }
    };
 
    const downloadCSV = () => {
@@ -731,27 +827,27 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </div>
                ) : (
                   cart.map((item, idx) => (
-                     <div key={idx} onClick={() => openEditCartItem(item, idx)} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center gap-3 animate-in slide-in-from-right-2 cursor-pointer hover:border-blue-300 transition-colors group">
-                        <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 font-bold text-[10px]">
-                           {idx + 1}
+                     <div key={idx} className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center gap-4 animate-in slide-in-from-right-2 group">
+                        <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 shrink-0">
+                           {getProductIcon(products.find(p => p.id === item.productId)?.type || ProductType.OTHERS)}
                         </div>
                         <div className="flex-1 min-w-0">
                            <p className="text-xs font-bold text-slate-800 truncate">{item.name}</p>
-                           <p className="text-[10px] font-bold text-slate-400">
-                              {item.price.toLocaleString()} x {item.quantity}
+                           <p className="text-xs font-bold text-slate-500">
+                              {item.price.toLocaleString()}
                               {(item.originalPrice && item.originalPrice > item.price) && (
-                                 <span className="text-emerald-600 ml-1">(-{(item.originalPrice - item.price).toLocaleString()})</span>
+                                 <span className="text-emerald-600 ml-1 line-through text-[9px]">{item.originalPrice.toLocaleString()}</span>
                               )}
                            </p>
                         </div>
-                        <div className="flex items-center gap-2 bg-slate-50 rounded-lg p-1" onClick={e => e.stopPropagation()}>
-                           <button onClick={() => updateQuantity(item.productId, -1)} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 hover:text-red-500 disabled:opacity-50"><Minus size={12} /></button>
-                           <span className="text-xs font-bold w-6 text-center">{item.quantity}</span>
-                           <button onClick={() => updateQuantity(item.productId, 1)} className="w-6 h-6 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 hover:text-emerald-500 disabled:opacity-50"><Plus size={12} /></button>
+                        <div className="flex items-center gap-1 bg-slate-50 rounded-lg p-1" onClick={e => e.stopPropagation()}>
+                           <button onClick={() => updateQuantity(item.productId, -1)} className="w-7 h-7 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 hover:text-red-500 disabled:opacity-50"><Minus size={14} /></button>
+                           <span className="text-sm font-bold w-8 text-center">{item.quantity}</span>
+                           <button onClick={() => updateQuantity(item.productId, 1)} className="w-7 h-7 flex items-center justify-center bg-white rounded shadow-sm text-slate-600 hover:text-emerald-500 disabled:opacity-50"><Plus size={14} /></button>
                         </div>
                         <div className="text-right min-w-[70px]">
                            <p className="text-xs font-bold text-slate-900">{item.total.toLocaleString()}</p>
-                           <button onClick={(e) => { e.stopPropagation(); removeFromCart(item.productId); }} className="text-[9px] text-red-400 hover:text-red-600 underline">Remove</button>
+                           <button onClick={(e) => { e.stopPropagation(); openEditCartItem(item, idx); }} className="text-[9px] text-blue-500 hover:underline">Edit</button>
                         </div>
                      </div>
                   ))
@@ -759,7 +855,25 @@ const POS: React.FC<POSProps> = ({ user }) => {
             </div>
 
             {/* Summary & Actions */}
-            <div className="p-6 bg-white border-t border-slate-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] z-10">
+            <div className="p-4 bg-white border-t border-slate-100 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] z-10 space-y-4">
+               {/* Pricing Mode Toggle */}
+               <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1 mb-2 block">Customer Type</label>
+                  <div className="grid grid-cols-3 gap-2">
+                     {(['Retail', 'Middle Man', 'Wholesale'] as const).map(mode => (
+                        <button
+                           key={mode}
+                           onClick={() => handleCheckout(mode)}
+                           className={`py-2.5 rounded-lg text-xs font-bold border transition-all flex items-center justify-center gap-2 ${pricingMode === mode
+                              ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                              : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
+                              }`}
+                        >
+                           {mode}
+                        </button>
+                     ))}
+                  </div>
+               </div>
                <div className="space-y-2 mb-6">
                   <div className="flex justify-between text-xs font-medium text-slate-500">
                      <span>Subtotal</span>
@@ -818,6 +932,25 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </div>
 
                   <div className="p-8 space-y-6">
+                     {/* Customer Type Selection inside Modal */}
+                     <div className="space-y-3">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide ml-1">Customer Type (Pricing)</label>
+                        <div className="grid grid-cols-3 gap-2">
+                           {(['Retail', 'Middle Man', 'Wholesale'] as const).map(mode => (
+                              <button
+                                 key={mode}
+                                 onClick={() => setPricingMode(mode)}
+                                 className={`py-2.5 rounded-xl text-xs font-bold border transition-all ${pricingMode === mode
+                                    ? 'bg-slate-900 text-white border-slate-900 shadow-md'
+                                    : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                                    }`}
+                              >
+                                 {mode}
+                              </button>
+                           ))}
+                        </div>
+                     </div>
+
                      {/* Amount Due Display */}
                      <div className="text-center mb-6">
                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Amount Due</p>
@@ -856,7 +989,10 @@ const POS: React.FC<POSProps> = ({ user }) => {
                               autoFocus
                               className="w-full h-14 bg-slate-50 rounded-2xl pl-12 pr-4 text-xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-slate-200 transition-all"
                               value={checkoutForm.amountPaid || ''}
-                              onChange={e => setCheckoutForm(prev => ({ ...prev, amountPaid: Number(e.target.value) }))}
+                              onChange={e => {
+                                 setCheckoutForm(prev => ({ ...prev, amountPaid: Number(e.target.value) }));
+                                 setHasManuallyAdjustedPayment(true);
+                              }}
                            />
                         </div>
                         {checkoutForm.amountPaid >= total && (
@@ -998,7 +1134,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         <p className="font-bold text-slate-900">{editingCartItem.item.name}</p>
                         <p className="text-[10px] text-slate-400">
                            Preferred: {(editingCartItem.item.originalPrice || editingCartItem.item.price).toLocaleString()} |
-                           Min: {(editingCartItem.product.minSellingPrice)?.toLocaleString() || 0}
+                           Min: {(pricingMode === 'Retail' ? editingCartItem.product.minSellingPrice : editingCartItem.product.costPrice)?.toLocaleString() || 0}
                         </p>
                      </div>
 
@@ -1089,15 +1225,30 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
                         <div className="mb-2">
                            {lastSale.items.map((item, i) => {
-                              const itemPrice = item.originalPrice || item.price;
-                              const itemTotal = item.quantity * itemPrice;
+                              const itemPrice = item.price;
+                              const originalItemPrice = item.originalPrice || item.price;
+                              const discount = (originalItemPrice - itemPrice) * item.quantity;
+                              const itemTotal = item.total;
                               return (
-                                 <div key={i} className="mb-1">
+                                 <div key={i} className="mb-1.5">
                                     <div>{item.name}</div>
-                                    <div className="flex justify-between pl-2">
-                                       <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
-                                       <span className="font-bold">{itemTotal.toLocaleString()}</span>
-                                    </div>
+                                    {lastSale.customerType === 'Retail' && discount > 0 ? (
+                                       <>
+                                          <div className="flex justify-between pl-2">
+                                             <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
+                                             <span className="font-bold">{itemTotal.toLocaleString()}</span>
+                                          </div>
+                                          <div className="flex justify-between pl-2 text-[9px] text-slate-500">
+                                             <span>(was {originalItemPrice.toLocaleString()} each)</span>
+                                             <span>Discount: -{discount.toLocaleString()}</span>
+                                          </div>
+                                       </>
+                                    ) : (
+                                       <div className="flex justify-between pl-2">
+                                          <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
+                                          <span className="font-bold">{itemTotal.toLocaleString()}</span>
+                                       </div>
+                                    )}
                                     {item.warrantyEndDate && (
                                        <div className="pl-2 text-[9px] text-slate-500">
                                           Warranty valid until: {new Date(item.warrantyEndDate).toLocaleDateString()}
@@ -1163,217 +1314,418 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
          {/* --- HISTORY & REPORTS MODAL --- */}
          {isHistoryModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className={`bg-white w-full rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh] ${reportViewMode === 'statement' ? 'max-w-4xl' : 'max-w-5xl'}`}>
+            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+               <div className={`bg-white w-full rounded-[2rem] shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh] transition-all duration-300 max-w-6xl`}>
 
                   {/* Modal Header */}
-                  <div className="p-6 border-b border-slate-100 flex items-center justify-between no-print">
-                     <div className="flex items-center gap-3">
-                        <h2 className="text-lg font-black text-slate-900 uppercase">Sales History & Reports</h2>
-
-                        {/* View Toggle */}
-                        <div className="flex p-1 bg-slate-100 rounded-lg ml-4">
-                           <button
-                              onClick={() => setReportViewMode('list')}
-                              className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase flex items-center gap-2 transition-all ${reportViewMode === 'list' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                           >
-                              <ListIcon size={14} /> List View
-                           </button>
-                           <button
-                              onClick={() => setReportViewMode('statement')}
-                              className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase flex items-center gap-2 transition-all ${reportViewMode === 'statement' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
-                           >
-                              <FileText size={14} /> Statement View
-                           </button>
+                  <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between no-print bg-white shrink-0 z-20">
+                     <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 bg-slate-50 rounded-xl flex items-center justify-center text-slate-900">
+                           <History size={20} strokeWidth={2} />
+                        </div>
+                        <div>
+                           <h2 className="text-lg font-black text-slate-900 uppercase tracking-tight">Sales History</h2>
+                           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Transaction Records</p>
                         </div>
                      </div>
 
                      <div className="flex items-center gap-2">
                         <button
+                           onClick={() => setIsStatementModalOpen(true)}
+                           className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold uppercase hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2"
+                        >
+                           <FileText size={14} /> Statement
+                        </button>
+                        <button
                            onClick={downloadCSV}
-                           className="px-4 py-2 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-lg text-xs font-bold uppercase hover:bg-emerald-100 mr-2 flex items-center gap-2"
+                           className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold uppercase hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2"
                         >
                            <FileText size={14} /> CSV
                         </button>
                         <button
-                           onClick={() => exportSectionToPDF(reportViewMode === 'statement' ? '#sales-statement' : '#sales-history-table', 'Sales_Report.pdf')}
-                           className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase hover:bg-slate-50 mr-2 flex items-center gap-2"
+                           onClick={() => exportSectionToPDF('#sales-history-table', 'Sales_Report.pdf')}
+                           className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase hover:bg-black transition-all flex items-center gap-2 shadow-lg shadow-slate-900/20"
                         >
                            <Download size={14} /> PDF
                         </button>
-                        {user.role === UserRole.ADMIN && (
-                           <button
-                              onClick={initiateClearHistory}
-                              disabled={clearingHistory}
-                              className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-xs font-bold uppercase hover:bg-red-100 mr-2 flex items-center gap-2 disabled:opacity-50"
-                           >
-                              {clearingHistory ? <Loader2 size={14} className="animate-spin" /> : <Eraser size={14} />} Clear All
-                           </button>
-                        )}
-                        <button onClick={() => setIsHistoryModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg hover:bg-slate-100"><X size={20} /></button>
+                        <button onClick={() => setIsHistoryModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-100 transition-all ml-2"><X size={20} /></button>
                      </div>
                   </div>
 
-                  {/* Filters Section */}
-                  <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex flex-wrap gap-4 items-end no-print">
-                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Start Date</label>
-                        <input type="date" className="win-input h-10 bg-white" value={reportStartDate} onChange={e => setReportStartDate(e.target.value)} />
+                  {/* Filters & Summary Section */}
+                  <div className="shrink-0 bg-slate-50/50 border-b border-slate-100">
+                     {/* Summary Cards - Restructured */}
+                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 p-6 pb-2">
+                        <div className="bg-slate-900 p-5 rounded-2xl text-white shadow-xl shadow-slate-900/10 relative overflow-hidden group">
+                           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                              <DollarSign size={64} />
+                           </div>
+                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total Revenue</p>
+                           <p className="text-3xl font-black tracking-tight">
+                              <span className="text-lg text-slate-500 mr-1 font-medium">UGX</span>
+                              {reportData.totals.revenue.toLocaleString()}
+                           </p>
+                        </div>
+                        <div className={`p-5 rounded-2xl text-white shadow-xl group ${reportData.totals.profit >= 0 ? 'bg-emerald-600 shadow-emerald-900/10' : 'bg-red-600 shadow-red-900/10'}`}>
+                           <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                              <TrendingUpIcon size={64} />
+                           </div>
+                           <p className="text-[10px] font-bold text-white/70 uppercase tracking-widest mb-1">Total Profit</p>
+                           <p className="text-3xl font-black tracking-tight">
+                              <span className="text-lg text-white/80 mr-1 font-medium">UGX</span>
+                              {reportData.totals.profit.toLocaleString()}
+                           </p>
+                        </div>
+                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center group hover:border-blue-300 transition-colors">
+                           <div className="flex items-center gap-3">
+                              <div className="p-3 bg-blue-50 text-blue-600 rounded-xl group-hover:scale-110 transition-transform">
+                                 <Receipt size={20} />
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Transactions</p>
+                                 <p className="text-2xl font-black text-slate-900">{reportData.totals.count}</p>
+                              </div>
+                           </div>
+                        </div>
+                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-center group hover:border-emerald-300 transition-colors">
+                           <div className="flex items-center gap-3">
+                              <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl group-hover:scale-110 transition-transform">
+                                 <TrendingUpIcon size={20} />
+                              </div>
+                              <div>
+                                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Avg. Ticket</p>
+                                 <p className="text-2xl font-black text-slate-900">
+                                    <span className="text-sm text-slate-400 mr-1 font-bold">UGX</span>
+                                    {Math.round(reportData.totals.avgTicket).toLocaleString()}
+                                 </p>
+                              </div>
+                           </div>
+                        </div>
                      </div>
-                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">End Date</label>
-                        <input type="date" className="win-input h-10 bg-white" value={reportEndDate} onChange={e => setReportEndDate(e.target.value)} />
-                     </div>
-                     <div className="space-y-1 pb-1">
+
+                     {/* Filter Bar */}
+                     <div className="px-6 pb-6 pt-2 flex flex-wrap gap-3 items-center">
+                        <div className="flex items-center bg-white border border-slate-200 rounded-xl p-1 shadow-sm">
+                           <div className="px-3 border-r border-slate-100">
+                              <Calendar size={14} className="text-slate-400" />
+                           </div>
+                           <input
+                              type="date"
+                              className="text-xs font-bold text-slate-700 bg-transparent border-none focus:ring-0 h-9 w-32"
+                              value={reportStartDate}
+                              onChange={e => setReportStartDate(e.target.value)}
+                           />
+                           <span className="text-slate-300 text-xs font-bold px-1">-</span>
+                           <input
+                              type="date"
+                              className="text-xs font-bold text-slate-700 bg-transparent border-none focus:ring-0 h-9 w-32"
+                              value={reportEndDate}
+                              onChange={e => setReportEndDate(e.target.value)}
+                           />
+                        </div>
+
+                        <div className="h-8 w-px bg-slate-200 mx-1"></div>
+
+                        <div className="relative">
+                           <select
+                              className="appearance-none bg-white border border-slate-200 pl-4 pr-10 h-11 rounded-xl text-xs font-bold text-slate-700 shadow-sm focus:ring-2 focus:ring-slate-100 outline-none cursor-pointer hover:bg-slate-50 transition-colors min-w-[140px]"
+                              value={reportCategory}
+                              onChange={e => setReportCategory(e.target.value)}
+                           >
+                              {categories.map(c => <option key={c} value={c}>{c === 'All' ? 'All Categories' : c}</option>)}
+                           </select>
+                           <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        </div>
+
+                        <div className="relative">
+                           <select
+                              className="appearance-none bg-white border border-slate-200 pl-4 pr-10 h-11 rounded-xl text-xs font-bold text-slate-700 shadow-sm focus:ring-2 focus:ring-slate-100 outline-none cursor-pointer hover:bg-slate-50 transition-colors min-w-[120px]"
+                              value={reportPaymentMethod}
+                              onChange={e => setReportPaymentMethod(e.target.value)}
+                           >
+                              <option value="All">All Payments</option>
+                              <option value="Cash">Cash</option>
+                              <option value="Mobile Money">Mobile Money</option>
+                              <option value="Bank">Bank</option>
+                           </select>
+                           <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        </div>
+
+                        <div className="relative">
+                           <select
+                              className="appearance-none bg-white border border-slate-200 pl-4 pr-10 h-11 rounded-xl text-xs font-bold text-slate-700 shadow-sm focus:ring-2 focus:ring-slate-100 outline-none cursor-pointer hover:bg-slate-50 transition-colors min-w-[140px]"
+                              value={reportCashier}
+                              onChange={e => setReportCashier(e.target.value)}
+                           >
+                              {cashiers.map(c => <option key={c} value={c}>{c === 'All' ? 'All Cashiers' : c}</option>)}
+                           </select>
+                           <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        </div>
+
                         <button
                            onClick={() => {
                               const today = new Date();
                               const str = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
                               setReportStartDate(str);
                               setReportEndDate(str);
+                              setReportCategory('All');
+                              setReportPaymentMethod('All');
+                              setReportCashier('All');
                            }}
-                           className="h-9 px-3 bg-slate-200 text-slate-600 rounded-lg text-[10px] font-bold uppercase hover:bg-slate-300 transition-colors"
+                           className="ml-auto p-3 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-all"
+                           title="Reset Filters"
                         >
-                           Today
+                           <RotateCcw size={16} />
                         </button>
-                     </div>
-                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Category</label>
-                        <select className="win-input h-10 bg-white" value={reportCategory} onChange={e => setReportCategory(e.target.value)}>
-                           {categories.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                     </div>
-                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Payment</label>
-                        <select className="win-input h-10 bg-white" value={reportPaymentMethod} onChange={e => setReportPaymentMethod(e.target.value)}>
-                           <option value="All">All Methods</option>
-                           <option value="Cash">Cash</option>
-                           <option value="Mobile Money">Mobile Money</option>
-                           <option value="Bank">Bank</option>
-                        </select>
-                     </div>
-                     <div className="space-y-1">
-                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Cashier</label>
-                        <select className="win-input h-10 bg-white" value={reportCashier} onChange={e => setReportCashier(e.target.value)}>
-                           {cashiers.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                     </div>
-                     <div className="flex-1 text-right self-center">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Report Total</p>
-                        <p className="text-xl font-black text-slate-900">UGX {reportTotals.revenue.toLocaleString()}</p>
-                        <p className="text-[10px] text-slate-500 font-bold">{reportTotals.count} Transactions</p>
                      </div>
                   </div>
 
                   {/* REPORT CONTENT AREA */}
-                  <div className="flex-1 overflow-y-auto bg-slate-100 p-0 flex justify-center">
+                  <div className="flex-1 overflow-y-auto bg-white p-0 flex justify-center relative">
+                     <div id="sales-history-table" className="w-full bg-white h-full">
+                        <table className="w-full text-left border-collapse">
+                           <thead className="bg-white sticky top-0 z-10 shadow-sm shadow-slate-100">
+                              <tr>
+                                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50 border-b border-slate-100">Receipt #</th>
+                                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50 border-b border-slate-100">Date & Time</th>
+                                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50 border-b border-slate-100">Customer</th>
+                                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50 border-b border-slate-100 text-center">Items</th>
+                                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50 border-b border-slate-100 text-right">Profit</th>
+                                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50 border-b border-slate-100 text-right">Total</th>
+                                 <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50 border-b border-slate-100 text-right no-print">Action</th>
+                              </tr>
+                           </thead>
+                           <tbody>
+                              {(() => {
+                                 let lastRenderedDate: string | null = null;
+                                 return reportData.paginatedSales.map(sale => {
+                                    const saleDate = new Date(sale.timestamp).toLocaleDateString('en-CA');
+                                    const showDateHeader = saleDate !== lastRenderedDate;
+                                    lastRenderedDate = saleDate;
 
-                     {reportViewMode === 'list' ? (
-                        // === LIST VIEW (Standard Table) ===
-                        <div id="sales-history-table" className="w-full bg-white h-full">
-                           <table className="w-full text-left">
-                              <thead className="bg-slate-50 border-b border-slate-100 sticky top-0 z-10">
-                                 <tr>
-                                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Receipt #</th>
-                                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
-                                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Cashier</th>
-                                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Total</th>
-                                    <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right no-print">Action</th>
-                                 </tr>
-                              </thead>
-                              <tbody className="divide-y divide-slate-50">
-                                 {filteredHistory.map(sale => (
-                                    <tr key={sale.id} className="hover:bg-slate-50 transition-colors">
-                                       <td className="px-6 py-3 font-mono text-xs font-bold text-slate-600">{sale.receiptNo}</td>
-                                       <td className="px-6 py-3 text-xs text-slate-500">
-                                          {new Date(sale.timestamp).toLocaleDateString()}
-                                          <div className="text-[9px] text-slate-400">{new Date(sale.timestamp).toLocaleTimeString()}</div>
-                                       </td>
-                                       <td className="px-6 py-3 text-xs font-medium text-slate-600">{sale.cashierName}</td>
-                                       <td className="px-6 py-3 text-xs font-bold text-slate-900">{sale.customerName || '-'}</td>
-                                       <td className="px-6 py-3 text-xs font-bold text-slate-900 text-right">{sale.total.toLocaleString()}</td>
-                                       <td className="px-6 py-3 text-right no-print">
-                                          <button
-                                             onClick={() => { setLastSale(sale); setIsReceiptOpen(true); }}
-                                             className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-slate-900 hover:border-slate-400 transition-all"
-                                             title="Reprint Receipt"
-                                          >
-                                             <Printer size={14} />
-                                          </button>
-                                          {user.role === UserRole.ADMIN && (
-                                             <>
-                                                <button onClick={() => { setSaleToEdit(JSON.parse(JSON.stringify(sale))); setIsEditModalOpen(true); }} className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-blue-600 hover:border-blue-400 transition-all ml-2" title="Edit Invoice">
-                                                   <Edit size={14} />
-                                                </button>
-                                                <button onClick={() => setSaleToDelete(sale)} className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-red-600 hover:border-red-400 transition-all ml-2" title="Delete Invoice">
-                                                   <Trash2 size={14} />
-                                                </button>
-                                             </>
+                                    return (
+                                       <React.Fragment key={sale.id}>
+                                          {showDateHeader && (
+                                             <tr className="bg-slate-100 sticky top-[57px] z-[5]">
+                                                <td colSpan={7} className="px-6 py-2">
+                                                   <div className="flex items-center gap-2">
+                                                      <Calendar size={14} className="text-slate-400" />
+                                                      <h3 className="text-xs font-black text-slate-500 uppercase tracking-wider">
+                                                         {new Date(sale.timestamp).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                                                      </h3>
+                                                   </div>
+                                                </td>
+                                             </tr>
                                           )}
-                                       </td>
-                                    </tr>
-                                 ))}
-                                 {filteredHistory.length === 0 && (
-                                    <tr><td colSpan={5} className="py-12 text-center text-slate-400 font-medium">No sales records found for selected criteria.</td></tr>
-                                 )}
-                              </tbody>
-                           </table>
+                                          <tr className="hover:bg-slate-50 transition-colors group border-b border-slate-100">
+                                             <td className="px-6 py-4">
+                                                <div className="flex items-center gap-2">
+                                                   <div className="p-1.5 bg-slate-100 rounded text-slate-500">
+                                                      <Receipt size={14} />
+                                                   </div>
+                                                   <span className="font-mono text-xs font-bold text-slate-700">{sale.receiptNo}</span>
+                                                </div>
+                                             </td>
+                                             <td className="px-6 py-4">
+                                                <div className="flex flex-col">
+                                                   <span className="text-xs font-bold text-slate-900">{new Date(sale.timestamp).toLocaleDateString()}</span>
+                                                   <span className="text-[10px] font-medium text-slate-400">{new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                </div>
+                                             </td>
+                                             <td className="px-6 py-4">
+                                                <div className="flex flex-col">
+                                                   <span className="text-xs font-bold text-slate-900">{sale.customerName || 'Walk-in Customer'}</span>
+                                                   <span className="text-[10px] text-slate-400">{sale.customerType || 'Retail'}</span>
+                                                </div>
+                                             </td>
+                                             <td className="px-6 py-4 text-center">
+                                                <div className="inline-block px-2 py-1 bg-slate-100 text-slate-600 rounded-md text-xs font-bold">
+                                                   {sale.items.length}
+                                                </div>
+                                             </td>
+                                             <td className="px-6 py-4 text-right">
+                                                <span className={`text-sm font-black ${sale.profit >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+                                                   {sale.profit.toLocaleString()}
+                                                </span>
+                                             </td>
+                                             <td className="px-6 py-4 text-right">
+                                                <span className="text-sm font-black text-slate-900">{sale.total.toLocaleString()}</span>
+                                                <div className="text-[9px] font-bold text-slate-400 uppercase mt-0.5">{sale.paymentMethod}</div>
+                                             </td>
+                                             <td className="px-6 py-4 text-right no-print">
+                                                <div className="flex justify-end gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                                                   <button
+                                                      onClick={() => setExpandedSaleId(expandedSaleId === sale.id ? null : sale.id)}
+                                                      className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-slate-900 hover:border-slate-400 transition-all shadow-sm"
+                                                      title="View Details"
+                                                   >
+                                                      {expandedSaleId === sale.id ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                                                   </button>
+                                                   <button
+                                                      onClick={() => { setLastSale(sale); setIsReceiptOpen(true); }}
+                                                      className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-slate-900 hover:border-slate-400 transition-all shadow-sm"
+                                                      title="Reprint Receipt"
+                                                   >
+                                                      <Printer size={14} />
+                                                   </button>
+                                                   {user.role === UserRole.ADMIN && (
+                                                      <>
+                                                         <button onClick={() => { setSaleToEdit(JSON.parse(JSON.stringify(sale))); setIsEditModalOpen(true); }} className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-blue-600 hover:border-blue-400 transition-all shadow-sm ml-1" title="Edit Invoice">
+                                                            <Edit size={14} />
+                                                         </button>
+                                                         <button onClick={() => setSaleToDelete(sale)} className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-red-600 hover:border-red-400 transition-all shadow-sm ml-1" title="Delete Invoice">
+                                                            <Trash2 size={14} />
+                                                         </button>
+                                                      </>
+                                                   )}
+                                                </div>
+                                             </td>
+                                          </tr>
+                                          {expandedSaleId === sale.id && (
+                                             <tr className="bg-slate-50/50 animate-in fade-in duration-200">
+                                                <td colSpan={7} className="p-0">
+                                                   <div className="p-4 m-4 bg-white rounded-lg border border-slate-200">
+                                                      <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Items in this Sale</h4>
+                                                      <div className="space-y-2">
+                                                         {sale.items.map((item, index) => (
+                                                            <div key={index} className="flex justify-between items-center text-xs border-b border-slate-100 last:border-0 pb-2 last:pb-0">
+                                                               <div>
+                                                                  <p className="font-bold text-slate-800">{item.name}</p>
+                                                                  <p className="text-[10px] text-slate-400">
+                                                                     {item.quantity} x {item.price.toLocaleString()}
+                                                                  </p>
+                                                               </div>
+                                                               <p className="font-bold text-slate-800">{item.total.toLocaleString()}</p>
+                                                            </div>
+                                                         ))}
+                                                      </div>
+                                                   </div>
+                                                </td>
+                                             </tr>
+                                          )}
+                                       </React.Fragment>
+                                    );
+                                 });
+                              })()}
+
+                              {reportData.paginatedSales.length === 0 && (
+                                 <tr>
+                                    <td colSpan={7} className="py-20 text-center">
+                                       <div className="flex flex-col items-center justify-center text-slate-300">
+                                          <Search size={48} className="mb-4 opacity-50" />
+                                          <p className="text-sm font-bold uppercase tracking-widest">No records found</p>
+                                          <p className="text-xs mt-1">Try adjusting your filters</p>
+                                       </div>
+                                    </td>
+                                 </tr>
+                              )}
+                           </tbody>
+                        </table>
+                     </div>
+                  </div>
+
+                  {/* Pagination Footer */}
+                  <div className="shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center no-print">
+                     <div>
+                        <p className="text-xs font-bold text-slate-500">
+                           Showing <span className="text-slate-900">{reportData.paginatedSales.length}</span> of <span className="text-slate-900">{reportData.totals.count}</span> transactions
+                        </p>
+                     </div>
+                     <div className="flex items-center gap-2">
+                        <button
+                           onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
+                           disabled={historyPage === 1}
+                           className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold uppercase text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                           Previous
+                        </button>
+                        <span className="text-xs font-bold text-slate-600">Page {historyPage} of {reportData.totalPages}</span>
+                        <button
+                           onClick={() => setHistoryPage(p => Math.min(reportData.totalPages, p + 1))}
+                           disabled={historyPage >= reportData.totalPages}
+                           className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold uppercase text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                           Next
+                        </button>
+                     </div>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* --- STATEMENT MODAL --- */}
+         {isStatementModalOpen && (
+            <div className="fixed inset-0 bg-slate-900/60 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
+               <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
+                  <div className="p-5 border-b border-slate-100 flex items-center justify-between no-print bg-slate-50 shrink-0">
+                     <div>
+                        <h2 className="text-lg font-bold text-slate-900">Sales Statement</h2>
+                        <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5">Period: {reportStartDate} to {reportEndDate}</p>
+                     </div>
+                     <div className="flex items-center gap-2">
+                        <button onClick={() => setIsPrintingStatement(true)} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase hover:bg-black transition-all flex items-center gap-2 shadow-lg shadow-slate-900/20">
+                           <Printer size={14} /> Print
+                        </button>
+                        <button onClick={() => setIsStatementModalOpen(false)} className="p-2 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors"><X size={20} /></button>
+                     </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto bg-white">
+                     <div id="sales-statement" className="receipt-a4-mode p-12 w-full max-w-[210mm] mx-auto">
+                        {/* Report Header */}
+                        <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
+                           <div>
+                              <h1 className="text-2xl font-black uppercase tracking-tight mb-2">Sales Report</h1>
+                              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Period: {reportStartDate} to {reportEndDate}</p>
+                              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">SNA Mobile ERP System</p>
+                           </div>
+                           <div className="text-right">
+                              {settings?.logo && (
+                                 <img src={settings.logo} className="h-20 object-contain ml-auto mb-3" alt="Logo" />
+                              )}
+                              <h2 className="text-lg font-bold text-slate-900 uppercase">{settings?.businessName || 'SNA SHOP'}</h2>
+                              <p className="text-xs text-slate-500">{settings?.address}</p>
+                              <p className="text-xs text-slate-500">Tel: {settings?.phone}</p>
+                              <p className="text-xs text-slate-500 mt-1">Generated: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
+                           </div>
                         </div>
-                     ) : (
-                        // === STATEMENT VIEW (A4 Printable) ===
-                        <div id="sales-statement" className="receipt-a4-mode bg-white p-12 shadow-xl text-slate-900 w-full max-w-[210mm] min-h-[297mm] my-8">
-                           {/* Report Header */}
-                           <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
-                              <div>
-                                 <h1 className="text-2xl font-black uppercase tracking-tight mb-2">Sales Report</h1>
-                                 <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Period: {reportStartDate} to {reportEndDate}</p>
-                                 <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">SNA Mobile ERP System</p>
-                              </div>
-                              <div className="text-right">
-                                 {settings?.logo && (
-                                    <img src={settings.logo} className="h-20 object-contain ml-auto mb-3" alt="Logo" />
-                                 )}
-                                 <h2 className="text-lg font-bold text-slate-900 uppercase">{settings?.businessName || 'SNA SHOP'}</h2>
-                                 <p className="text-xs text-slate-500">{settings?.address}</p>
-                                 <p className="text-xs text-slate-500">Tel: {settings?.phone}</p>
-                                 <p className="text-xs text-slate-500 mt-1">Generated: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
-                              </div>
-                           </div>
 
-                           {/* Executive Summary Cards */}
-                           <div className="grid grid-cols-3 gap-6 mb-10">
-                              <div className="p-4 border border-slate-200 rounded-lg">
-                                 <div className="flex items-center gap-2 mb-2 text-slate-400">
-                                    <DollarSign size={14} />
-                                    <p className="text-[10px] font-bold uppercase tracking-wider">Total Revenue</p>
-                                 </div>
-                                 <p className="text-2xl font-black text-slate-900">
-                                    {reportTotals.revenue.toLocaleString()}
-                                 </p>
+                        {/* Executive Summary Cards */}
+                        <div className="grid grid-cols-3 gap-6 mb-10">
+                           <div className="p-4 border border-slate-200 rounded-lg">
+                              <div className="flex items-center gap-2 mb-2 text-slate-400">
+                                 <DollarSign size={14} />
+                                 <p className="text-[10px] font-bold uppercase tracking-wider">Total Revenue</p>
                               </div>
-                              <div className="p-4 border border-slate-200 rounded-lg bg-slate-50">
-                                 <div className="flex items-center gap-2 mb-2 text-slate-400">
-                                    <Receipt size={14} />
-                                    <p className="text-[10px] font-bold uppercase tracking-wider">Transactions</p>
-                                 </div>
-                                 <p className="text-2xl font-black text-slate-900">
-                                    {reportTotals.count}
-                                 </p>
-                              </div>
-                              <div className="p-4 border border-slate-200 rounded-lg bg-slate-50">
-                                 <div className="flex items-center gap-2 mb-2 text-slate-400">
-                                    <TrendingUp size={14} />
-                                    <p className="text-[10px] font-bold uppercase tracking-wider">Avg Ticket</p>
-                                 </div>
-                                 <p className="text-2xl font-black text-slate-900">
-                                    {Math.round(reportTotals.avgTicket).toLocaleString()}
-                                 </p>
-                              </div>
+                              <p className="text-2xl font-black text-slate-900">
+                                 {reportData.totals.revenue.toLocaleString()}
+                              </p>
                            </div>
+                           <div className="p-4 border border-slate-200 rounded-lg bg-slate-50">
+                              <div className="flex items-center gap-2 mb-2 text-slate-400">
+                                 <Receipt size={14} />
+                                 <p className="text-[10px] font-bold uppercase tracking-wider">Transactions</p>
+                              </div>
+                              <p className="text-2xl font-black text-slate-900">
+                                 {reportData.totals.count}
+                              </p>
+                           </div>
+                           <div className="p-4 border border-slate-200 rounded-lg bg-slate-50">
+                              <div className="flex items-center gap-2 mb-2 text-slate-400">
+                                 <TrendingUpIcon size={14} />
+                                 <p className="text-[10px] font-bold uppercase tracking-wider">Avg Ticket</p>
+                              </div>
+                              <p className="text-2xl font-black text-slate-900">
+                                 {Math.round(reportData.totals.avgTicket).toLocaleString()}
+                              </p>
+                           </div>
+                        </div>
 
-                           {/* Transaction Table */}
-                           <div className="mb-8">
-                              <h3 className="text-xs font-black uppercase tracking-widest border-b border-slate-200 pb-2 mb-4 text-slate-500">Transaction Details</h3>
+                        {/* Transaction Table */}
+                        {statementPages.map((pageItems, pageIndex) => (
+                           <div key={pageIndex} className="mb-8" style={pageIndex < statementPages.length - 1 ? { pageBreakAfter: 'always' } : {}}>
+                              {pageIndex === 0 && (
+                                 <h3 className="text-xs font-black uppercase tracking-widest border-b border-slate-200 pb-2 mb-4 text-slate-500">Transaction Details</h3>
+                              )}
                               <table className="w-full text-left text-xs">
                                  <thead>
                                     <tr className="border-b border-slate-200">
@@ -1386,7 +1738,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     </tr>
                                  </thead>
                                  <tbody className="divide-y divide-slate-100">
-                                    {filteredHistory.map((sale, idx) => (
+                                    {pageItems.map((sale, idx) => (
                                        <tr key={idx}>
                                           <td className="py-3 font-mono text-slate-600">{new Date(sale.timestamp).toLocaleDateString()}</td>
                                           <td className="py-3 font-bold text-slate-900">{sale.receiptNo}</td>
@@ -1397,33 +1749,67 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        </tr>
                                     ))}
                                  </tbody>
-                                 <tfoot className="border-t-2 border-slate-200">
-                                    <tr>
-                                       <td colSpan={5} className="py-3 text-right font-black text-sm uppercase">Grand Total</td>
-                                       <td className="py-3 text-right font-black text-sm">{reportTotals.revenue.toLocaleString()}</td>
-                                    </tr>
-                                 </tfoot>
+                                 {/* Grand Total Footer only on the last page */}
+                                 {pageIndex === statementPages.length - 1 && (
+                                    <tfoot className="border-t-2 border-slate-200">
+                                       <tr>
+                                          <td colSpan={5} className="py-3 text-right font-black text-sm uppercase">Grand Total</td>
+                                          <td className="py-3 text-right font-black text-sm">{reportData.totals.revenue.toLocaleString()}</td>
+                                       </tr>
+                                    </tfoot>
+                                 )}
                               </table>
+                              {/* Page Number Footer */}
+                              {statementPages.length > 1 && (
+                                 <div className="text-center text-xs text-slate-400 mt-4 print:block hidden">
+                                    Page {pageIndex + 1} of {statementPages.length}
+                                 </div>
+                              )}
                            </div>
+                        ))}
 
-                           {/* Footer / Signatures */}
-                           <div className="mt-16 pt-8 border-t-2 border-slate-100">
-                              <div className="flex justify-between gap-12">
-                                 <div className="flex-1">
-                                    <div className="h-12 border-b border-slate-900 border-dashed mb-2"></div>
-                                    <p className="text-xs font-bold text-slate-900 uppercase">Prepared By</p>
-                                 </div>
-                                 <div className="flex-1">
-                                    <div className="h-12 border-b border-slate-900 border-dashed mb-2"></div>
-                                    <p className="text-xs font-bold text-slate-900 uppercase">Authorized Signature</p>
-                                 </div>
+                        {/* Footer / Signatures */}
+                        <div className="mt-16 pt-8 border-t-2 border-slate-100">
+                           <div className="flex justify-between gap-12">
+                              <div className="flex-1">
+                                 <div className="h-12 border-b border-slate-900 border-dashed mb-2"></div>
+                                 <p className="text-xs font-bold text-slate-900 uppercase">Prepared By</p>
                               </div>
-                              <p className="text-[10px] text-center text-slate-400 mt-8">
-                                 End of Report • {new Date().getFullYear()} © SNA Mobile Shop
-                              </p>
+                              <div className="flex-1">
+                                 <div className="h-12 border-b border-slate-900 border-dashed mb-2"></div>
+                                 <p className="text-xs font-bold text-slate-900 uppercase">Authorized Signature</p>
+                              </div>
                            </div>
+                           <p className="text-[10px] text-center text-slate-400 mt-8">
+                              End of Report • {new Date().getFullYear()} © SNA Mobile Shop
+                           </p>
                         </div>
-                     )}
+                     </div>
+                  </div>
+                  {/* Pagination Footer for Statement */}
+                  <div className="shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center no-print">
+                     <div>
+                        <p className="text-xs font-bold text-slate-500">
+                           Total Transactions: <span className="text-slate-900">{filteredHistory.length}</span>
+                        </p>
+                     </div>
+                     <div className="flex items-center gap-2">
+                        <button
+                           onClick={() => setStatementCurrentPage(p => Math.max(1, p - 1))}
+                           disabled={statementCurrentPage === 1}
+                           className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold uppercase text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                           Previous
+                        </button>
+                        <span className="text-xs font-bold text-slate-600">Page {statementCurrentPage} of {statementPages.length}</span>
+                        <button
+                           onClick={() => setStatementCurrentPage(p => Math.min(statementPages.length, p + 1))}
+                           disabled={statementCurrentPage >= statementPages.length}
+                           className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold uppercase text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                           Next
+                        </button>
+                     </div>
                   </div>
                </div>
             </div>
@@ -1508,29 +1894,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      <button onClick={() => setSaleToDelete(null)} disabled={isDeleting} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
                      <button onClick={confirmDeleteSale} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2">
                         {isDeleting ? <Loader2 className="animate-spin" size={14} /> : null} {isDeleting ? 'Deleting...' : 'Yes, Delete'}
-                     </button>
-                  </div>
-               </div>
-            </div>
-         )}
-
-         {/* CONFIRMATION MODAL FOR CLEARING HISTORY */}
-         {isClearHistoryConfirmOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6 border border-white/20">
-                  <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                     <AlertTriangle size={40} strokeWidth={2} />
-                  </div>
-                  <div>
-                     <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">System Warning</h3>
-                     <p className="text-sm text-slate-500 font-medium mt-2 leading-relaxed">
-                        You are about to permanently delete <span className="text-slate-900 font-bold">ALL Sales History</span>. This action cannot be undone and will reset revenue metrics.
-                     </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                     <button onClick={() => setIsClearHistoryConfirmOpen(false)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                     <button onClick={performClearHistory} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all">
-                        {clearingHistory ? <Loader2 className="animate-spin inline mr-2" size={12} /> : null} Yes, Clear All
                      </button>
                   </div>
                </div>

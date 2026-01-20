@@ -45,6 +45,7 @@ export interface Product {
   category: string;
   supplierId?: string;
   costPrice: number;
+  middleManPrice?: number;
   selling_price: number;
   minSellingPrice?: number;
   stockQuantity: number;
@@ -129,7 +130,7 @@ export interface SaleItem {
   name: string;
   quantity: number;
   price: number;
-  discount?: number;
+  originalPrice?: number;
   total: number;
   warrantyEndDate?: number;
   sn?: string;
@@ -149,7 +150,7 @@ export interface Sale {
   cashierName: string;
   customerName?: string;
   customerPhone?: string;
-  customerType?: 'Retail' | 'Wholesale';
+  customerType?: 'Retail' | 'Wholesale' | 'Middle Man';
   timestamp: number;
   isSynced?: boolean;
 }

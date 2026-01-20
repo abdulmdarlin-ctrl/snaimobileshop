@@ -57,6 +57,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
       type: ProductType.OTHERS,
       category: '',
       costPrice: 0,
+      middleManPrice: 0,
       selling_price: 0,
       minSellingPrice: 0,
       stockQuantity: 0,
@@ -573,11 +574,16 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                      <div className="space-y-4">
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Pricing & Categorization</h3>
 
-                        <div className="grid grid-cols-2 gap-6">
+                        <div className="grid grid-cols-3 gap-6">
                            <div>
                               <label className="block text-xs font-bold text-slate-600 mb-1.5">Cost Price</label>
                               <input type="number" min="0" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 outline-none transition-all"
                                  value={formData.costPrice} onChange={e => setFormData({ ...formData, costPrice: Number(e.target.value) })} />
+                           </div>
+                           <div>
+                              <label className="block text-xs font-bold text-blue-600 mb-1.5">Middle Man Price</label>
+                              <input type="number" min="0" placeholder="Negotiable Price" className="w-full p-3 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all"
+                                 value={formData.middleManPrice || ''} onChange={e => setFormData({ ...formData, middleManPrice: Number(e.target.value) })} />
                            </div>
                            <div>
                               <label className="block text-xs font-bold text-emerald-600 mb-1.5">Retail Price</label>
@@ -586,7 +592,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                               <div className="mt-2">
                                  <label className="block text-[10px] font-bold text-emerald-400 mb-1">Min Retail</label>
                                  <input type="number" min="0" className="w-full p-2 bg-white border border-emerald-100 text-emerald-600 rounded-md text-xs font-bold outline-none"
-                                    value={formData.minSellingPrice || 0} onChange={e => setFormData({ ...formData, minSellingPrice: Number(e.target.value) })} />
+                                    value={formData.minSellingPrice || ''} onChange={e => setFormData({ ...formData, minSellingPrice: Number(e.target.value) })} />
                               </div>
                            </div>
                         </div>

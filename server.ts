@@ -46,6 +46,7 @@ const initDb = async () => {
         brand VARCHAR(100),
         category VARCHAR(100),
         cost_price DECIMAL(15,2) DEFAULT 0,
+        middle_man_price DECIMAL(15,2) DEFAULT 0,
         selling_price DECIMAL(15,2) DEFAULT 0,
         min_selling_price DECIMAL(15,2) DEFAULT 0,
         stock_quantity INT DEFAULT 0,
@@ -192,23 +193,23 @@ app.use(express.json() as any);
 app.get('/api/v1/products', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, sku, name, type, brand, category, cost_price as "costPrice", 
+      SELECT id, sku, name, type, brand, category, cost_price as "costPrice", middle_man_price as "middleManPrice",
       selling_price, min_selling_price as "minSellingPrice", stock_quantity as "stockQuantity", 
       reorder_level as "reorderLevel", supplier_id as "supplierId", location, warranty_period as "warrantyPeriod"
       FROM products ORDER BY id ASC
     `);
-    const products = result.rows.map(p => ({ ...p, id: p.id.toString(), costPrice: Number(p.costPrice), selling_price: Number(p.selling_price), minSellingPrice: Number(p.minSellingPrice) }));
+    const products = result.rows.map(p => ({ ...p, id: p.id.toString(), costPrice: Number(p.costPrice), middleManPrice: Number(p.middleManPrice), selling_price: Number(p.selling_price), minSellingPrice: Number(p.minSellingPrice) }));
     res.json(products);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/v1/products', async (req, res) => {
-  const { sku, name, type, brand, category, costPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
+  const { sku, name, type, brand, category, costPrice, middleManPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
   try {
     const result = await pool.query(
-      `INSERT INTO products (sku, name, type, brand, category, cost_price, selling_price, min_selling_price, stock_quantity, reorder_level, supplier_id, location, warranty_period) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
-      [sku, name, type, brand, category, costPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod]
+      `INSERT INTO products (sku, name, type, brand, category, cost_price, middle_man_price, selling_price, min_selling_price, stock_quantity, reorder_level, supplier_id, location, warranty_period) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
+      [sku, name, type, brand, category, costPrice, middleManPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod]
     );
     res.json({ id: result.rows[0].id.toString(), ...req.body });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -216,7 +217,7 @@ app.post('/api/v1/products', async (req, res) => {
 
 app.put('/api/v1/products/:id', async (req, res) => {
   const { id } = req.params;
-  const { sku, name, type, brand, category, costPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
+  const { sku, name, type, brand, category, costPrice, middleManPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
   try {
     // Build dynamic query
     const fields = [];
@@ -228,6 +229,7 @@ app.put('/api/v1/products/:id', async (req, res) => {
     if (brand !== undefined) { fields.push(`brand=$${idx++}`); values.push(brand); }
     if (category !== undefined) { fields.push(`category=$${idx++}`); values.push(category); }
     if (costPrice !== undefined) { fields.push(`cost_price=$${idx++}`); values.push(costPrice); }
+    if (middleManPrice !== undefined) { fields.push(`middle_man_price=$${idx++}`); values.push(middleManPrice); }
     if (selling_price !== undefined) { fields.push(`selling_price=$${idx++}`); values.push(selling_price); }
     if (minSellingPrice !== undefined) { fields.push(`min_selling_price=$${idx++}`); values.push(minSellingPrice); }
     if (stockQuantity !== undefined) { fields.push(`stock_quantity=$${idx++}`); values.push(stockQuantity); }

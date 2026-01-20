@@ -9,7 +9,7 @@ import html2canvas from 'html2canvas';
 
 export const printSection = (selector: string, callback?: () => void) => {
   const element = document.querySelector(selector);
-  
+
   if (!element) {
     console.warn(`Print Error: Target element not found. Selector: ${selector}`);
     return;
@@ -17,7 +17,7 @@ export const printSection = (selector: string, callback?: () => void) => {
 
   // Open a new window
   const printWindow = window.open('', '_blank', 'height=800,width=600,menubar=no,toolbar=no,location=no,status=no,titlebar=no');
-  
+
   if (!printWindow) {
     alert('Pop-up blocked! Please allow pop-ups for this site to print receipts.');
     return;
@@ -40,9 +40,8 @@ export const printSection = (selector: string, callback?: () => void) => {
         <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
         <style>
           body { 
-            font-family: 'Inter', sans-serif;
-            background: white;
-            padding: 20px;
+            font-family: 'Inter', sans-serif; /* Fallback font */
+            background: white; /* Ensure white background for printing */
             color: black;
           }
           
@@ -65,11 +64,19 @@ export const printSection = (selector: string, callback?: () => void) => {
           svg, img { max-width: 100%; height: auto; }
           
           @media print {
-            @page { margin: 0; size: auto; }
-            body { padding: 0; margin: 0; }
+            @page { 
+              margin: 0.24in !important; 
+              size: auto; 
+            }
+            body { padding: 0 !important; margin: 0 !important; }
             .no-print { display: none !important; }
             /* Force background graphics for proper visual fidelity */
             * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          }
+
+          /* Fix for tfoot repeating on every page */
+          tfoot {
+            display: table-row-group;
           }
         </style>
       </head>
@@ -94,44 +101,120 @@ export const printSection = (selector: string, callback?: () => void) => {
   `);
 
   printWindow.document.close();
-  
+
   if (callback) callback();
 };
 
 export const exportSectionToPDF = async (selector: string, filename: string = 'SNA_Export.pdf') => {
-  const element = document.querySelector(selector) as HTMLElement;
-  if (!element) return;
+  let element;
+  try {
+    element = document.querySelector(selector) as HTMLElement;
+  } catch (e) {
+    console.error("PDF Export Error: Invalid selector passed", selector);
+    return;
+  }
+  if (!element) {
+    console.warn(`PDF Export Error: Target element not found. Selector: ${selector}`);
+    return;
+  }
 
   document.body.style.cursor = 'wait';
 
   try {
-    const isThermal = element.classList.contains('receipt-mode') || selector.includes('receipt');
     const isA4 = element.classList.contains('receipt-a4-mode');
-    
+
     // Use html2canvas to capture the element as an image
     const canvas = await html2canvas(element, {
       scale: 2, // Slightly lower scale for better performance on mobile
       useCORS: true,
       logging: false,
-      backgroundColor: '#ffffff'
+      backgroundColor: '#ffffff',
+      // These properties help capture content beyond the visible viewport
+      windowWidth: element.scrollWidth,
+      windowHeight: element.scrollHeight,
     });
 
     const imgData = canvas.toDataURL('image/png');
-    
-    // Determine PDF format based on content type
-    const pdf = (isThermal && !isA4) 
-      ? new jsPDF({ orientation: 'p', unit: 'mm', format: [80, 297] }) // 80mm width, long height for thermal
-      : new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
 
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    // Calculate dimensions to fit width
-    const contentWidthMm = (isThermal && !isA4) ? 72 : pageWidth - 20; 
-    const contentHeightMm = (canvas.height * contentWidthMm) / canvas.width;
+    if (isA4) {
+      // Multi-page A4 logic
+      const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+      const margin = 6; // ~0.24 inches
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const usableWidth = pdfWidth - (margin * 2);
+      const usableHeight = pdfHeight - (margin * 2);
 
-    const x = (pageWidth - contentWidthMm) / 2;
-    // Add image to PDF
-    pdf.addImage(imgData, 'PNG', x, 5, contentWidthMm, contentHeightMm, undefined, 'FAST');
-    pdf.save(filename);
+      const imgHeight = (canvas.height * usableWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = margin;
+
+      pdf.addImage(imgData, 'PNG', margin, position, usableWidth, imgHeight);
+      heightLeft -= usableHeight;
+
+      while (heightLeft > 0) {
+        position = -heightLeft + margin;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', margin, position, usableWidth, imgHeight);
+        heightLeft -= usableHeight;
+      }
+
+      // Add page numbers to the footer
+      const pageCount = (pdf.internal as any).getNumberOfPages();
+      if (pageCount > 1) { // Only add if there are multiple pages
+        for (let i = 1; i <= pageCount; i++) {
+          pdf.setPage(i);
+          pdf.setFontSize(8);
+          // Set the font for the page numbers. Options: 'helvetica', 'courier', 'times'
+          pdf.setFont('courier', 'bold');
+          pdf.setTextColor(150); // A soft gray color
+          pdf.text(
+            `Page ${i} of ${pageCount}`,
+            pdf.internal.pageSize.getWidth() / 2, // Center horizontally
+            pdf.internal.pageSize.getHeight() - 5, // 5mm from the bottom
+            { align: 'center' }
+          );
+        }
+      }
+
+      pdf.save(filename);
+    } else {
+      // Logic for single-page or thermal prints
+      const isThermal = element.classList.contains('receipt-mode');
+
+      if (isThermal) {
+        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: [80, 297] });
+        const thermalMargin = 4; // 4mm margin for 72mm content on 80mm paper
+        const contentWidthMm = 80 - (thermalMargin * 2);
+        const contentHeightMm = (canvas.height * contentWidthMm) / canvas.width;
+        pdf.addImage(imgData, 'PNG', thermalMargin, thermalMargin, contentWidthMm, contentHeightMm, undefined, 'FAST');
+        pdf.save(filename);
+      } else {
+        // Standard A4 single page, scaled to fit
+        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4' });
+        const margin = 6; // Standard ~0.24 inch margin
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const usableWidth = pdfWidth - (margin * 2);
+        const usableHeight = pdfHeight - (margin * 2);
+
+        let imgWidth = usableWidth;
+        let imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+        // If the content is too high, scale it down to fit the page
+        if (imgHeight > usableHeight) {
+          imgHeight = usableHeight;
+          imgWidth = (canvas.width * imgHeight) / canvas.height;
+        }
+
+        // Center the image horizontally within the usable area
+        const x = margin + (usableWidth - imgWidth) / 2;
+        const y = margin;
+
+        pdf.addImage(imgData, 'PNG', x, y, imgWidth, imgHeight, undefined, 'FAST');
+        pdf.save(filename);
+      }
+    }
   } catch (error) {
     console.error('PDF Export failed:', error);
     alert('Failed to generate PDF. Please try again.');
