@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Search, Bell, LogOut, Settings, ChevronDown, Box, ShoppingCart, Wrench, Menu, Database, WifiOff, RefreshCw, AlertTriangle, PackageX, ArrowRight, Globe } from 'lucide-react';
-import { User, Product, Sale, Repair, AppSettings } from '../types';
+import { Bell, LogOut, Settings, ChevronDown, Menu, Database, WifiOff, RefreshCw, AlertTriangle, PackageX, Globe, User as UserIcon } from 'lucide-react';
+import { User, Product, AppSettings } from '../types';
 import { Page } from '../App';
 import { db } from '../db';
 
@@ -14,28 +14,17 @@ interface TopbarProps {
   settings: AppSettings | null;
 }
 
-interface SearchResults {
-  products: Product[];
-  sales: Sale[];
-  repairs: Repair[];
-}
-
 const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggle, settings }) => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lowStockItems, setLowStockItems] = useState<Product[]>([]);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [results, setResults] = useState<SearchResults>({ products: [], sales: [], repairs: [] });
-  const [isSearching, setIsSearching] = useState(false);
-  const [showResults, setShowResults] = useState(false);
   const [dbStatus, setDbStatus] = useState<'live' | 'mock'>('live');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
 
   const fetchMeta = async () => {
@@ -60,60 +49,14 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
   }, []);
 
   useEffect(() => {
-    const performSearch = async () => {
-      if (!searchTerm.trim()) {
-        setResults({ products: [], sales: [], repairs: [] });
-        setIsSearching(false);
-        return;
-      }
-
-      setIsSearching(true);
-      try {
-        const query = searchTerm.toLowerCase();
-        const [allProducts, allSales, allRepairs] = await Promise.all([
-          db.products.toArray(),
-          db.sales.toArray(),
-          db.repairs.toArray()
-        ]);
-
-        const filteredProducts = allProducts.filter(p =>
-          p.name.toLowerCase().includes(query) || p.sku.toLowerCase().includes(query)
-        ).slice(0, 5);
-
-        const filteredSales = allSales.filter(s =>
-          s.receiptNo.toLowerCase().includes(query) ||
-          (s.customerName && s.customerName.toLowerCase().includes(query))
-        ).slice(0, 3);
-
-        const filteredRepairs = allRepairs.filter(r =>
-          r.jobCardNo.toLowerCase().includes(query) ||
-          r.customerName.toLowerCase().includes(query) ||
-          r.deviceModel.toLowerCase().includes(query)
-        ).slice(0, 3);
-
-        setResults({
-          products: filteredProducts,
-          sales: filteredSales,
-          repairs: filteredRepairs
-        });
-      } catch (e) {
-        console.error("Search failed", e);
-      } finally {
-        setIsSearching(false);
-      }
-    };
-
-    const timer = setTimeout(performSearch, 300);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setIsProfileOpen(false);
-      }
-      if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
-        setShowResults(false);
       }
       if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
         setIsNotificationsOpen(false);
@@ -121,17 +64,9 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
     };
 
     const handleGlobalShortcuts = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        inputRef.current?.focus();
-        setShowResults(true);
-      }
-
       if (e.key === 'Escape') {
-        setShowResults(false);
         setIsProfileOpen(false);
         setIsNotificationsOpen(false);
-        inputRef.current?.blur();
       }
     };
 
@@ -143,123 +78,82 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
     };
   }, []);
 
-  const handleResultClick = (page: Page) => {
-    onNavigate(page);
-    setShowResults(false);
-    setSearchTerm('');
-  };
-
-  const hasResults = results.products.length > 0 || results.sales.length > 0 || results.repairs.length > 0;
-
   return (
-    <header className="h-16 bg-white flex items-center justify-between px-4 lg:px-8 z-40 shrink-0 border-b border-slate-200 sticky top-0 shadow-sm gap-2 sm:gap-4">
-      <div className="flex items-center gap-2 sm:gap-4">
+    <header className="h-20 bg-white/80 backdrop-blur-xl flex items-center justify-between px-4 lg:px-8 z-40 shrink-0 border-b border-slate-200/60 sticky top-0 w-full transition-all duration-300 shadow-sm">
+
+      {/* Left Section: Brand & Menu */}
+      <div className="flex items-center gap-3 lg:gap-5">
         <button
           onClick={onMenuToggle}
-          className="p-2 rounded-xl text-slate-500 hover:bg-slate-50"
+          className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors lg:hidden"
         >
-          <Menu size={20} />
+          <Menu size={22} strokeWidth={2} />
         </button>
-        <div className="flex items-center gap-3 hidden sm:flex">
-          {settings?.logo && (
-            <div className="w-8 h-8 rounded-lg overflow-hidden border border-slate-100 flex items-center justify-center bg-white shadow-sm">
-              <img src={settings.logo} alt="Logo" className="w-full h-full object-contain" />
-            </div>
-          )}
-          <div className="flex flex-col">
-            <h2 className="text-sm font-black text-slate-900 leading-none truncate uppercase italic tracking-tighter">
-              {settings?.businessName || 'SNA! MOBILE HUB'}
-            </h2>
-            <div className="flex items-center gap-2 mt-1">
-              <button
-                onClick={fetchMeta}
-                className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border transition-all ${dbStatus === 'live'
-                    ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
-                    : 'bg-orange-50 text-orange-600 border-orange-100'
-                  }`}
-              >
-                {dbStatus === 'live' ? <Globe size={10} /> : <WifiOff size={10} />}
-                <span className="text-[8px] font-black uppercase tracking-tighter">
-                  {dbStatus === 'live' ? 'ONLINE NODE (CLOUD)' : 'OFFLINE NODE (LOCAL)'}
-                </span>
-                <RefreshCw size={8} className={isRefreshing ? 'animate-spin' : ''} />
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
 
-      <div className="flex-1 max-w-lg relative" ref={searchRef}>
-        <div className="relative group">
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search catalog... (Ctrl+K)"
-            className="win-input pl-10 pr-4 bg-slate-50 border-transparent focus:bg-white focus:ring-2 focus:ring-orange-500/10 transition-all text-xs h-10 shadow-sm rounded-lg"
-            value={searchTerm}
-            onChange={(e) => {
-              setSearchTerm(e.target.value);
-              setShowResults(true);
-            }}
-            onFocus={() => setShowResults(true)}
-          />
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-        </div>
-
-        {showResults && (searchTerm || isSearching) && (
-          <div className="absolute top-full left-0 right-0 sm:left-auto sm:w-[400px] mt-2 bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden animate-in z-50">
-            {isSearching ? (
-              <div className="p-8 flex flex-col items-center justify-center space-y-3">
-                <div className="w-6 h-6 border-2 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-[10px] font-black uppercase tracking-[3px] text-slate-400">Querying DB...</p>
-              </div>
-            ) : !hasResults ? (
-              <div className="p-8 flex flex-col items-center justify-center text-center">
-                <p className="text-xs font-black text-slate-900 uppercase italic">No Matches Detected</p>
-              </div>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center text-white shadow-lg shadow-slate-900/10 overflow-hidden shrink-0">
+            {settings?.logo ? (
+              <img src={settings.logo} alt="Logo" className="w-full h-full object-cover" />
             ) : (
-              <div className="p-2 space-y-1 max-h-[60vh] overflow-y-auto scrollbar-hide">
-                {results.products.length > 0 && (
-                  <div className="pb-2">
-                    <div className="px-4 py-2 flex items-center gap-2">
-                      <Box size={12} className="text-orange-500" />
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Inventory Assets</span>
-                    </div>
-                    {results.products.map(p => (
-                      <button key={p.id} onClick={() => handleResultClick('inventory')} className="w-full text-left px-4 py-2.5 hover:bg-slate-50 rounded-xl flex justify-between items-center group transition-colors">
-                        <div className="min-w-0">
-                          <p className="text-xs font-black text-slate-900 truncate group-hover:text-orange-600 transition-colors">{p.name}</p>
-                          <p className="text-[9px] font-bold text-slate-400 uppercase">{p.sku}</p>
-                        </div>
-                        <span className="text-[10px] font-black text-slate-900">UGX {p.selling_price.toLocaleString()}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              <span className="font-black text-xs tracking-tighter">SNA</span>
             )}
           </div>
-        )}
+
+          <div className="hidden md:flex flex-col">
+            <h1 className="text-sm font-black text-slate-900 leading-tight tracking-tight uppercase">
+              {settings?.businessName || 'SNA Mobile'}
+            </h1>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <div className={`w-1.5 h-1.5 rounded-full ${dbStatus === 'live' ? 'bg-emerald-500 animate-pulse' : 'bg-orange-500'}`} />
+              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                {dbStatus === 'live' ? 'System Online' : 'Local Mode'}
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div className="flex items-center justify-end">
+      {/* Center Section: Welcome Message */}
+      <div className="flex-1 flex justify-center items-center px-4">
+        <div className="hidden md:flex flex-col items-center">
+          <span className="text-xl font-black text-slate-900">
+            Welcome to Sna! Mobile Shop System
+          </span>
+          <span className="text-xs font-bold text-slate-500">
+            Enterprise Resource Planning
+          </span>
+        </div>
+      </div>
+
+      {/* Right Section: Actions & Profile */}
+      <div className="flex items-center gap-2 sm:gap-4">
+
+        {/* Clock */}
+        <div className="hidden lg:flex flex-col items-end mr-2">
+          <span className="text-xs font-black text-slate-700 leading-none">
+            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <span className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">
+            {currentTime.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+          </span>
+        </div>
+
+        {/* Notifications */}
         <div className="relative" ref={notifRef}>
           <button
             onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
-            className={`p-2 rounded-xl transition-all relative ${isNotificationsOpen ? 'bg-orange-50 text-orange-600' : 'text-slate-500 hover:text-orange-600 hover:bg-orange-50'}`}
+            className={`p-2.5 rounded-xl transition-all relative group ${isNotificationsOpen ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
           >
-            <Bell size={18} />
+            <Bell size={20} strokeWidth={2} />
             {lowStockCount > 0 && (
-              <span className="absolute top-1 right-1 w-3.5 h-3.5 bg-orange-600 text-white text-[7px] font-black rounded-full flex items-center justify-center border-2 border-white animate-pulse">
-                {lowStockCount}
-              </span>
+              <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>
             )}
           </button>
 
           {isNotificationsOpen && (
             <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden animate-in z-50">
               <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
-                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Notifications</span>
+                <span className="text-[10px] font-black text-slate-500 uppercase">Notifications</span>
                 {lowStockCount > 0 && <span className="text-[9px] font-bold text-white bg-orange-600 px-2 py-0.5 rounded-full">{lowStockCount} Alerts</span>}
               </div>
               <div className="max-h-[300px] overflow-y-auto">
@@ -297,23 +191,28 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
           )}
         </div>
 
-        <div className="h-6 w-px bg-slate-200 mx-1 sm:mx-2"></div>
+        <div className="h-8 w-px bg-slate-100 mx-1 hidden sm:block"></div>
 
+        {/* Profile Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
             onClick={() => setIsProfileOpen(!isProfileOpen)}
-            className="flex items-center gap-1 p-1 rounded-xl hover:bg-slate-50 transition-all"
+            className="flex items-center gap-3 p-1.5 pr-3 rounded-xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-100"
           >
-            <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200">
+            <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200 shadow-sm">
               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="av" className="w-full h-full object-cover" />
             </div>
-            <ChevronDown size={14} className={`text-slate-400 hidden sm:block transition-transform ${isProfileOpen ? 'rotate-180' : ''}`} />
+            <div className="hidden sm:flex flex-col items-start">
+              <p className="text-xs font-bold text-slate-700 leading-none">{user.username}</p>
+              <p className="text-[10px] font-medium text-slate-400 uppercase mt-0.5">{user.role}</p>
+            </div>
+            <ChevronDown size={14} className={`text-slate-400 transition-transform duration-300 ${isProfileOpen ? 'rotate-180' : ''}`} />
           </button>
 
           {isProfileOpen && (
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden py-1 animate-in z-50">
               <div className="px-4 py-2 border-b border-slate-50 mb-1">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Logged as</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase">Logged as</p>
                 <p className="text-xs font-bold text-slate-900 truncate">{user.fullName || user.username}</p>
               </div>
               <button onClick={() => { onNavigate('settings'); setIsProfileOpen(false); }} className="w-full flex items-center px-4 py-2 text-xs text-slate-600 hover:bg-slate-50">
