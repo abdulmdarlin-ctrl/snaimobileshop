@@ -15,34 +15,47 @@ export const printSection = (selector: string, callback?: () => void) => {
     return;
   }
 
-  // Open a new window
-  const printWindow = window.open('', '_blank', 'height=800,width=600,menubar=no,toolbar=no,location=no,status=no,titlebar=no');
+  // Create a hidden iframe to avoid popup-blocker and focus issues
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.top = '-10000px'; // Position it far off-screen
+  iframe.style.left = '-10000px';
+  iframe.style.width = '1px'; // Give it minimal dimensions
+  iframe.style.height = '1px';
+  document.body.appendChild(iframe);
 
-  if (!printWindow) {
-    alert('Pop-up blocked! Please allow pop-ups for this site to print receipts.');
+  const iframeDoc = iframe.contentWindow?.document;
+  if (!iframeDoc) {
+    console.error("Could not access iframe document for printing.");
+    document.body.removeChild(iframe);
     return;
   }
 
   // Get content
   const content = element.innerHTML;
 
-  // Construct the document
-  printWindow.document.write(`
+  // Get all stylesheets from the main document to inject them into the iframe
+  const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+    .map(el => el.outerHTML)
+    .join('\n');
+
+  // Construct the document inside the iframe
+  iframeDoc.open();
+  iframeDoc.write(`
     <!DOCTYPE html>
     <html lang="en">
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Print Receipt - SNA! Mobile ERP</title>
-        <!-- Re-inject Tailwind -->
-        <script src="https://cdn.tailwindcss.com"></script>
-        <!-- Re-inject Fonts -->
-        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap" rel="stylesheet">
+        <title>Print - SNA! Mobile ERP</title>
+        ${styles}
         <style>
           body { 
             font-family: 'Inter', sans-serif; /* Fallback font */
             background: white; /* Ensure white background for printing */
             color: black;
+            margin: 0;
+            padding: 0;
           }
           
           /* Thermal Mode specific styling */
@@ -81,26 +94,26 @@ export const printSection = (selector: string, callback?: () => void) => {
         </style>
       </head>
       <body>
-        <div id="print-wrapper">
-          ${content}
-        </div>
-        <script>
-          // Auto-print logic
-          // We wait slightly for Tailwind to parse the classes
-          window.onload = () => {
-             setTimeout(() => {
-               window.focus();
-               window.print();
-               // Automatically close the window after print dialog is dismissed (Print or Cancel)
-               window.close(); 
-             }, 800);
-          };
-        </script>
+        ${content}
       </body>
     </html>
   `);
+  iframeDoc.close();
 
-  printWindow.document.close();
+  iframe.contentWindow.onload = function () {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch (e) {
+      console.error("Printing failed:", e);
+      alert("Could not open print dialog. Please check browser settings.");
+    } finally {
+      // Clean up the iframe after a delay to allow the print dialog to open.
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+      }, 500);
+    }
+  };
 
   if (callback) callback();
 };

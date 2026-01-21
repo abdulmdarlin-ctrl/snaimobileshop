@@ -9,7 +9,7 @@ import {
    TrendingUp, TrendingDown, DollarSign, ShoppingBag, Activity,
    Wrench, Package, ArrowRight, Calendar, Users,
    Plus, Search, Filter, MoreHorizontal, ArrowUpRight, ChevronDown,
-   CreditCard, AlertCircle, CheckCircle2, ShoppingCart, X, AlertTriangle, Receipt, Crown, Percent,
+   CreditCard, AlertCircle, CheckCircle2, ShoppingCart, X, AlertTriangle, Receipt, Crown, Percent, Pause, Clock,
    Smartphone, Headphones, Battery, Box
 } from 'lucide-react';
 
@@ -56,6 +56,31 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    const [recentActivity, setRecentActivity] = useState<any[]>([]);
    const [selectedDate, setSelectedDate] = useState<string | null>(null);
    const [showLowStockBanner, setShowLowStockBanner] = useState(true);
+
+   const [heldSalesInfo, setHeldSalesInfo] = useState<{ count: number, oldestTimestamp: number | null, oldestNote?: string }>({ count: 0, oldestTimestamp: null });
+   const [heldSales, setHeldSales] = useState<any[]>([]);
+   const [isPendingSalesDropdownOpen, setIsPendingSalesDropdownOpen] = useState(false);
+
+   useEffect(() => {
+      const checkHeld = () => {
+         const saved = localStorage.getItem('sna_held_sales');
+         if (saved) {
+            const parsed = JSON.parse(saved);
+            setHeldSales(parsed);
+            if (parsed.length > 0) {
+               const oldestSale = parsed.reduce((prev: any, curr: any) => prev.timestamp < curr.timestamp ? prev : curr);
+               setHeldSalesInfo({ count: parsed.length, oldestTimestamp: oldestSale.timestamp, oldestNote: oldestSale.notes });
+               return;
+            }
+         }
+         setHeldSales([]);
+         setHeldSalesInfo({ count: 0, oldestTimestamp: null });
+      };
+      checkHeld();
+      window.addEventListener('storage', checkHeld);
+      // Listen for custom events for same-tab updates
+      return () => window.removeEventListener('storage', checkHeld);
+   }, []);
 
    useEffect(() => {
       const updateGreeting = () => {
@@ -114,7 +139,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                title: `Sale #${s.receiptNo}`,
                desc: s.customerName || '-',
                amount: s.total,
-               status: 'Paid'
+               status: 'Paid',
+               saleObject: s
             })),
             ...repairs.map(r => ({
                id: r.id,
@@ -211,6 +237,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
       } else if (e.key === 'Escape') {
          setShowSearchResults(false);
          searchInputRef.current?.blur();
+      }
+   };
+
+   const handleActivityClick = (item: any) => {
+      if (item.type === 'sale' && item.saleObject?.id) {
+         sessionStorage.setItem('sna_view_receipt_for_id', item.saleObject.id);
+         onNavigate('sales');
       }
    };
 
@@ -521,6 +554,66 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
          </div>
 
+         {/* Pending Sales Alert */}
+         {heldSalesInfo.count > 0 && (
+            <div className="relative">
+               <div className="relative overflow-hidden bg-amber-50/50 p-4 rounded-2xl border border-amber-200 flex items-center justify-between text-amber-900 animate-in slide-in-from-top-4">
+                  <div className="absolute top-0 left-0 h-0.5 w-full bg-gradient-to-r from-transparent via-amber-500 to-transparent animate-strokemove"></div>
+                  <div className="flex items-center gap-4">
+                     <div className="w-12 h-12 bg-white/50 rounded-xl flex items-center justify-center backdrop-blur-md border border-amber-200/50">
+                        <Pause size={24} className="animate-pulse" />
+                     </div>
+                     <div>
+                        <div className="flex items-center gap-2">
+                           <h3 className="text-sm font-black uppercase tracking-wider text-amber-950">Pending Transactions</h3>
+                           {heldSalesInfo.oldestTimestamp && (
+                              <span className="px-2 py-0.5 bg-amber-200/50 rounded-full text-[10px] font-bold flex items-center gap-1 backdrop-blur-sm">
+                                 <Clock size={10} />
+                                 {(() => {
+                                    const diff = Math.floor((Date.now() - heldSalesInfo.oldestTimestamp) / 60000);
+                                    if (diff < 1) return 'Just now';
+                                    if (diff < 60) return `${diff}m ago`;
+                                    const hours = Math.floor(diff / 60);
+                                    if (hours < 24) return `${hours}h ago`;
+                                    return `${Math.floor(hours / 24)}d ago`;
+                                 })()}
+                              </span>
+                           )}
+                        </div>
+                        <p className="text-xs font-medium text-amber-800/80">
+                           You have <span className="font-bold text-amber-950">{heldSalesInfo.count}</span> unfinished {heldSalesInfo.count === 1 ? 'sale' : 'sales'} waiting in the POS.
+                        </p>
+                     </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                     <button
+                        onClick={() => onNavigate('sales')}
+                        className="px-5 py-2.5 bg-amber-600/10 border border-amber-500/50 text-amber-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-amber-600 hover:text-white transition-all shadow-lg shadow-amber-500/10 flex items-center gap-2 animate-pulse"
+                     >
+                        Resume Now <ArrowRight size={14} strokeWidth={3} />
+                     </button>
+                     <button onClick={() => setIsPendingSalesDropdownOpen(prev => !prev)} className="p-2.5 bg-amber-600/10 border border-amber-500/50 text-amber-700 rounded-xl hover:bg-amber-100 transition-all">
+                        <ChevronDown size={16} className={`transition-transform ${isPendingSalesDropdownOpen ? 'rotate-180' : ''}`} />
+                     </button>
+                  </div>
+               </div>
+               {isPendingSalesDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-lg border border-slate-200 p-4 space-y-3 animate-in fade-in slide-in-from-top-2 z-10">
+                     {heldSales.map(sale => (
+                        <div key={sale.id} className="p-3 bg-slate-50 rounded-lg flex justify-between items-center border border-slate-100">
+                           <div>
+                              <p className="text-xs font-bold text-slate-800">{sale.customerName}</p>
+                              <p className="text-[10px] text-slate-500">{sale.items.length} items • UGX {sale.total.toLocaleString()}</p>
+                              {sale.notes && <p className="text-[10px] text-amber-700 italic">Note: {sale.notes}</p>}
+                           </div>
+                           <button onClick={() => onNavigate('sales')} className="text-[10px] font-bold text-blue-600 hover:underline">Resume</button>
+                        </div>
+                     ))}
+                  </div>
+               )}
+            </div>
+         )}
+
          {/* Quick Stats Row */}
          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-xl hover:shadow-blue-900/5 hover:-translate-y-1 transition-all duration-300 group">
@@ -648,6 +741,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   .mask-linear-fade {
                      mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
                      -webkit-mask-image: linear-gradient(to right, transparent, black 5%, black 95%, transparent);
+                  }
+                  @keyframes strokemove {
+                     0% { transform: translateX(-100%); }
+                     100% { transform: translateX(100%); }
+                  }
+                  .animate-strokemove {
+                      animation: strokemove 3s linear infinite;
                   }
                `}</style>
                </div>
@@ -833,25 +933,33 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      <h3 className="text-lg font-bold text-slate-900">Recent Activity</h3>
                   </div>
                   <div className="space-y-4">
-                     {recentActivity.length > 0 ? recentActivity.map((item, idx) => (
-                        <div key={idx} className="flex items-start gap-3 pb-3 border-b border-slate-50 last:border-0 last:pb-0">
-                           <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${item.type === 'sale' ? 'bg-emerald-500' :
-                              item.type === 'repair' ? 'bg-orange-500' : 'bg-blue-500'
-                              }`} />
-                           <div className="flex-1 min-w-0">
-                              <div className="flex justify-between items-start">
-                                 <p className="text-xs font-bold text-slate-900 truncate">{item.title}</p>
-                                 <span className="text-[9px] text-slate-400 whitespace-nowrap ml-2">
-                                    {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                 </span>
+                     {recentActivity.length > 0 ? recentActivity.map((item, idx) => {
+                        const isClickable = item.type === 'sale';
+                        const Wrapper = isClickable ? 'button' as const : 'div' as const;
+                        return (
+                           <Wrapper
+                              key={idx}
+                              onClick={isClickable ? () => handleActivityClick(item) : undefined}
+                              className={`w-full text-left flex items-start gap-3 pb-3 border-b border-slate-50 last:border-0 last:pb-0 ${isClickable ? 'hover:bg-slate-50 rounded-lg -mx-2 px-2 transition-colors cursor-pointer' : ''}`}
+                           >
+                              <div className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${item.type === 'sale' ? 'bg-emerald-500' :
+                                 item.type === 'repair' ? 'bg-orange-500' : 'bg-blue-500'
+                                 }`} />
+                              <div className="flex-1 min-w-0">
+                                 <div className="flex justify-between items-start">
+                                    <p className="text-xs font-bold text-slate-900 truncate">{item.title}</p>
+                                    <span className="text-[9px] text-slate-400 whitespace-nowrap ml-2">
+                                       {new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                 </div>
+                                 <p className="text-[10px] text-slate-500 truncate">{item.desc}</p>
+                                 {item.amount !== null && (
+                                    <p className="text-[10px] font-bold text-slate-700 mt-0.5">UGX {item.amount.toLocaleString()}</p>
+                                 )}
                               </div>
-                              <p className="text-[10px] text-slate-500 truncate">{item.desc}</p>
-                              {item.amount !== null && (
-                                 <p className="text-[10px] font-bold text-slate-700 mt-0.5">UGX {item.amount.toLocaleString()}</p>
-                              )}
-                           </div>
-                        </div>
-                     )) : (
+                           </Wrapper>
+                        );
+                     }) : (
                         <div className="text-center py-8 text-slate-400 text-xs font-medium">No recent activity.</div>
                      )}
                   </div>

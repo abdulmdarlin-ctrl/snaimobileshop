@@ -151,6 +151,7 @@ export interface Sale {
   customerName?: string;
   customerPhone?: string;
   customerType?: 'Retail' | 'Wholesale' | 'Middle Man';
+  globalDiscountPercentage?: number; // Added to store global discount applied
   timestamp: number;
   isSynced?: boolean;
 }
@@ -231,6 +232,8 @@ export interface AppSettings {
   receiptShowTaxDetail?: boolean;
   receiptShowCashier?: boolean;
   receiptFont?: 'monospace' | 'sans' | 'serif';
+  receiptFontSize?: number;
+  receiptLineHeight?: number;
   theme: 'light' | 'dark';
   themeColor?: string;
   currency?: string;

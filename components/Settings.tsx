@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp, getApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { db } from '../db';
-import { AppSettings, User, UserRole, ProductType, AuditLog } from '../types';
+import { AppSettings, User, UserRole, ProductType, AuditLog, Sale } from '../types';
 import { Page } from '../App';
 import {
    Save, Users, Receipt, Database, Store, ChevronRight,
@@ -16,6 +16,7 @@ import {
    Cpu, Wifi, Bluetooth, ScanBarcode, FileJson, History, X, Filter, Calendar, ChevronDown, Image as ImageIcon
 } from 'lucide-react';
 import { useToast } from './Toast';
+import SnaiLogo from '../assets/SNAI-LOGO.png';
 
 interface SettingsProps {
    user: User;
@@ -37,6 +38,170 @@ const safeStringify = (obj: any, indent = 0) => {
       }
       return value;
    }, indent);
+};
+
+// Mock data for receipt preview
+const mockSaleForPreview: Sale = {
+   id: 'preview-123',
+   receiptNo: 'PREVIEW-001',
+   items: [
+      { productId: 'p1', name: 'Sample Smartphone', quantity: 1, price: 1200000, originalPrice: 1200000, total: 1200000 },
+      { productId: 'p2', name: 'Protective Case', quantity: 1, price: 50000, originalPrice: 60000, total: 50000 },
+   ],
+   subtotal: 1250000,
+   discount: 10000,
+   tax: 225000,
+   total: 1475000,
+   amountPaid: 1500000,
+   balance: 25000,
+   paymentMethod: 'Cash',
+   cashierName: 'Admin',
+   customerName: 'Preview Customer',
+   customerPhone: '0700123456',
+   customerType: 'Retail',
+   globalDiscountPercentage: 0,
+   timestamp: Date.now(),
+};
+
+const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale: Sale }) => {
+   if (!settings || !sale) return null;
+
+   return (
+      <div
+         id="receipt-preview"
+         className={`${settings?.receiptFormat === 'a4' ? 'receipt-a4-mode' : 'receipt-mode'} bg-white p-4 shadow-xl text-black ${settings?.receiptFont === 'sans' ? 'font-sans' :
+            settings?.receiptFont === 'serif' ? 'font-serif' : 'font-mono'
+            } w-full`}
+         style={{
+            fontSize: `${settings?.receiptFontSize || 11}px`,
+            lineHeight: settings?.receiptLineHeight || 1.3
+         }}>
+         {/* Header from POS */}
+         <div className="text-center mb-4">
+            {settings.receiptShowLogo && (
+               <img src={SnaiLogo} className="h-16 mx-auto mb-2 object-contain" alt="Logo" />
+            )}
+            <h2 className="font-bold text-sm uppercase">{settings?.receiptHeader || settings?.businessName || 'SNA! SHOP'}</h2>
+            {settings?.tagline && <div className="text-[10px] italic">"{settings.tagline}"</div>}
+            <div className="text-[10px]">{settings?.address}</div>
+            <div className="text-[10px]">Tel: {settings?.phone}</div>
+            {settings?.tin && <div className="text-[10px]">TIN: {settings.tin}</div>}
+         </div>
+
+         <div className="border-b border-black border-dashed mb-2"></div>
+
+         {/* Meta info from POS */}
+         <div className="flex justify-between mb-1">
+            <span>Date: {new Date(sale.timestamp).toLocaleDateString()}</span>
+            <span>Time: {new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+         </div>
+         <div className="mb-2">
+            <div>Receipt #: {sale.receiptNo}</div>
+            {settings?.receiptShowCashier !== false && <div>Cashier: {sale.cashierName}</div>}
+            {sale.customerName && sale.customerName.trim() !== '' && sale.customerName !== 'Walk-in' && (
+               <div>Cust: {sale.customerName}</div>
+            )}
+         </div>
+
+         <div className="border-b border-black border-dashed mb-2"></div>
+
+         {/* Items from POS */}
+         <div className="mb-2">
+            {sale.items.map((item, i) => {
+               const itemPrice = item.price;
+               const originalItemPrice = item.originalPrice || item.price;
+               const discount = (originalItemPrice - itemPrice) * item.quantity;
+               const itemTotal = item.total;
+               return (
+                  <div key={i} className="mb-1.5">
+                     <div>{item.name}</div>
+                     {sale.customerType === 'Retail' && discount > 0 ? (
+                        <>
+                           <div className="flex justify-between pl-2">
+                              <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
+                              <span className="font-bold">{itemTotal.toLocaleString()}</span>
+                           </div>
+                           <div className="flex justify-between pl-2 text-[9px] text-slate-500">
+                              <span>(was {originalItemPrice.toLocaleString()} each)</span>
+                              <span>Discount: -{discount.toLocaleString()}</span>
+                           </div>
+                        </>
+                     ) : (
+                        <div className="flex justify-between pl-2">
+                           <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
+                           <span className="font-bold">{itemTotal.toLocaleString()}</span>
+                        </div>
+                     )}
+                     {item.warrantyEndDate && (
+                        <div className="pl-2 text-[9px] text-slate-500">
+                           Warranty valid until: {new Date(item.warrantyEndDate).toLocaleDateString()}
+                        </div>
+                     )}
+                  </div>
+               );
+            })}
+         </div>
+
+         <div className="border-b border-black border-dashed mb-2"></div>
+
+         {/* Totals from POS */}
+         <div className="space-y-1 mb-2">
+            {(() => {
+               const grossSubtotalBeforeAnyDiscounts = sale.items.reduce((acc, item) => acc + ((item.originalPrice || item.price) * item.quantity), 0);
+               const itemLevelDiscountAmount = sale.items.reduce((acc, item) => acc + ((item.originalPrice || item.price) - item.price) * item.quantity, 0);
+               const globalDiscountAmountInReceipt = (sale.subtotal * (sale.globalDiscountPercentage || 0)) / 100;
+               const netSubtotalAfterAllDiscounts = sale.subtotal - globalDiscountAmountInReceipt;
+
+               return (
+                  <>
+                     <div className="flex justify-between">
+                        <span>Original Subtotal</span>
+                        <span>{grossSubtotalBeforeAnyDiscounts.toLocaleString()}</span>
+                     </div>
+                     {itemLevelDiscountAmount > 0 && (
+                        <div className="flex justify-between">
+                           <span>Item Discount</span>
+                           <span>-{itemLevelDiscountAmount.toLocaleString()}</span>
+                        </div>
+                     )}
+                     {sale.customerType === 'Retail' && globalDiscountAmountInReceipt > 0 && (
+                        <div className="flex justify-between">
+                           <span>Global Discount ({sale.globalDiscountPercentage}%)</span>
+                           <span>-{globalDiscountAmountInReceipt.toLocaleString()}</span>
+                        </div>
+                     )}
+                     <div className="flex justify-between font-bold border-t border-black border-dashed pt-1 mt-1">
+                        <span>NET SUBTOTAL</span>
+                        <span>{netSubtotalAfterAllDiscounts.toLocaleString()}</span>
+                     </div>
+                  </>
+               );
+            })()}
+            {settings?.receiptShowTaxDetail !== false && sale.tax > 0 && (
+               <div className="flex justify-between">
+                  <span>TAX ({settings?.taxPercentage || 18}%)</span>
+                  <span>{sale.tax.toLocaleString()}</span>
+               </div>
+            )}
+            <div className="flex justify-between font-bold text-sm border-t border-black pt-1 mt-1">
+               <span>TOTAL</span>
+               <span>{sale.total.toLocaleString()}</span>
+            </div>
+         </div>
+
+         {/* Footer from POS */}
+         <div
+            style={{
+               fontSize: `${settings?.receiptFooterFontSize || 10}px`,
+               fontWeight: settings?.receiptFooterBold ? 'bold' : 'normal',
+               fontStyle: settings?.receiptFooterItalic ? 'italic' : 'normal',
+               textAlign: settings?.receiptFooterAlign || 'center'
+            }}
+         >
+            {settings?.receiptFooter || 'Thank you for shopping with us!'}
+         </div>
+      </div>
+   );
 };
 
 const ToggleSwitch = ({ checked, onChange }: { checked: boolean; onChange: (val: boolean) => void }) => (
@@ -142,6 +307,13 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
             receiptFooterAlign: 'center',
             receiptFormat: 'thermal',
             receiptShowLogo: true,
+            receiptShowCashier: true,
+            receiptShowTaxDetail: true,
+            receiptFooterBold: false,
+            receiptFooterItalic: false,
+            receiptFont: 'monospace',
+            receiptFontSize: 11,
+            receiptLineHeight: 1.3,
             theme: 'light',
             themeColor: '#ef4444',
             invoicePrefix: 'INV',
@@ -1041,24 +1213,108 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                )}
 
                {activeTab === 'receipts' && isAdmin && (
-                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 max-w-3xl">
-                     <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm">
-                        <div className="flex items-center gap-2 mb-6">
-                           <ScrollText className="text-orange-500" size={20} />
-                           <h3 className="text-lg font-black text-slate-900 uppercase">Receipt Configuration</h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4">
+                     <div className="space-y-8">
+                        <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm">
+                           <div className="flex items-center gap-2 mb-6">
+                              <ScrollText className="text-orange-500" size={20} />
+                              <h3 className="text-lg font-black text-slate-900 uppercase">Receipt Configuration</h3>
+                           </div>
+                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                              <div className="space-y-2">
+                                 <label className="win-label">Receipt Header</label>
+                                 <input className="win-input h-12" value={settings.receiptHeader} onChange={e => setSettings(s => s ? { ...s, receiptHeader: e.target.value } : null)} />
+                              </div>
+                              <div className="space-y-2">
+                                 <label className="win-label">Tax ID / TIN</label>
+                                 <input className="win-input h-12" value={settings.tin || ''} onChange={e => setSettings(s => s ? { ...s, tin: e.target.value } : null)} />
+                              </div>
+                              <div className="space-y-2">
+                                 <label className="win-label">Receipt Format</label>
+                                 <select
+                                    className="win-input h-12"
+                                    value={settings.receiptFormat || 'thermal'}
+                                    onChange={e => setSettings(s => s ? { ...s, receiptFormat: e.target.value as any } : null)}
+                                 >
+                                    <option value="thermal">Thermal (80mm)</option>
+                                    <option value="a4">A4</option>
+                                 </select>
+                              </div>
+                              <div className="col-span-full space-y-2">
+                                 <label className="win-label">Receipt Footer Message</label>
+                                 <textarea className="win-input p-4 h-24 resize-none" value={settings.receiptFooter} onChange={e => setSettings(s => s ? { ...s, receiptFooter: e.target.value } : null)} />
+                                 <div className="flex items-center gap-4 pt-2">
+                                    <div className="flex items-center gap-2">
+                                       <label className="text-xs font-bold text-slate-500">Align:</label>
+                                       <div className="flex p-1 bg-slate-100 rounded-lg">
+                                          <button type="button" onClick={() => setSettings(s => s ? { ...s, receiptFooterAlign: 'left' } : null)} className={`p-1.5 rounded ${settings.receiptFooterAlign === 'left' ? 'bg-white shadow-sm' : ''}`}><AlignLeft size={16} /></button>
+                                          <button type="button" onClick={() => setSettings(s => s ? { ...s, receiptFooterAlign: 'center' } : null)} className={`p-1.5 rounded ${settings.receiptFooterAlign === 'center' ? 'bg-white shadow-sm' : ''}`}><AlignCenter size={16} /></button>
+                                          <button type="button" onClick={() => setSettings(s => s ? { ...s, receiptFooterAlign: 'right' } : null)} className={`p-1.5 rounded ${settings.receiptFooterAlign === 'right' ? 'bg-white shadow-sm' : ''}`}><AlignRight size={16} /></button>
+                                       </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                       <label className="text-xs font-bold text-slate-500">Bold:</label>
+                                       <ToggleSwitch checked={settings.receiptFooterBold ?? false} onChange={v => setSettings(s => s ? { ...s, receiptFooterBold: v } : null)} />
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                       <label className="text-xs font-bold text-slate-500">Italic:</label>
+                                       <ToggleSwitch checked={settings.receiptFooterItalic ?? false} onChange={v => setSettings(s => s ? { ...s, receiptFooterItalic: v } : null)} />
+                                    </div>
+                                 </div>
+                              </div>
+                           </div>
+                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 mt-6 border-t border-slate-100">
+                              <div className="flex items-center justify-between">
+                                 <label className="text-sm font-bold text-slate-700">Show Logo</label>
+                                 <ToggleSwitch checked={settings.receiptShowLogo ?? true} onChange={v => setSettings(s => s ? { ...s, receiptShowLogo: v } : null)} />
+                              </div>
+                              <div className="flex items-center justify-between">
+                                 <label className="text-sm font-bold text-slate-700">Show Cashier</label>
+                                 <ToggleSwitch checked={settings.receiptShowCashier ?? true} onChange={v => setSettings(s => s ? { ...s, receiptShowCashier: v } : null)} />
+                              </div>
+                              <div className="flex items-center justify-between">
+                                 <label className="text-sm font-bold text-slate-700">Show Tax Detail</label>
+                                 <ToggleSwitch checked={settings.receiptShowTaxDetail ?? true} onChange={v => setSettings(s => s ? { ...s, receiptShowTaxDetail: v } : null)} />
+                              </div>
+                           </div>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                           <div className="space-y-2">
-                              <label className="win-label">Receipt Header</label>
-                              <input className="win-input h-12" value={settings.receiptHeader} onChange={e => setSettings(s => s ? { ...s, receiptHeader: e.target.value } : null)} />
+
+                        <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm">
+                           <div className="flex items-center gap-2 mb-6">
+                              <Type className="text-blue-500" size={20} />
+                              <h3 className="text-lg font-black text-slate-900 uppercase">Receipt Typography</h3>
                            </div>
-                           <div className="space-y-2">
-                              <label className="win-label">Tax ID / TIN</label>
-                              <input className="win-input h-12" value={settings.tin || ''} onChange={e => setSettings(s => s ? { ...s, tin: e.target.value } : null)} />
+                           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                              <div className="space-y-2">
+                                 <label className="win-label">Font Family</label>
+                                 <select
+                                    className="win-input h-12"
+                                    value={settings.receiptFont || 'monospace'}
+                                    onChange={e => setSettings(s => s ? { ...s, receiptFont: e.target.value as any } : null)}
+                                 >
+                                    <option value="monospace">Monospace (Default)</option>
+                                    <option value="sans">Sans-Serif</option>
+                                    <option value="serif">Serif</option>
+                                 </select>
+                              </div>
+                              <div className="space-y-2">
+                                 <label className="win-label">Font Size (px)</label>
+                                 <input type="number" className="win-input h-12" value={settings.receiptFontSize || 11} onChange={e => setSettings(s => s ? { ...s, receiptFontSize: Number(e.target.value) } : null)} />
+                              </div>
+                              <div className="space-y-2">
+                                 <label className="win-label">Line Height</label>
+                                 <input type="number" step="0.1" className="win-input h-12" value={settings.receiptLineHeight || 1.3} onChange={e => setSettings(s => s ? { ...s, receiptLineHeight: Number(e.target.value) } : null)} />
+                              </div>
                            </div>
-                           <div className="col-span-full space-y-2">
-                              <label className="win-label">Receipt Footer Message</label>
-                              <textarea className="win-input p-4 h-24 resize-none" value={settings.receiptFooter} onChange={e => setSettings(s => s ? { ...s, receiptFooter: e.target.value } : null)} />
+                        </div>
+                     </div>
+
+                     {/* Right: Live Preview */}
+                     <div className="hidden lg:block">
+                        <div className="sticky top-24">
+                           <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest mb-4 ml-2">Live Preview</h3>
+                           <div className="bg-slate-200 p-4 rounded-2xl flex justify-center">
+                              <ReceiptPreview settings={settings} sale={mockSaleForPreview} />
                            </div>
                         </div>
                      </div>
@@ -1215,140 +1471,148 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
          </div>
 
          {/* --- USER MODAL --- */}
-         {isUserModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20">
-                  <div className="p-8 border-b border-slate-50 flex items-center justify-between">
-                     <h2 className="text-xl font-black text-slate-900 italic uppercase tracking-tighter">{editingUser ? 'Edit User' : 'New User'}</h2>
-                     <button onClick={() => setIsUserModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-50 transition-all"><X size={24} /></button>
-                  </div>
-                  <div className="p-8 space-y-6">
-                     <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                           <label className="win-label">Username</label>
-                           <input className="win-input h-12" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} disabled={!!editingUser && editingUser.id !== currentUser.id} />
-                        </div>
-                        <div className="space-y-2">
-                           <label className="win-label">Full Name</label>
-                           <input className="win-input h-12" value={userForm.fullName} onChange={e => setUserForm({ ...userForm, fullName: e.target.value })} />
-                        </div>
+         {
+            isUserModalOpen && (
+               <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
+                  <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20">
+                     <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+                        <h2 className="text-xl font-black text-slate-900 italic uppercase tracking-tighter">{editingUser ? 'Edit User' : 'New User'}</h2>
+                        <button onClick={() => setIsUserModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-50 transition-all"><X size={24} /></button>
                      </div>
-                     <div className="space-y-2">
-                        <label className="win-label">Role</label>
-                        <select className="win-input h-12" value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value as UserRole })} disabled={editingUser?.id === currentUser.id && currentUser.role === UserRole.ADMIN}>
-                           {Object.values(UserRole).map(r => <option key={r} value={r}>{r}</option>)}
-                        </select>
-                     </div>
-
-                     {/* Added Last Login Field for visibility */}
-                     {editingUser && (
-                        <div className="space-y-2">
-                           <label className="win-label">Last Login Timestamp</label>
-                           <div className="relative">
-                              <input
-                                 disabled
-                                 className="win-input h-12 bg-slate-50 text-slate-500 pl-10 font-mono text-xs"
-                                 value={editingUser.lastLogin ? new Date(editingUser.lastLogin).toLocaleString() : 'Never Logged In'}
-                              />
-                              <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                     <div className="p-8 space-y-6">
+                        <div className="grid grid-cols-2 gap-4">
+                           <div className="space-y-2">
+                              <label className="win-label">Username</label>
+                              <input className="win-input h-12" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} disabled={!!editingUser && editingUser.id !== currentUser.id} />
+                           </div>
+                           <div className="space-y-2">
+                              <label className="win-label">Full Name</label>
+                              <input className="win-input h-12" value={userForm.fullName} onChange={e => setUserForm({ ...userForm, fullName: e.target.value })} />
                            </div>
                         </div>
-                     )}
+                        <div className="space-y-2">
+                           <label className="win-label">Role</label>
+                           <select className="win-input h-12" value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value as UserRole })} disabled={editingUser?.id === currentUser.id && currentUser.role === UserRole.ADMIN}>
+                              {Object.values(UserRole).map(r => <option key={r} value={r}>{r}</option>)}
+                           </select>
+                        </div>
 
-                     <div className="space-y-2">
-                        <label className="win-label">Password {editingUser && '(Optional)'}</label>
-                        <div className="relative">
-                           <input type={showPassword ? "text" : "password"} className="win-input h-12 pr-10" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder={editingUser ? "Leave blank to keep current" : ""} />
-                           <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        {/* Added Last Login Field for visibility */}
+                        {editingUser && (
+                           <div className="space-y-2">
+                              <label className="win-label">Last Login Timestamp</label>
+                              <div className="relative">
+                                 <input
+                                    disabled
+                                    className="win-input h-12 bg-slate-50 text-slate-500 pl-10 font-mono text-xs"
+                                    value={editingUser.lastLogin ? new Date(editingUser.lastLogin).toLocaleString() : 'Never Logged In'}
+                                 />
+                                 <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                              </div>
+                           </div>
+                        )}
+
+                        <div className="space-y-2">
+                           <label className="win-label">Password {editingUser && '(Optional)'}</label>
+                           <div className="relative">
+                              <input type={showPassword ? "text" : "password"} className="win-input h-12 pr-10" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder={editingUser ? "Leave blank to keep current" : ""} />
+                              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                              </button>
+                           </div>
+                        </div>
+                        <div className="pt-4 flex gap-4">
+                           <button onClick={() => setIsUserModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-slate-200">Cancel</button>
+                           <button onClick={handleUserSave} disabled={userSaving} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-black flex items-center justify-center gap-2">
+                              {userSaving && <Loader2 size={14} className="animate-spin" />}
+                              {userSaving ? 'Saving...' : 'Save User'}
                            </button>
                         </div>
                      </div>
-                     <div className="pt-4 flex gap-4">
-                        <button onClick={() => setIsUserModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-slate-200">Cancel</button>
-                        <button onClick={handleUserSave} disabled={userSaving} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-black flex items-center justify-center gap-2">
-                           {userSaving && <Loader2 size={14} className="animate-spin" />}
-                           {userSaving ? 'Saving...' : 'Save User'}
-                        </button>
-                     </div>
                   </div>
                </div>
-            </div>
-         )}
+            )
+         }
 
          {/* --- IMPORT MODAL --- */}
-         {isImportModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20">
-                  <div className="p-8 border-b border-slate-50 flex items-center justify-between">
-                     <h2 className="text-xl font-black text-slate-900 italic uppercase tracking-tighter">Bulk Import Products</h2>
-                     <button onClick={() => setIsImportModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-50 transition-all"><X size={24} /></button>
+         {
+            isImportModalOpen && (
+               <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
+                  <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20">
+                     <div className="p-8 border-b border-slate-50 flex items-center justify-between">
+                        <h2 className="text-xl font-black text-slate-900 italic uppercase tracking-tighter">Bulk Import Products</h2>
+                        <button onClick={() => setIsImportModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-50 transition-all"><X size={24} /></button>
+                     </div>
+                     <div className="p-8 space-y-6">
+                        <p className="text-sm text-slate-500">Paste CSV data (Name, SKU, Category, Cost, Price, Stock)</p>
+                        <textarea
+                           className="w-full h-64 p-4 bg-slate-50 rounded-2xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
+                           placeholder="iPhone 13, IPH13, Phones, 2000000, 2500000, 10..."
+                           value={importText}
+                           onChange={e => setImportText(e.target.value)}
+                        />
+                        <div className="flex gap-4">
+                           <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-slate-200">Cancel</button>
+                           <button onClick={handleImportProducts} disabled={importing} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-black disabled:opacity-70">
+                              {importing ? 'Importing...' : 'Process Import'}
+                           </button>
+                        </div>
+                     </div>
                   </div>
-                  <div className="p-8 space-y-6">
-                     <p className="text-sm text-slate-500">Paste CSV data (Name, SKU, Category, Cost, Price, Stock)</p>
-                     <textarea
-                        className="w-full h-64 p-4 bg-slate-50 rounded-2xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
-                        placeholder="iPhone 13, IPH13, Phones, 2000000, 2500000, 10..."
-                        value={importText}
-                        onChange={e => setImportText(e.target.value)}
-                     />
-                     <div className="flex gap-4">
-                        <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-slate-200">Cancel</button>
-                        <button onClick={handleImportProducts} disabled={importing} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-black disabled:opacity-70">
-                           {importing ? 'Importing...' : 'Process Import'}
+               </div>
+            )
+         }
+
+         {
+            userToDelete && (
+               <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
+                  <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6">
+                     <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
+                        <AlertTriangle size={40} strokeWidth={2} />
+                     </div>
+                     <div>
+                        <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Confirm Deletion</h3>
+                        <p className="text-sm text-slate-500 font-medium mt-2 leading-relaxed">
+                           Are you sure you want to permanently delete the user <span className="text-slate-900 font-bold">"{userToDelete.username}"</span>?
+                        </p>
+                     </div>
+                     <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => setUserToDelete(null)} disabled={isDeletingUser} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
+                        <button onClick={confirmDeleteUser} disabled={isDeletingUser} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2">
+                           {isDeletingUser ? <Loader2 className="animate-spin" size={14} /> : null} {isDeletingUser ? 'Deleting...' : 'Yes, Delete'}
                         </button>
                      </div>
                   </div>
                </div>
-            </div>
-         )}
-
-         {userToDelete && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6">
-                  <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                     <AlertTriangle size={40} strokeWidth={2} />
-                  </div>
-                  <div>
-                     <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Confirm Deletion</h3>
-                     <p className="text-sm text-slate-500 font-medium mt-2 leading-relaxed">
-                        Are you sure you want to permanently delete the user <span className="text-slate-900 font-bold">"{userToDelete.username}"</span>?
-                     </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                     <button onClick={() => setUserToDelete(null)} disabled={isDeletingUser} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                     <button onClick={confirmDeleteUser} disabled={isDeletingUser} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2">
-                        {isDeletingUser ? <Loader2 className="animate-spin" size={14} /> : null} {isDeletingUser ? 'Deleting...' : 'Yes, Delete'}
-                     </button>
-                  </div>
-               </div>
-            </div>
-         )}
+            )
+         }
 
          {/* CONFIRMATION MODAL FOR CLEARING AUDIT LOGS */}
-         {isClearLogsConfirmOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6 border border-white/20">
-                  <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                     <AlertTriangle size={40} strokeWidth={2} />
-                  </div>
-                  <div>
-                     <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">System Warning</h3>
-                     <p className="text-sm text-slate-500 font-medium mt-2 leading-relaxed">
-                        You are about to permanently delete <span className="text-slate-900 font-bold">ALL Audit Logs</span>. This action cannot be undone and removes all activity history.
-                     </p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                     <button onClick={() => setIsClearLogsConfirmOpen(false)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                     <button onClick={performClearLogs} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all">
-                        {clearingLogs ? <Loader2 className="animate-spin inline mr-2" size={12} /> : null} Yes, Clear All
-                     </button>
+         {
+            isClearLogsConfirmOpen && (
+               <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
+                  <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6 border border-white/20">
+                     <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
+                        <AlertTriangle size={40} strokeWidth={2} />
+                     </div>
+                     <div>
+                        <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">System Warning</h3>
+                        <p className="text-sm text-slate-500 font-medium mt-2 leading-relaxed">
+                           You are about to permanently delete <span className="text-slate-900 font-bold">ALL Audit Logs</span>. This action cannot be undone and removes all activity history.
+                        </p>
+                     </div>
+                     <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => setIsClearLogsConfirmOpen(false)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
+                        <button onClick={performClearLogs} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all">
+                           {clearingLogs ? <Loader2 className="animate-spin inline mr-2" size={12} /> : null} Yes, Clear All
+                        </button>
+                     </div>
                   </div>
                </div>
-            </div>
-         )}
+            )
+         }
 
-      </div>
+      </div >
    );
 };
 
