@@ -7,8 +7,8 @@ import {
    User as UserIcon, AlertCircle, Package, Receipt, Edit, Tag,
    ChevronRight, Smartphone, Headphones, Battery, Box, Filter, TrendingUp as TrendingUpIcon, Pause, PlayCircle,
    Loader2, AlertTriangle, ScanBarcode, Download, FileText, Calendar, Percent,
-   Eraser, Store, LayoutGrid, List as ListIcon, TrendingUp, DollarSign, UserPlus, MapPin, Mail, Phone,
-   ArrowUpRight, Sparkles, Zap
+   Eraser, Store, LayoutGrid, List as ListIcon, DollarSign, UserPlus, MapPin, Mail, Phone,
+   ArrowUpRight, Sparkles, Zap, MessageCircle
 } from 'lucide-react';
 import { printSection, exportSectionToPDF } from '../utils/printExport';
 import { useToast } from './Toast';
@@ -845,6 +845,27 @@ const POS: React.FC<POSProps> = ({ user }) => {
       showToast("Opening email client...", 'info');
    };
 
+   const handleSendReceiptWhatsApp = () => {
+      if (!lastSale) return;
+      const businessName = settings?.businessName || 'SNA Mobile Shop';
+      const total = lastSale.total.toLocaleString();
+      const receiptNo = lastSale.receiptNo;
+
+      let message = `*Receipt from ${businessName}*\n\n`;
+      message += `*Receipt No:* ${receiptNo}\n`;
+      message += `*Date:* ${new Date(lastSale.timestamp).toLocaleDateString()}\n`;
+      message += `*Total:* ${total} UGX\n\n`;
+      message += `*Items:*\n`;
+      lastSale.items.forEach(item => {
+         message += `• ${item.name} (x${item.quantity}) - ${item.total.toLocaleString()} UGX\n`;
+      });
+      message += `\nThank you for shopping with us!`;
+
+      const encodedMessage = encodeURIComponent(message);
+      const phone = lastSale.customerPhone?.replace(/\D/g, '') || '';
+      window.open(`https://wa.me/${phone}?text=${encodedMessage}`, '_blank');
+   };
+
    const getProductIcon = (type: ProductType) => {
       switch (type) {
          case ProductType.PHONE: return <Smartphone size={24} strokeWidth={1.5} />;
@@ -975,7 +996,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                               <div>
                                  <p className="text-[11px] font-black text-slate-300 uppercase tracking-widest leading-none mb-0.5">Price</p>
                                  <p className="text-base font-black text-slate-900">
-                                    <span className="text-xs text-slate-400 mr-0.5 font-light">UGX</span>
+                                    <span className="text-xs text-slate-400 mr-0.5 font-normal">UGX</span>
                                     {product.selling_price.toLocaleString()}
                                  </p>
                               </div>
@@ -1045,7 +1066,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   <div className="h-full flex flex-col items-center justify-center text-slate-300">
                      <ShoppingCart size={64} className="mb-4 opacity-10" />
                      <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">Cart is empty</p>
-                     <p className="text-xs font-light text-slate-400 mt-2">Add items to begin transaction</p>
+                     <p className="text-xs font-normal text-slate-400 mt-2">Add items to begin transaction</p>
                   </div>
                ) : (
                   cart.map((item, idx) => (
@@ -1083,18 +1104,18 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Pricing: {pricingMode}</span>
                </div>
                <div className="space-y-2.5 mb-6">
-                  <div className="flex justify-between text-xs font-light text-slate-500">
+                  <div className="flex justify-between text-xs font-normal text-slate-500">
                      <span>Subtotal</span>
                      <span className="font-bold">{subtotal.toLocaleString()}</span>
                   </div>
                   {totalDiscount > 0 && pricingMode === 'Retail' && (
-                     <div className="flex justify-between text-xs font-light text-emerald-600">
+                     <div className="flex justify-between text-xs font-normal text-emerald-600">
                         <span>Discount Applied</span>
                         <span className="font-bold">-{totalDiscount.toLocaleString()}</span>
                      </div>
                   )}
                   {settings?.taxEnabled && (
-                     <div className="flex justify-between text-xs font-light text-slate-500">
+                     <div className="flex justify-between text-xs font-normal text-slate-500">
                         <span>Tax ({settings.taxPercentage}%)</span>
                         <span className="font-bold">{tax.toLocaleString()}</span>
                      </div>
@@ -1102,7 +1123,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   <div className="flex justify-between items-baseline pt-4 border-t border-dashed border-slate-200">
                      <span className="text-sm font-black text-slate-900 uppercase tracking-wider">Total Payable</span>
                      <span className="text-3xl font-black text-emerald-600">
-                        <span className="text-xs text-slate-400 mr-1 font-light">UGX</span>
+                        <span className="text-xs text-slate-400 mr-1 font-normal">UGX</span>
                         {total.toLocaleString()}
                      </span>
                   </div>
@@ -1274,39 +1295,60 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         )}
                      </div>
                   ) : (
-                     <div className="bg-slate-50 p-3 rounded-xl space-y-2 animate-in slide-in-from-right-5">
+                     <div className="bg-slate-50 p-4 rounded-2xl space-y-4 animate-in slide-in-from-right-5 border border-slate-100">
                         <div className="flex justify-between items-center mb-1">
-                           <span className="text-xs font-bold text-slate-400 uppercase">New Customer Profile</span>
-                           <button onClick={() => setIsCreatingCustomer(false)} className="text-xs text-red-500 hover:underline">Cancel</button>
+                           <div className="flex items-center gap-2">
+                              <UserPlus size={16} className="text-blue-600" />
+                              <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">New Customer Profile</span>
+                           </div>
+                           <button onClick={() => setIsCreatingCustomer(false)} className="text-xs text-red-500 hover:underline font-bold">Cancel</button>
                         </div>
-                        <input
-                           className="w-full h-9 bg-white border border-slate-200 rounded-lg px-3 text-xs font-bold outline-none focus:border-blue-400"
-                           placeholder="Full Name (Required)"
-                           value={newCustomerForm.name}
-                           onChange={e => setNewCustomerForm({ ...newCustomerForm, name: e.target.value })}
-                        />
-                        <div className="grid grid-cols-2 gap-2">
-                           <input
-                              className="w-full h-9 bg-white border border-slate-200 rounded-lg px-3 text-xs outline-none focus:border-blue-400"
-                              placeholder="Phone (Optional)"
-                              value={newCustomerForm.phone}
-                              onChange={e => setNewCustomerForm({ ...newCustomerForm, phone: e.target.value })}
-                           />
-                           <input
-                              className="w-full h-9 bg-white border border-slate-200 rounded-lg px-3 text-xs outline-none focus:border-blue-400"
-                              placeholder="Email (Optional)"
-                              value={newCustomerForm.email}
-                              onChange={e => setNewCustomerForm({ ...newCustomerForm, email: e.target.value })}
-                           />
+
+                        <div className="space-y-3">
+                           <div className="relative">
+                              <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                              <input
+                                 className="w-full h-10 bg-white border border-slate-200 rounded-xl pl-9 pr-4 text-xs font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 transition-all"
+                                 placeholder="Full Name (Required)"
+                                 value={newCustomerForm.name}
+                                 onChange={e => setNewCustomerForm({ ...newCustomerForm, name: e.target.value })}
+                              />
+                           </div>
+
+                           <div className="grid grid-cols-2 gap-3">
+                              <div className="relative">
+                                 <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                                 <input
+                                    className="w-full h-10 bg-white border border-slate-200 rounded-xl pl-9 pr-4 text-xs font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 transition-all"
+                                    placeholder="Phone"
+                                    value={newCustomerForm.phone}
+                                    onChange={e => setNewCustomerForm({ ...newCustomerForm, phone: e.target.value })}
+                                 />
+                              </div>
+                              <div className="relative">
+                                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                                 <input
+                                    className="w-full h-10 bg-white border border-slate-200 rounded-xl pl-9 pr-4 text-xs font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 transition-all"
+                                    placeholder="Email"
+                                    value={newCustomerForm.email}
+                                    onChange={e => setNewCustomerForm({ ...newCustomerForm, email: e.target.value })}
+                                 />
+                              </div>
+                           </div>
+
+                           <div className="relative">
+                              <MapPin className="absolute left-3 top-3 text-slate-400" size={14} />
+                              <textarea
+                                 className="w-full h-16 bg-white border border-slate-200 rounded-xl pl-9 pr-4 py-2 text-xs font-bold outline-none focus:border-blue-400 focus:ring-4 focus:ring-blue-50 transition-all resize-none"
+                                 placeholder="Physical Address"
+                                 value={newCustomerForm.address}
+                                 onChange={e => setNewCustomerForm({ ...newCustomerForm, address: e.target.value })}
+                              />
+                           </div>
                         </div>
-                        <input
-                           className="w-full h-9 bg-white border border-slate-200 rounded-lg px-3 text-xs outline-none focus:border-blue-400"
-                           placeholder="Address (Optional)"
-                           value={newCustomerForm.address}
-                           onChange={e => setNewCustomerForm({ ...newCustomerForm, address: e.target.value })}
-                        />
-                        <button onClick={handleCreateCustomer} className="w-full py-2 bg-blue-600 text-white rounded-lg text-xs font-bold uppercase hover:bg-blue-700 transition-colors">
-                           Save & Select Customer
+
+                        <button onClick={handleCreateCustomer} className="w-full py-3 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2">
+                           <Check size={16} strokeWidth={3} /> Save & Select
                         </button>
                      </div>
                   )}
@@ -1542,10 +1584,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         <p>{settings?.receiptFooter || 'Thank you for shopping with us!'}</p>
                         <p className="mt-1 font-normal text-[10px] italic">Powered by SNA Mobile Shop</p>
                         <div className="mt-3 flex justify-center">
-                           <QRCode
-                              value={`R:${lastSale.receiptNo}|T:${lastSale.total}|D:${new Date(lastSale.timestamp).toISOString()}`}
-                              size={64}
-                           />
+                           {qrCodeDataURL && <img src={qrCodeDataURL} alt="Receipt QR" className="w-16 h-16" />}
                         </div>
                      </div>
                   </div>
@@ -1653,7 +1692,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      </div>
                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Total Revenue</p>
                      <p className="text-4xl font-black tracking-tighter">
-                        <span className="text-xl text-slate-500 mr-1 font-light">UGX</span>
+                        <span className="text-xl text-slate-500 mr-1 font-normal">UGX</span>
                         {reportData.totals.revenue.toLocaleString()}
                      </p>
                   </div>
@@ -1663,7 +1702,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      </div>
                      <p className="text-xs font-bold text-white/70 uppercase tracking-widest mb-2">Total Profit</p>
                      <p className="text-4xl font-black tracking-tighter">
-                        <span className="text-xl text-white/80 mr-1 font-light">UGX</span>
+                        <span className="text-xl text-white/80 mr-1 font-normal">UGX</span>
                         {reportData.totals.profit.toLocaleString()}
                      </p>
                   </div>
@@ -1820,7 +1859,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        <td className="px-6 py-4">
                                           <div className="flex flex-col">
                                              <span className="text-xs font-bold text-slate-900">{new Date(sale.timestamp).toLocaleDateString()}</span>
-                                             <span className="text-xs font-light text-slate-400">{new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                             <span className="text-xs font-normal text-slate-400">{new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                           </div>
                                        </td>
                                        <td className="px-6 py-4">
@@ -2299,7 +2338,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         <label className="text-xs font-bold text-slate-500 uppercase tracking-wide ml-1">Note / Description</label>
                         <textarea
                            autoFocus
-                           className="w-full h-24 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-light outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none"
+                           className="w-full h-24 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-sm font-normal outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none"
                            placeholder="e.g. Customer went to get cash..."
                            value={holdNote}
                            onChange={e => setHoldNote(e.target.value)}
@@ -2348,7 +2387,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     <span className="text-xs font-black text-slate-900 truncate">{s.customerName}</span>
                                     <span className="text-[11px] font-bold text-slate-400 uppercase bg-slate-100 px-1.5 py-0.5 rounded">{s.items.length} Items</span>
                                  </div>
-                                 <p className="text-xs text-slate-400 font-light">
+                                 <p className="text-xs text-slate-400 font-normal">
                                     {new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • UGX {s.total.toLocaleString()}
                                  </p>
                                  {s.notes && (
@@ -2450,7 +2489,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      </div>
                      <div>
                         <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Are you sure?</h3>
-                        <p className="text-sm text-slate-500 font-light mt-2 leading-relaxed">
+                        <p className="text-sm text-slate-500 font-normal mt-2 leading-relaxed">
                            This will permanently remove invoice <span className="text-slate-900 font-bold">{saleToDelete.receiptNo}</span> and <span className="text-emerald-600 font-bold">restore stock</span> for all items.
                         </p>
                      </div>
@@ -2470,5 +2509,3 @@ const POS: React.FC<POSProps> = ({ user }) => {
 };
 
 export default POS;
-
-

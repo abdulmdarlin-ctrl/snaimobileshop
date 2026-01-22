@@ -240,7 +240,6 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                      <div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase">Month Spend</p>
                         <p className="text-sm font-black text-slate-900">{(stats.thisMonthSpend / 1000000).toFixed(2)}M</p>
-                        <p className="text-sm font-bold text-slate-900">{(stats.thisMonthSpend / 1000000).toFixed(2)}M</p>
                      </div>
                   </div>
                   <div className="flex items-center gap-3 px-4 py-2 bg-white rounded-3xl border border-slate-100 shadow-sm">

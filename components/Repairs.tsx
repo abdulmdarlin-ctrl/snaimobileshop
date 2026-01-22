@@ -7,7 +7,7 @@ import {
    Wrench, User as UserIcon, Clock, AlertCircle,
    Smartphone, Hash, Battery, FileText, CheckCircle2,
    ChevronRight, Calendar, DollarSign, PenTool, Layers,
-   CreditCard, Loader2, AlertTriangle, Store
+   CreditCard, Loader2, AlertTriangle, Store, MessageCircle
 } from 'lucide-react';
 import { printSection } from '../utils/printExport';
 import { useToast } from './Toast';
@@ -155,6 +155,26 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
       } finally {
          setLoading(false);
       }
+   };
+
+   const handleSendWhatsApp = () => {
+      if (!activeRepairForReceipt) return;
+      const businessName = settings?.businessName || 'SNA Repair Center';
+      const balance = activeRepairForReceipt.estimatedCost - activeRepairForReceipt.depositPaid;
+
+      let message = `*Job Card - ${businessName}*\n\n`;
+      message += `*Job No:* ${activeRepairForReceipt.jobCardNo}\n`;
+      message += `*Device:* ${activeRepairForReceipt.deviceModel}\n`;
+      message += `*Issue:* ${activeRepairForReceipt.issue}\n`;
+      message += `*Est. Cost:* ${activeRepairForReceipt.estimatedCost.toLocaleString()} UGX\n`;
+      message += `*Deposit:* ${activeRepairForReceipt.depositPaid.toLocaleString()} UGX\n`;
+      message += `*Balance:* ${balance.toLocaleString()} UGX\n\n`;
+      message += `*Status:* ${activeRepairForReceipt.status}\n\n`;
+      message += `Please keep this job card for collection. Thank you!`;
+
+      const encodedMessage = encodeURIComponent(message);
+      const phone = activeRepairForReceipt.customerPhone.replace(/\D/g, '');
+      window.open(`https://wa.me/${phone}?text=${encodedMessage}`, '_blank');
    };
 
    const confirmDeleteRepair = async () => {
@@ -581,6 +601,9 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
                   {/* Footer Actions */}
                   <div className="p-6 bg-white border-t border-slate-200 flex gap-4">
                      <button onClick={() => setIsReceiptOpen(false)} className="flex-1 py-3 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs uppercase tracking-wide hover:bg-slate-200 transition-all">Close</button>
+                     <button onClick={handleSendWhatsApp} className="flex-1 py-3 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl font-bold text-xs uppercase hover:bg-emerald-100 transition-all flex items-center justify-center gap-2">
+                        <MessageCircle size={16} /> WhatsApp
+                     </button>
                      <button onClick={() => printSection('#repair-receipt-target', () => setIsReceiptOpen(false))} className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase tracking-wide shadow-xl hover:bg-black transition-all flex items-center justify-center gap-2">
                         <Printer size={16} strokeWidth={3} /> Print & Close
                      </button>

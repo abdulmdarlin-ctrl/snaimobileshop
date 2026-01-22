@@ -7,7 +7,7 @@ import {
     User as UserIcon, Calendar, CheckCircle2, AlertOctagon,
     Loader2, Filter, ChevronDown, Check, XCircle, CreditCard,
     FileText, Box, ArrowLeft, Phone, MapPin, Briefcase, RefreshCw, DollarSign,
-    History, AlertTriangle, Printer, Download, Mail
+    History, AlertTriangle, Printer, Download, Mail, MessageCircle
 } from 'lucide-react';
 import { printSection, exportSectionToPDF } from '../utils/printExport';
 import { useToast } from './Toast';
@@ -263,6 +263,36 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
         const body = `Dear ${selectedAgent.name},\n\nPlease find attached your account statement.\n\nRegards,\n${settings?.businessName || 'Management'}`;
         window.location.href = `mailto:${selectedAgent.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
         showToast("Opening email client...", 'info');
+    };
+
+    const handleSendWhatsApp = () => {
+        if (!selectedAgent) return;
+
+        const businessName = settings?.businessName || 'SNA Mobile ERP';
+        const totalIssued = agentLoans.reduce((sum, l) => sum + l.totalLoanAmount, 0);
+        const totalPaid = agentLoans.reduce((sum, l) => sum + (l.remittedAmount || l.deposit || 0), 0);
+        const balance = totalIssued - totalPaid;
+
+        let message = `*Account Statement - ${businessName}*\n\n`;
+        message += `*Agent:* ${selectedAgent.name}\n`;
+        message += `*Total Issued:* ${totalIssued.toLocaleString()} UGX\n`;
+        message += `*Total Paid:* ${totalPaid.toLocaleString()} UGX\n`;
+        message += `*Outstanding Balance:* ${balance.toLocaleString()} UGX\n\n`;
+        message += `*Recent Consignments:*\n`;
+
+        agentLoans.slice(0, 10).forEach(loan => {
+            message += `• ${new Date(loan.startDate).toLocaleDateString()}: ${loan.deviceModel} (${loan.totalLoanAmount.toLocaleString()} UGX) - ${loan.status}\n`;
+        });
+
+        if (agentLoans.length > 10) {
+            message += `\n_Showing last 10 records._`;
+        }
+
+        message += `\n\nThank you for your partnership!`;
+
+        const encodedMessage = encodeURIComponent(message);
+        const phone = selectedAgent.phone.replace(/\D/g, '');
+        window.open(`https://wa.me/${phone}?text=${encodedMessage}`, '_blank');
     };
 
     const handleProductSelect = (pid: string) => {
@@ -752,6 +782,9 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
                 <div className="p-5 border-t border-slate-100 bg-white flex gap-4 justify-end no-print">
                     <button onClick={() => setIsReportOpen(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs uppercase hover:bg-slate-200 transition-colors">Close</button>
+                    <button onClick={handleSendWhatsApp} className="px-6 py-2.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl font-bold text-xs uppercase hover:bg-emerald-100 transition-colors flex items-center gap-2">
+                        <MessageCircle size={16} /> WhatsApp
+                    </button>
                     <button onClick={handlePrintReport} disabled={isPrinting} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase hover:bg-slate-50 transition-colors flex items-center gap-2">
                         {isPrinting ? <Loader2 size={16} className="animate-spin" /> : <Printer size={16} />} Print
                     </button>

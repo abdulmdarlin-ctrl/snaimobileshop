@@ -317,7 +317,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                <input
                   type="text"
                   placeholder="Search products by name or SKU..."
-                  className="w-full bg-slate-50 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm font-light text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-rose-500/20 focus:bg-white transition-all shadow-inner"
+                  className="w-full bg-slate-50 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm font-normal text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-rose-500/20 focus:bg-white transition-all shadow-inner"
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
                />
@@ -365,9 +365,9 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
             {/* Total Items */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
                <div>
-                  <p className="text-sm text-slate-500 font-light mb-1">Total Products</p>
+                  <p className="text-sm text-slate-500 font-normal mb-1">Total Products</p>
                   <h3 className="text-2xl font-bold text-slate-800">{inventoryStats.totalSKUs}</h3>
-                  <p className="text-xs text-slate-400 mt-1 font-light">
+                  <p className="text-xs text-slate-400 mt-1 font-normal">
                      {inventoryStats.totalUnits.toLocaleString()} Units in Stock
                   </p>
                </div>
@@ -379,12 +379,12 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
             {/* Inventory Value */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
                <div>
-                  <p className="text-sm text-slate-500 font-light mb-1">Total Value</p>
+                  <p className="text-sm text-slate-500 font-normal mb-1">Total Value</p>
                   <h3 className="text-2xl font-bold text-slate-800">
                      <span className="text-sm text-slate-400 mr-1">UGX</span>
                      {(inventoryStats.totalValue / (inventoryStats.totalValue > 1000000 ? 1000000 : 1000)).toFixed(1)}{inventoryStats.totalValue > 1000000 ? 'M' : 'k'}
                   </h3>
-                  <p className="text-xs text-emerald-500 mt-1 font-light flex items-center gap-1">
+                  <p className="text-xs text-emerald-500 mt-1 font-normal flex items-center gap-1">
                      <TrendingDown size={14} className="rotate-180" /> Asset Value
                   </p>
                </div>
@@ -396,9 +396,9 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
             {/* Low Stock */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
                <div>
-                  <p className="text-sm text-slate-500 font-light mb-1">Low Stock Alerts</p>
+                  <p className="text-sm text-slate-500 font-normal mb-1">Low Stock Alerts</p>
                   <h3 className="text-2xl font-bold text-slate-800">{inventoryStats.lowStockItems}</h3>
-                  <p className="text-xs text-orange-500 mt-1 font-light flex items-center gap-1">
+                  <p className="text-xs text-orange-500 mt-1 font-normal flex items-center gap-1">
                      <AlertTriangle size={14} /> Reorder Suggested
                   </p>
                </div>
@@ -410,11 +410,11 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
             {/* Categories */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
                <div>
-                  <p className="text-sm text-slate-500 font-light mb-1">Categories</p>
+                  <p className="text-sm text-slate-500 font-normal mb-1">Categories</p>
                   <h3 className="text-2xl font-bold text-slate-800">
                      {[...new Set(products.map(p => p.type))].length}
                   </h3>
-                  <p className="text-xs text-slate-400 mt-1 font-light">Distinct Types</p>
+                  <p className="text-xs text-slate-400 mt-1 font-normal">Distinct Types</p>
                </div>
                <div className="w-12 h-12 bg-violet-50 rounded-full flex items-center justify-center text-violet-500">
                   <Layers size={24} />
@@ -611,7 +611,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                         <div className="grid grid-cols-3 gap-6">
                            <div>
                               <label className="block text-xs font-bold text-slate-600 mb-1.5">Cost Price</label>
-                              <input type="number" min="0" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-light focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 outline-none transition-all"
+                              <input type="number" min="0" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-normal focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 outline-none transition-all"
                                  value={formData.costPrice} onChange={e => setFormData({ ...formData, costPrice: Number(e.target.value) })} />
                            </div>
                            <div>
@@ -823,7 +823,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                   </div>
                   <div>
                      <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Confirm Deletion</h3>
-                     <p className="text-sm text-slate-500 font-light mt-2 leading-relaxed">
+                     <p className="text-sm text-slate-500 font-normal mt-2 leading-relaxed">
                         Are you sure you want to permanently delete the product <span className="text-slate-900 font-bold">"{productToDelete.name}"</span>?
                      </p>
                   </div>

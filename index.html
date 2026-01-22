@@ -8,17 +8,26 @@
   <link href="https://fonts.cdnfonts.com/css/pt-root-ui" rel="stylesheet">
   <script>
     /* Custom Tailwind Configuration */
-    window.tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['"PT Root UI"', 'sans-serif'],
-          },
-          fontSize: {
-            'xs': '12px',
-            'sm': '14px',
-            'base': '14px',
-          },
+    tailwind = {
+      config: {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['"PT Root UI"', 'sans-serif'],
+            },
+            fontWeight: {
+              light: '400',
+              normal: '400',
+              medium: '500',
+              bold: '700',
+              black: '700',
+            },
+            fontSize: {
+              'xs': '12px',
+              'sm': '14px',
+              'base': '14px',
+            },
+          }
         }
       }
     }

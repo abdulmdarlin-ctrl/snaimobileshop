@@ -457,7 +457,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                </div>
 
                <div className="flex flex-col">
-                  <p className="text-xs text-slate-400 font-light mb-0.5">
+                  <p className="text-xs text-slate-400 font-normal mb-0.5">
                      {new Date().getHours() < 12 ? 'Good Morning' : new Date().getHours() < 18 ? 'Good Afternoon' : 'Good Evening'},
                   </p>
                   <h2 className="text-xl lg:text-2xl font-bold text-white leading-tight tracking-tight uppercase">
@@ -469,7 +469,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{user.role}</span>
                      </div>
                      <span className="w-1 h-1 rounded-full bg-slate-700"></span>
-                     <p className="text-[11px] font-light text-slate-500">
+                     <p className="text-[11px] font-normal text-slate-500">
                         {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                      </p>
                   </div>
@@ -524,7 +524,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                            </span>
                         </div>
                      </div>
-                     <p className="text-[11px] md:text-sm font-light text-amber-900/70 flex items-center gap-2">
+                     <p className="text-[11px] md:text-sm font-normal text-amber-900/70 flex items-center gap-2">
                         <span>You have <span className="text-amber-950 font-bold">{heldSales.length}</span> unfinished sale{heldSales.length > 1 ? 's' : ''}.</span>
                         <span className="w-1 h-1 rounded-full bg-amber-300"></span>
                         <span className="text-amber-800 font-bold">Value: UGX {heldTotalValue.toLocaleString()}</span>
@@ -717,7 +717,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   <div>
                      <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Revenue</p>
                      <h2 className="text-3xl font-black text-slate-900 tracking-tight">
-                        <span className="text-sm text-slate-400 mr-1 font-light">UGX</span>
+                        <span className="text-sm text-slate-400 mr-1 font-normal">UGX</span>
                         {(stats.revenue / 1000).toFixed(1)}k
                      </h2>
                   </div>
@@ -864,7 +864,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
                               <div className="flex-1 min-w-0">
                                  <h4 className="text-xs font-bold text-slate-900 truncate">{item.title}</h4>
-                                 <p className="text-xs text-slate-500 font-light truncate leading-tight">{item.desc}</p>
+                                 <p className="text-xs text-slate-500 font-normal truncate leading-tight">{item.desc}</p>
                               </div>
 
                               {item.amount && (
@@ -882,7 +882,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      );
                   })}
                   {recentActivity.length === 0 && (
-                     <div className="text-center py-10 text-slate-400 text-xs font-light">No recent activity found.</div>
+                     <div className="text-center py-10 text-slate-400 text-xs font-normal">No recent activity found.</div>
                   )}
                </div>
             </div>
@@ -924,7 +924,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      </div>
                   ))}
                   {topCustomers.length === 0 && (
-                     <div className="text-center py-10 text-slate-400 text-xs font-light">No customer data available.</div>
+                     <div className="text-center py-10 text-slate-400 text-xs font-normal">No customer data available.</div>
                   )}
                </div>
             </div>
