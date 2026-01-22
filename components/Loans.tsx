@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { printSection, exportSectionToPDF } from '../utils/printExport';
 import { useToast } from './Toast';
+import Modal from './Modal';
 
 interface LoansProps { user: User; }
 
@@ -369,7 +370,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                     </button>
                 </div>
 
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-4">
                     <Search className="text-slate-400" size={18} />
                     <input
                         className="flex-1 bg-transparent outline-none text-sm font-bold placeholder:font-normal"
@@ -386,7 +387,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                         const activeLoans = myLoans.filter(l => l.status === 'Active');
 
                         return (
-                            <div key={agent.id} onClick={() => { setSelectedAgentId(agent.id!); setView('profile'); setLoanSearchTerm(''); setProfileTab('active'); }} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer group relative">
+                            <div key={agent.id} onClick={() => { setSelectedAgentId(agent.id!); setView('profile'); setLoanSearchTerm(''); setProfileTab('active'); }} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer group relative">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
                                         <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 font-bold text-lg uppercase border border-slate-100">
@@ -424,51 +425,47 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                 </div>
 
                 {/* --- REGISTER AGENT MODAL --- */}
-                {isAgentModalOpen && (
-                    <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in !mt-0">
-                        <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-white/20">
-                            <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                                <h2 className="text-lg font-bold text-slate-900">{editingId ? 'Edit Profile' : 'New Agent Profile'}</h2>
-                                <button onClick={() => setIsAgentModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-900" /></button>
-                            </div>
-                            <form onSubmit={handleSaveAgent} className="p-6 space-y-4">
-                                <div className="space-y-1.5">
-                                    <label className="win-label">Full Name</label>
-                                    <input required className="win-input h-10 font-bold" value={agentForm.name} onChange={e => setAgentForm({ ...agentForm, name: e.target.value })} placeholder="e.g. John Doe" />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="win-label">Phone Number</label>
-                                    <input required className="win-input h-10" value={agentForm.phone} onChange={e => setAgentForm({ ...agentForm, phone: e.target.value })} placeholder="+256..." />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="win-label">ID / NIN</label>
-                                    <input className="win-input h-10 uppercase" value={agentForm.nin || ''} onChange={e => setAgentForm({ ...agentForm, nin: e.target.value })} placeholder="National ID" />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="win-label">Region / Location</label>
-                                    <input className="win-input h-10" value={agentForm.location || ''} onChange={e => setAgentForm({ ...agentForm, location: e.target.value })} placeholder="e.g. Kampala Central" />
-                                </div>
-                                {/* Status Field added here */}
-                                <div className="space-y-1.5">
-                                    <label className="win-label">Account Status</label>
-                                    <select
-                                        className="win-input h-10 font-bold"
-                                        value={agentForm.status}
-                                        onChange={e => setAgentForm({ ...agentForm, status: e.target.value as 'Active' | 'Inactive' })}
-                                    >
-                                        <option value="Active">Active</option>
-                                        <option value="Inactive">Inactive</option>
-                                    </select>
-                                </div>
-                                <div className="pt-4">
-                                    <button disabled={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2">
-                                        {isSaving && <Loader2 className="animate-spin" size={14} />} {isSaving ? 'Saving...' : 'Save Agent Profile'}
-                                    </button>
-                                </div>
-                            </form>
+                <Modal
+                    isOpen={isAgentModalOpen}
+                    onClose={() => setIsAgentModalOpen(false)}
+                    title={editingId ? 'Edit Profile' : 'New Agent Profile'}
+                    maxWidth="md"
+                >
+                    <form onSubmit={handleSaveAgent} className="space-y-4">
+                        <div className="space-y-1.5">
+                            <label className="win-label">Full Name</label>
+                            <input required className="win-input h-10 font-bold" value={agentForm.name} onChange={e => setAgentForm({ ...agentForm, name: e.target.value })} placeholder="e.g. John Doe" />
                         </div>
-                    </div>
-                )}
+                        <div className="space-y-1.5">
+                            <label className="win-label">Phone Number</label>
+                            <input required className="win-input h-10" value={agentForm.phone} onChange={e => setAgentForm({ ...agentForm, phone: e.target.value })} placeholder="+256..." />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="win-label">ID / NIN</label>
+                            <input className="win-input h-10 uppercase" value={agentForm.nin || ''} onChange={e => setAgentForm({ ...agentForm, nin: e.target.value })} placeholder="National ID" />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="win-label">Region / Location</label>
+                            <input className="win-input h-10" value={agentForm.location || ''} onChange={e => setAgentForm({ ...agentForm, location: e.target.value })} placeholder="e.g. Kampala Central" />
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="win-label">Account Status</label>
+                            <select
+                                className="win-input h-10 font-bold"
+                                value={agentForm.status}
+                                onChange={e => setAgentForm({ ...agentForm, status: e.target.value as 'Active' | 'Inactive' })}
+                            >
+                                <option value="Active">Active</option>
+                                <option value="Inactive">Inactive</option>
+                            </select>
+                        </div>
+                        <div className="pt-4">
+                            <button disabled={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2">
+                                {isSaving && <Loader2 className="animate-spin" size={14} />} {isSaving ? 'Saving...' : 'Save Agent Profile'}
+                            </button>
+                        </div>
+                    </form>
+                </Modal>
             </div>
         );
     }
@@ -533,22 +530,22 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
             {/* Stats Grid */}
             <div className="grid grid-cols-3 gap-4 shrink-0">
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Active Stock</p>
                     <p className="text-2xl font-bold text-slate-900">{agentStats.items}</p>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Stock Value</p>
                     <p className="text-2xl font-bold text-slate-900">{agentStats.totalValue.toLocaleString()}</p>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total Remitted</p>
                     <p className="text-2xl font-bold text-emerald-600">{agentStats.paid.toLocaleString()}</p>
                 </div>
             </div>
 
             {/* Main Content: Stock List */}
-            <div className="flex-1 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden min-h-[400px]">
+            <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden min-h-[400px]">
                 <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center bg-slate-50 gap-4">
                     <div className="flex items-center gap-4 w-full sm:w-auto">
                         {/* Tabs */}
@@ -633,7 +630,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                                     </td>
                                 </tr>
                             ))}
-                            {filteredAgentLoans.length === 0 && (
+                            {allFilteredAgentLoans.length === 0 && (
                                 <tr><td colSpan={6} className="py-12 text-center text-slate-400 text-xs font-bold uppercase">No records found in {profileTab}</td></tr>
                             )}
                         </tbody>
@@ -642,311 +639,309 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
             </div>
 
             {/* --- AGENT REPORT MODAL --- */}
-            {isReportOpen && selectedAgent && (
-                <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-                    <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
-                        <div className="p-5 border-b border-slate-100 flex items-center justify-between no-print bg-slate-50">
+            <Modal
+                isOpen={isReportOpen && !!selectedAgent}
+                onClose={() => setIsReportOpen(false)}
+                title={
+                    <div className="flex flex-col">
+                        <span className="text-lg font-bold text-slate-900">Agent Account Statement</span>
+                        <span className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5">Generate Report</span>
+                    </div>
+                }
+                maxWidth="4xl"
+                noPadding
+            >
+                <div className="flex-1 overflow-y-auto p-8 bg-slate-200 flex justify-center">
+                    <div id="agent-report" className="receipt-a4-mode bg-white p-8 shadow-xl text-slate-900 w-full max-w-[210mm] min-h-[297mm]">
+                        {/* Report Header */}
+                        <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
                             <div>
-                                <h2 className="text-lg font-bold text-slate-900">Agent Account Statement</h2>
-                                <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5">Generate Report</p>
+                                <h1 className="text-2xl font-black uppercase tracking-tight mb-2">Account Statement</h1>
+                                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Generated: {new Date().toLocaleDateString()}</p>
+
+                                <div className="mt-6">
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Statement For:</p>
+                                    <h2 className="text-xl font-bold text-slate-900">{selectedAgent?.name}</h2>
+                                    <p className="text-sm text-slate-600">{selectedAgent?.phone}</p>
+                                    {selectedAgent?.email && <p className="text-xs text-slate-500">{selectedAgent.email}</p>}
+                                    <p className="text-xs text-slate-500 uppercase">{selectedAgent?.location || 'N/A'}</p>
+                                    {selectedAgent?.nin && <p className="text-xs text-slate-500 font-mono mt-1">ID: {selectedAgent.nin}</p>}
+                                </div>
                             </div>
-                            <button onClick={() => setIsReportOpen(false)} className="p-2 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors"><X size={20} /></button>
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto p-8 bg-slate-200 flex justify-center">
-                            <div id="agent-report" className="receipt-a4-mode bg-white p-8 shadow-xl text-slate-900 w-full max-w-[210mm] min-h-[297mm]">
-                                {/* Report Header */}
-                                <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
-                                    <div>
-                                        <h1 className="text-2xl font-black uppercase tracking-tight mb-2">Account Statement</h1>
-                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Generated: {new Date().toLocaleDateString()}</p>
-
-                                        <div className="mt-6">
-                                            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Statement For:</p>
-                                            <h2 className="text-xl font-bold text-slate-900">{selectedAgent.name}</h2>
-                                            <p className="text-sm text-slate-600">{selectedAgent.phone}</p>
-                                            {selectedAgent.email && <p className="text-xs text-slate-500">{selectedAgent.email}</p>}
-                                            <p className="text-xs text-slate-500 uppercase">{selectedAgent.location || 'N/A'}</p>
-                                            {selectedAgent.nin && <p className="text-xs text-slate-500 font-mono mt-1">ID: {selectedAgent.nin}</p>}
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        {settings?.logo && (
-                                            <img src={settings.logo} className="h-20 object-contain ml-auto mb-3" alt="Logo" />
-                                        )}
-                                        <h2 className="text-lg font-bold text-slate-900 uppercase">{settings?.businessName || 'SNA Mobile ERP'}</h2>
-                                        <p className="text-xs text-slate-500">{settings?.address}</p>
-                                        <p className="text-xs text-slate-500">{settings?.phone}</p>
-                                    </div>
-                                </div>
-
-                                {/* Summary Cards */}
-                                <div className="grid grid-cols-3 gap-4 mb-8">
-                                    <div className="p-4 border border-slate-200 rounded-lg">
-                                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Total Issued</p>
-                                        <p className="text-xl font-black text-slate-900">
-                                            {agentLoans.reduce((sum, l) => sum + l.totalLoanAmount, 0).toLocaleString()}
-                                        </p>
-                                    </div>
-                                    <div className="p-4 border border-slate-200 rounded-lg bg-emerald-50/50">
-                                        <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">Total Paid</p>
-                                        <p className="text-xl font-black text-emerald-700">
-                                            {agentLoans.reduce((sum, l) => sum + (l.remittedAmount || l.deposit || 0), 0).toLocaleString()}
-                                        </p>
-                                    </div>
-                                    <div className="p-4 border border-slate-200 rounded-lg bg-red-50/50">
-                                        <p className="text-[10px] font-bold text-red-600 uppercase tracking-wider mb-1">Outstanding Balance</p>
-                                        <p className="text-xl font-black text-red-700">
-                                            {(agentLoans.reduce((sum, l) => sum + l.totalLoanAmount, 0) - agentLoans.reduce((sum, l) => sum + (l.remittedAmount || l.deposit || 0), 0)).toLocaleString()}
-                                        </p>
-                                    </div>
-                                </div>
-
-                                {/* Transaction Table */}
-                                <div className="mb-8">
-                                    <h3 className="text-xs font-black uppercase tracking-widest border-b border-slate-200 pb-2 mb-4 text-slate-500">Transaction History</h3>
-                                    <table className="w-full text-left text-xs">
-                                        <thead>
-                                            <tr className="border-b border-slate-200">
-                                                <th className="py-2 font-bold text-slate-500 uppercase">Date</th>
-                                                <th className="py-2 font-bold text-slate-500 uppercase">Item Description</th>
-                                                <th className="py-2 font-bold text-slate-500 uppercase text-right">Value</th>
-                                                <th className="py-2 font-bold text-slate-500 uppercase text-right">Paid</th>
-                                                <th className="py-2 font-bold text-slate-500 uppercase text-center">Status</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                            {agentLoans.map((loan, idx) => (
-                                                <tr key={idx}>
-                                                    <td className="py-3 font-mono text-slate-600">{new Date(loan.startDate).toLocaleDateString()}</td>
-                                                    <td className="py-3">
-                                                        <div className="font-bold text-slate-900">{loan.deviceModel}</div>
-                                                        <div className="text-[10px] text-slate-500 font-mono">{loan.imei}</div>
-                                                    </td>
-                                                    <td className="py-3 text-right font-bold text-slate-900">{loan.totalLoanAmount.toLocaleString()}</td>
-                                                    <td className="py-3 text-right font-bold text-emerald-600">{(loan.remittedAmount || loan.deposit || 0).toLocaleString()}</td>
-                                                    <td className="py-3 text-center">
-                                                        <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${loan.status === 'Active' ? 'border-emerald-200 text-emerald-600' : 'border-slate-200 text-slate-500'
-                                                            }`}>{loan.status}</span>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-
-                                {/* Footer / Signatures */}
-                                <div className="mt-12 pt-8 border-t-2 border-slate-100">
-                                    <div className="flex justify-between gap-12">
-                                        <div className="flex-1">
-                                            <div className="h-16 border-b border-slate-900 border-dashed mb-2"></div>
-                                            <p className="text-xs font-bold text-slate-900 uppercase">Agent Signature</p>
-                                        </div>
-                                        <div className="flex-1">
-                                            <div className="h-16 border-b border-slate-900 border-dashed mb-2"></div>
-                                            <p className="text-xs font-bold text-slate-900 uppercase">Manager Signature</p>
-                                        </div>
-                                    </div>
-                                    <p className="text-[10px] text-center text-slate-400 mt-8">Printed from SNA Mobile ERP System</p>
-                                </div>
+                            <div className="text-right">
+                                {settings?.logo && (
+                                    <img src={settings.logo} className="h-20 object-contain ml-auto mb-3" alt="Logo" />
+                                )}
+                                <h2 className="text-lg font-bold text-slate-900 uppercase">{settings?.businessName || 'SNA Mobile ERP'}</h2>
+                                <p className="text-xs text-slate-500">{settings?.address}</p>
+                                <p className="text-xs text-slate-500">{settings?.phone}</p>
                             </div>
                         </div>
 
-                        <div className="p-5 border-t border-slate-100 bg-white flex gap-4 justify-end no-print">
-                            <button onClick={() => setIsReportOpen(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs uppercase hover:bg-slate-200 transition-colors">Close</button>
-                            <button onClick={handlePrintReport} disabled={isPrinting} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase hover:bg-slate-50 transition-colors flex items-center gap-2">
-                                {isPrinting ? <Loader2 size={16} className="animate-spin" /> : <Printer size={16} />} Print
-                            </button>
-                            <button onClick={handleEmailReport} className="px-6 py-2.5 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl font-bold text-xs uppercase hover:bg-blue-100 transition-colors flex items-center gap-2">
-                                <Mail size={16} /> Email
-                            </button>
-                            <button onClick={handleDownloadReport} disabled={isDownloading} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase hover:bg-black transition-colors flex items-center gap-2">
-                                {isDownloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Download PDF
-                            </button>
+                        {/* Summary Cards */}
+                        <div className="grid grid-cols-3 gap-4 mb-8">
+                            <div className="p-4 border border-slate-200 rounded-lg">
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Total Issued</p>
+                                <p className="text-xl font-black text-slate-900">
+                                    {agentLoans.reduce((sum, l) => sum + l.totalLoanAmount, 0).toLocaleString()}
+                                </p>
+                            </div>
+                            <div className="p-4 border border-slate-200 rounded-lg bg-emerald-50/50">
+                                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">Total Paid</p>
+                                <p className="text-xl font-black text-emerald-700">
+                                    {agentLoans.reduce((sum, l) => sum + (l.remittedAmount || l.deposit || 0), 0).toLocaleString()}
+                                </p>
+                            </div>
+                            <div className="p-4 border border-slate-200 rounded-lg bg-red-50/50">
+                                <p className="text-[10px] font-bold text-red-600 uppercase tracking-wider mb-1">Outstanding Balance</p>
+                                <p className="text-xl font-black text-red-700">
+                                    {(agentLoans.reduce((sum, l) => sum + l.totalLoanAmount, 0) - agentLoans.reduce((sum, l) => sum + (l.remittedAmount || l.deposit || 0), 0)).toLocaleString()}
+                                </p>
+                            </div>
+                        </div>
+
+                        {/* Transaction Table */}
+                        <div className="mb-8">
+                            <h3 className="text-xs font-black uppercase tracking-widest border-b border-slate-200 pb-2 mb-4 text-slate-500">Transaction History</h3>
+                            <table className="w-full text-left text-xs">
+                                <thead>
+                                    <tr className="border-b border-slate-200">
+                                        <th className="py-2 font-bold text-slate-500 uppercase">Date</th>
+                                        <th className="py-2 font-bold text-slate-500 uppercase">Item Description</th>
+                                        <th className="py-2 font-bold text-slate-500 uppercase text-right">Value</th>
+                                        <th className="py-2 font-bold text-slate-500 uppercase text-right">Paid</th>
+                                        <th className="py-2 font-bold text-slate-500 uppercase text-center">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {agentLoans.map((loan, idx) => (
+                                        <tr key={idx}>
+                                            <td className="py-3 font-mono text-slate-600">{new Date(loan.startDate).toLocaleDateString()}</td>
+                                            <td className="py-3">
+                                                <div className="font-bold text-slate-900">{loan.deviceModel}</div>
+                                                <div className="text-[10px] text-slate-500 font-mono">{loan.imei}</div>
+                                            </td>
+                                            <td className="py-3 text-right font-bold text-slate-900">{loan.totalLoanAmount.toLocaleString()}</td>
+                                            <td className="py-3 text-right font-bold text-emerald-600">{(loan.remittedAmount || loan.deposit || 0).toLocaleString()}</td>
+                                            <td className="py-3 text-center">
+                                                <span className={`px-2 py-0.5 rounded text-[10px] uppercase font-bold border ${loan.status === 'Active' ? 'border-emerald-200 text-emerald-600' : 'border-slate-200 text-slate-500'
+                                                    }`}>{loan.status}</span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Footer / Signatures */}
+                        <div className="mt-12 pt-8 border-t-2 border-slate-100">
+                            <div className="flex justify-between gap-12">
+                                <div className="flex-1">
+                                    <div className="h-16 border-b border-slate-900 border-dashed mb-2"></div>
+                                    <p className="text-xs font-bold text-slate-900 uppercase">Agent Signature</p>
+                                </div>
+                                <div className="flex-1">
+                                    <div className="h-16 border-b border-slate-900 border-dashed mb-2"></div>
+                                    <p className="text-xs font-bold text-slate-900 uppercase">Manager Signature</p>
+                                </div>
+                            </div>
+                            <p className="text-[10px] text-center text-slate-400 mt-8">Printed from SNA Mobile ERP System</p>
                         </div>
                     </div>
                 </div>
-            )}
+
+                <div className="p-5 border-t border-slate-100 bg-white flex gap-4 justify-end no-print">
+                    <button onClick={() => setIsReportOpen(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs uppercase hover:bg-slate-200 transition-colors">Close</button>
+                    <button onClick={handlePrintReport} disabled={isPrinting} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase hover:bg-slate-50 transition-colors flex items-center gap-2">
+                        {isPrinting ? <Loader2 size={16} className="animate-spin" /> : <Printer size={16} />} Print
+                    </button>
+                    <button onClick={handleEmailReport} className="px-6 py-2.5 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl font-bold text-xs uppercase hover:bg-blue-100 transition-colors flex items-center gap-2">
+                        <Mail size={16} /> Email
+                    </button>
+                    <button onClick={handleDownloadReport} disabled={isDownloading} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase hover:bg-black transition-colors flex items-center gap-2">
+                        {isDownloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Download PDF
+                    </button>
+                </div>
+            </Modal>
 
             {/* --- ISSUE STOCK MODAL --- */}
-            {isStockModalOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-                    <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
-                            <div>
-                                <h2 className="text-lg font-bold text-slate-900">Issue Stock</h2>
-                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">TO: {selectedAgent?.name.toUpperCase()}</p>
-                            </div>
-                            <button onClick={() => setIsStockModalOpen(false)} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400 hover:text-slate-900 transition-all"><X size={20} /></button>
-                        </div>
-
-                        <form onSubmit={handleIssueStock} className="flex-1 flex flex-col min-h-0">
-                            <div className="flex-1 overflow-y-auto p-8 space-y-6">
-                                {/* Inventory Picker */}
-                                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                                        <Box size={14} className="text-slate-400" /> SELECT FROM INVENTORY (CONSIGNMENT)
-                                    </label>
-                                    <select
-                                        className="w-full h-12 bg-white border border-slate-200 rounded-xl px-4 text-xs font-bold text-slate-700 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all"
-                                        value={stockForm.productId || ''}
-                                        onChange={e => handleProductSelect(e.target.value)}
-                                    >
-                                        <option value="">-- Manual Entry / Select Stock --</option>
-                                        {products.map(p => (
-                                            <option key={p.id} value={p.id!}>
-                                                {p.brand ? `[${p.brand}] ` : ''}{p.name} ({p.stockQuantity} avail)
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-5">
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">MODEL NAME</label>
-                                        <input
-                                            disabled={!!stockForm.productId}
-                                            className={`win-input h-12 text-xs ${!!stockForm.productId ? 'bg-slate-50 text-slate-500 font-bold' : 'bg-white font-bold'}`}
-                                            value={stockForm.deviceModel}
-                                            onChange={e => setStockForm({ ...stockForm, deviceModel: e.target.value })}
-                                            placeholder="Enter Model..."
-                                        />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">IMEI / SERIAL</label>
-                                        <input
-                                            required
-                                            autoFocus
-                                            className="win-input h-12 font-mono text-xs text-slate-900"
-                                            value={stockForm.imei}
-                                            onChange={e => setStockForm({ ...stockForm, imei: e.target.value })}
-                                            placeholder="Scan or Type..."
-                                        />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">PROVIDER</label>
-                                        <select
-                                            disabled={!!stockForm.productId}
-                                            className={`win-input h-12 text-xs ${!!stockForm.productId ? 'bg-slate-50 text-slate-500 font-bold' : 'bg-white font-bold'}`}
-                                            value={stockForm.provider}
-                                            onChange={e => setStockForm({ ...stockForm, provider: e.target.value as any })}
-                                        >
-                                            <option value="TAKE NOW">TAKE NOW</option>
-                                            <option value="MOGO">MOGO</option>
-                                            <option value="MOBI BUY">MOBI BUY</option>
-                                            <option value="Other">Other</option>
-                                        </select>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">TOTAL VALUE</label>
-                                        <input
-                                            type="number"
-                                            className="win-input h-12 font-bold text-xs"
-                                            value={stockForm.totalLoanAmount}
-                                            onChange={e => setStockForm({ ...stockForm, totalLoanAmount: Number(e.target.value) })}
-                                        />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">UPFRONT DEPOSIT</label>
-                                        <input
-                                            type="number"
-                                            className="win-input h-12 font-bold text-emerald-600 text-xs"
-                                            value={stockForm.deposit}
-                                            onChange={e => setStockForm({ ...stockForm, deposit: Number(e.target.value) })}
-                                        />
-                                    </div>
-                                    <div className="space-y-2">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">DAILY REMITTANCE</label>
-                                        <input
-                                            type="number"
-                                            className="win-input h-12 font-bold text-xs"
-                                            value={stockForm.dailyInstallment}
-                                            onChange={e => setStockForm({ ...stockForm, dailyInstallment: Number(e.target.value) })}
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="p-6 bg-slate-50/50 border-t border-slate-100 flex justify-end gap-3 shrink-0">
-                                <button
-                                    type="button"
-                                    onClick={() => setIsStockModalOpen(false)}
-                                    className="px-6 py-3 bg-white border border-slate-200 text-slate-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
-                                >
-                                    CANCEL
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={isSaving}
-                                    className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all flex items-center gap-2"
-                                >
-                                    {isSaving ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} strokeWidth={4} />} CONFIRM ISSUE
-                                </button>
-                            </div>
-                        </form>
+            <Modal
+                isOpen={isStockModalOpen}
+                onClose={() => setIsStockModalOpen(false)}
+                title={
+                    <div className="flex flex-col">
+                        <span className="text-lg font-bold text-slate-900">Issue Stock</span>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">TO: {selectedAgent?.name.toUpperCase()}</span>
                     </div>
-                </div>
-            )}
-
-            {/* --- UPDATE STATUS / MARK SOLD MODAL --- */}
-            {isStatusModalOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-white/20">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                            <h2 className="text-lg font-bold text-slate-900">Update Status</h2>
-                            <button onClick={() => setIsStatusModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-900" /></button>
+                }
+                maxWidth="2xl"
+                noPadding
+            >
+                <form onSubmit={handleIssueStock} className="flex-1 flex flex-col min-h-0">
+                    <div className="flex-1 overflow-y-auto p-8 space-y-6">
+                        {/* Inventory Picker */}
+                        <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                <Box size={14} className="text-slate-400" /> SELECT FROM INVENTORY (CONSIGNMENT)
+                            </label>
+                            <select
+                                className="w-full h-12 bg-white border border-slate-200 rounded-xl px-4 text-xs font-bold text-slate-700 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all"
+                                value={stockForm.productId || ''}
+                                onChange={e => handleProductSelect(e.target.value)}
+                            >
+                                <option value="">-- Manual Entry / Select Stock --</option>
+                                {products.map(p => (
+                                    <option key={p.id} value={p.id!}>
+                                        {p.brand ? `[${p.brand}] ` : ''}{p.name} ({p.stockQuantity} avail)
+                                    </option>
+                                ))}
+                            </select>
                         </div>
-                        <form onSubmit={handleUpdateStatus} className="p-6 space-y-4">
-                            <div className="space-y-1.5">
-                                <label className="win-label">Current Status</label>
-                                <div className="relative">
-                                    <select
-                                        className="win-input h-10 font-bold appearance-none"
-                                        value={statusForm.status}
-                                        onChange={e => setStatusForm({ ...statusForm, status: e.target.value })}
-                                    >
-                                        <option value="Active">Active</option>
-                                        <option value="Sold">Sold / Completed</option>
-                                        <option value="Defaulted">Defaulted</option>
-                                        <option value="Repossessed">Repossessed</option>
-                                    </select>
-                                    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                                </div>
-                            </div>
 
-                            <div className="space-y-1.5">
-                                <label className="win-label">Remitted Amount (UGX)</label>
+                        <div className="grid grid-cols-2 gap-5">
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">MODEL NAME</label>
+                                <input
+                                    disabled={!!stockForm.productId}
+                                    className={`win-input h-12 text-xs ${!!stockForm.productId ? 'bg-slate-50 text-slate-500 font-bold' : 'bg-white font-bold'}`}
+                                    value={stockForm.deviceModel}
+                                    onChange={e => setStockForm({ ...stockForm, deviceModel: e.target.value })}
+                                    placeholder="Enter Model..."
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">IMEI / SERIAL</label>
+                                <input
+                                    required
+                                    autoFocus
+                                    className="win-input h-12 font-mono text-xs text-slate-900"
+                                    value={stockForm.imei}
+                                    onChange={e => setStockForm({ ...stockForm, imei: e.target.value })}
+                                    placeholder="Scan or Type..."
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">PROVIDER</label>
+                                <input
+                                    list="provider-options"
+                                    className="win-input h-12 text-xs font-bold bg-white"
+                                    value={stockForm.provider}
+                                    onChange={e => setStockForm({ ...stockForm, provider: e.target.value })}
+                                    placeholder="Select or Type..."
+                                />
+                                <datalist id="provider-options">
+                                    <option value="MOGO" />
+                                    <option value="TAKENOW" />
+                                    <option value="WATU" />
+                                    <option value="MOBI BUY" />
+                                    <option value="OTHERS" />
+                                </datalist>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">TOTAL VALUE</label>
                                 <input
                                     type="number"
-                                    className="win-input h-10 font-bold"
-                                    value={statusForm.remittedAmount}
-                                    onChange={e => setStatusForm({ ...statusForm, remittedAmount: Number(e.target.value) })}
+                                    className="win-input h-12 font-bold text-xs"
+                                    value={stockForm.totalLoanAmount}
+                                    onChange={e => setStockForm({ ...stockForm, totalLoanAmount: Number(e.target.value) })}
                                 />
                             </div>
-
-                            <div className="space-y-1.5">
-                                <label className="win-label">Notes</label>
-                                <textarea
-                                    className="win-input p-3 h-24 resize-none"
-                                    value={statusForm.notes}
-                                    onChange={e => setStatusForm({ ...statusForm, notes: e.target.value })}
-                                    placeholder="Transaction details..."
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">UPFRONT DEPOSIT</label>
+                                <input
+                                    type="number"
+                                    className="win-input h-12 font-bold text-emerald-600 text-xs"
+                                    value={stockForm.deposit}
+                                    onChange={e => setStockForm({ ...stockForm, deposit: Number(e.target.value) })}
                                 />
                             </div>
-
-                            <div className="pt-2">
-                                <button
-                                    type="submit"
-                                    disabled={isSaving}
-                                    className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-xs uppercase tracking-widest shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2"
-                                >
-                                    {isSaving ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} strokeWidth={3} />} UPDATE RECORD
-                                </button>
+                            <div className="space-y-2">
+                                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">DAILY REMITTANCE</label>
+                                <input
+                                    type="number"
+                                    className="win-input h-12 font-bold text-xs"
+                                    value={stockForm.dailyInstallment}
+                                    onChange={e => setStockForm({ ...stockForm, dailyInstallment: Number(e.target.value) })}
+                                />
                             </div>
-                        </form>
+                        </div>
                     </div>
-                </div>
-            )}
+
+                    <div className="p-6 bg-slate-50/50 border-t border-slate-100 flex justify-end gap-3 shrink-0">
+                        <button
+                            type="button"
+                            onClick={() => setIsStockModalOpen(false)}
+                            className="px-6 py-3 bg-white border border-slate-200 text-slate-500 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
+                        >
+                            CANCEL
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={isSaving}
+                            className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all flex items-center gap-2"
+                        >
+                            {isSaving ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} strokeWidth={4} />} CONFIRM ISSUE
+                        </button>
+                    </div>
+                </form>
+            </Modal>
+
+            {/* --- UPDATE STATUS / MARK SOLD MODAL --- */}
+            <Modal
+                isOpen={isStatusModalOpen}
+                onClose={() => setIsStatusModalOpen(false)}
+                title="Update Status"
+                maxWidth="sm"
+            >
+                <form onSubmit={handleUpdateStatus} className="space-y-4">
+                    <div className="space-y-1.5">
+                        <label className="win-label">Current Status</label>
+                        <div className="relative">
+                            <select
+                                className="win-input h-10 font-bold appearance-none"
+                                value={statusForm.status}
+                                onChange={e => setStatusForm({ ...statusForm, status: e.target.value })}
+                            >
+                                <option value="Active">Active</option>
+                                <option value="Sold">Sold / Completed</option>
+                                <option value="Defaulted">Defaulted</option>
+                                <option value="Repossessed">Repossessed</option>
+                            </select>
+                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                        </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="win-label">Remitted Amount (UGX)</label>
+                        <input
+                            type="number"
+                            className="win-input h-10 font-bold"
+                            value={statusForm.remittedAmount}
+                            onChange={e => setStatusForm({ ...statusForm, remittedAmount: Number(e.target.value) })}
+                        />
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="win-label">Notes</label>
+                        <textarea
+                            className="win-input p-3 h-24 resize-none"
+                            value={statusForm.notes}
+                            onChange={e => setStatusForm({ ...statusForm, notes: e.target.value })}
+                            placeholder="Transaction details..."
+                        />
+                    </div>
+
+                    <div className="pt-2">
+                        <button
+                            type="submit"
+                            disabled={isSaving}
+                            className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-xs uppercase tracking-widest shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2"
+                        >
+                            {isSaving ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} strokeWidth={3} />} UPDATE RECORD
+                        </button>
+                    </div>
+                </form>
+            </Modal>
 
             {/* --- REGISTER AGENT MODAL --- */}
             {isAgentModalOpen && (

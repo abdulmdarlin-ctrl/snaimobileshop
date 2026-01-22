@@ -24,6 +24,19 @@ export enum ProductType {
   OTHERS = 'Others'
 }
 
+export enum CustomerCategory {
+  RETAIL = 'Retail',
+  WHOLESALE = 'Wholesale',
+  MIDDLE_MAN = 'Middle Man',
+  VIP = 'VIP'
+}
+
+export enum CustomerStatus {
+  ACTIVE = 'Active',
+  INACTIVE = 'Inactive',
+  BLACKLISTED = 'Blacklisted'
+}
+
 export interface User {
   id?: string;
   username: string;
@@ -66,6 +79,23 @@ export interface Agent {
   notes?: string;
 }
 
+export interface Customer {
+  id?: string;
+  name: string;
+  phone: string;
+  email?: string;
+  address?: string;
+  tin?: string;
+  nin?: string;
+  category: CustomerCategory;
+  status: CustomerStatus;
+  notes?: string;
+  joinedDate: number;
+  totalSpending?: number;
+  visitCount?: number;
+  balance?: number;
+}
+
 export interface Loan {
   id?: string;
   agentId?: string;
@@ -75,7 +105,7 @@ export interface Loan {
   deviceModel: string;
   productId?: string;
   imei: string;
-  provider: 'TAKE NOW' | 'MOGO' | 'MOBI BUY' | 'Other';
+  provider: string;
   deposit: number;
   totalLoanAmount: number;
   dailyInstallment?: number;
@@ -231,6 +261,7 @@ export interface AppSettings {
   receiptShowLogo?: boolean;
   receiptShowTaxDetail?: boolean;
   receiptShowCashier?: boolean;
+  receiptShowQRCode?: boolean;
   receiptFont?: 'monospace' | 'sans' | 'serif';
   receiptFontSize?: number;
   receiptLineHeight?: number;

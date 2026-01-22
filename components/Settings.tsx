@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp, getApp, deleteApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
@@ -16,6 +16,7 @@ import {
    Cpu, Wifi, Bluetooth, ScanBarcode, FileJson, History, X, Filter, Calendar, ChevronDown, Image as ImageIcon
 } from 'lucide-react';
 import { useToast } from './Toast';
+import Modal from './Modal';
 import SnaiLogo from '../assets/SNAI-LOGO.png';
 
 interface SettingsProps {
@@ -66,6 +67,23 @@ const mockSaleForPreview: Sale = {
 const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale: Sale }) => {
    if (!settings || !sale) return null;
 
+   const [qrCodeDataURL, setQrCodeDataURL] = useState<string>('');
+
+   useEffect(() => {
+      const generateMockQR = async () => {
+         try {
+            const QRCode = (window as any).QRCode;
+            if (QRCode) {
+               const data = await QRCode.toDataURL(`SNA-VERIFY|${sale.receiptNo}|${sale.total}|${Date.now()}`);
+               setQrCodeDataURL(data);
+            }
+         } catch (err) {
+            console.error('Failed to generate mock QR', err);
+         }
+      };
+      generateMockQR();
+   }, [sale.receiptNo, sale.total, settings?.receiptShowQRCode]);
+
    return (
       <div
          id="receipt-preview"
@@ -81,9 +99,9 @@ const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale
             {settings.receiptShowLogo && (
                <img src={SnaiLogo} className="h-16 mx-auto mb-2 object-contain" alt="Logo" />
             )}
-            <h2 className="font-bold text-sm uppercase">{settings?.receiptHeader || settings?.businessName || 'SNA! SHOP'}</h2>
+            <h2 className="font-bold text-sm uppercase whitespace-pre-wrap">{settings?.receiptHeader || settings?.businessName || 'SNA! SHOP'}</h2>
             {settings?.tagline && <div className="text-[10px] italic">"{settings.tagline}"</div>}
-            <div className="text-[10px]">{settings?.address}</div>
+            <div className="text-[10px] whitespace-pre-wrap">{settings?.address}</div>
             <div className="text-[10px]">Tel: {settings?.phone}</div>
             {settings?.tin && <div className="text-[10px]">TIN: {settings.tin}</div>}
          </div>
@@ -105,7 +123,7 @@ const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale
 
          <div className="border-b border-black border-dashed mb-2"></div>
 
-         {/* Items from POS */}
+         {/* Items Section */}
          <div className="mb-2">
             {sale.items.map((item, i) => {
                const itemPrice = item.price;
@@ -113,27 +131,20 @@ const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale
                const discount = (originalItemPrice - itemPrice) * item.quantity;
                const itemTotal = item.total;
                return (
-                  <div key={i} className="mb-1.5">
-                     <div>{item.name}</div>
-                     {sale.customerType === 'Retail' && discount > 0 ? (
-                        <>
-                           <div className="flex justify-between pl-2">
-                              <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
-                              <span className="font-bold">{itemTotal.toLocaleString()}</span>
-                           </div>
-                           <div className="flex justify-between pl-2 text-[9px] text-slate-500">
-                              <span>(was {originalItemPrice.toLocaleString()} each)</span>
-                              <span>Discount: -{discount.toLocaleString()}</span>
-                           </div>
-                        </>
-                     ) : (
-                        <div className="flex justify-between pl-2">
-                           <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
-                           <span className="font-bold">{itemTotal.toLocaleString()}</span>
+                  <div key={i} className="mb-2">
+                     <div className="font-medium">{item.name}</div>
+                     <div className="flex justify-between pl-1">
+                        <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
+                        <span>{itemTotal.toLocaleString()}</span>
+                     </div>
+                     {sale.customerType === 'Retail' && discount > 0 && (
+                        <div className="flex justify-between pl-1 text-[9px] text-slate-500 italic">
+                           <span>(was {originalItemPrice.toLocaleString()} each)</span>
+                           <span>Discount: -{discount.toLocaleString()}</span>
                         </div>
                      )}
                      {item.warrantyEndDate && (
-                        <div className="pl-2 text-[9px] text-slate-500">
+                        <div className="pl-1 text-[9px] text-slate-500">
                            Warranty valid until: {new Date(item.warrantyEndDate).toLocaleDateString()}
                         </div>
                      )}
@@ -144,7 +155,7 @@ const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale
 
          <div className="border-b border-black border-dashed mb-2"></div>
 
-         {/* Totals from POS */}
+         {/* Totals Section */}
          <div className="space-y-1 mb-2">
             {(() => {
                const grossSubtotalBeforeAnyDiscounts = sale.items.reduce((acc, item) => acc + ((item.originalPrice || item.price) * item.quantity), 0);
@@ -170,7 +181,8 @@ const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale
                            <span>-{globalDiscountAmountInReceipt.toLocaleString()}</span>
                         </div>
                      )}
-                     <div className="flex justify-between font-bold border-t border-black border-dashed pt-1 mt-1">
+                     <div className="border-b border-black border-dashed my-1"></div>
+                     <div className="flex justify-between font-bold uppercase">
                         <span>NET SUBTOTAL</span>
                         <span>{netSubtotalAfterAllDiscounts.toLocaleString()}</span>
                      </div>
@@ -183,14 +195,26 @@ const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale
                   <span>{sale.tax.toLocaleString()}</span>
                </div>
             )}
-            <div className="flex justify-between font-bold text-sm border-t border-black pt-1 mt-1">
-               <span>TOTAL</span>
-               <span>{sale.total.toLocaleString()}</span>
+
+            <div className="border-t-2 border-black pt-1 mt-1">
+               <div className="flex justify-between font-black text-lg">
+                  <span>TOTAL</span>
+                  <span>{sale.total.toLocaleString()}</span>
+               </div>
             </div>
+
          </div>
+
+         {settings?.receiptShowQRCode && qrCodeDataURL && (
+            <div className="flex flex-col items-center py-4 border-t border-black border-dashed mt-2">
+               <img src={qrCodeDataURL} alt="Verification QR" className="w-24 h-24 mb-1" />
+               <p className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">Scan to Verify Transaction</p>
+            </div>
+         )}
 
          {/* Footer from POS */}
          <div
+            className="whitespace-pre-wrap"
             style={{
                fontSize: `${settings?.receiptFooterFontSize || 10}px`,
                fontWeight: settings?.receiptFooterBold ? 'bold' : 'normal',
@@ -295,13 +319,13 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
          const initialSettings: AppSettings = s || {
             businessName: 'SNA! MOBILE SHOP',
-            tagline: 'ERP Operations',
-            address: 'Kampala, Uganda',
-            phone: '+256 700 000 000',
+            tagline: 'We repair, we don\'t disrepair',
+            address: 'KYAZANGA OPP STABEX PETROL STATION',
+            phone: '+256 756337888 | +256 778413197',
             currency: 'UGX',
             taxEnabled: true,
             taxPercentage: 18,
-            receiptHeader: 'SNA! SHOP',
+            receiptHeader: 'SNA! MOBILE SHOP',
             receiptFooter: 'Thank you for shopping with us!',
             receiptFooterFontSize: 10,
             receiptFooterAlign: 'center',
@@ -309,6 +333,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
             receiptShowLogo: true,
             receiptShowCashier: true,
             receiptShowTaxDetail: true,
+            receiptShowQRCode: true,
             receiptFooterBold: false,
             receiptFooterItalic: false,
             receiptFont: 'monospace',
@@ -738,7 +763,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
          <div className="w-full lg:w-72 shrink-0 flex flex-col gap-6">
 
             {/* User Mini Profile */}
-            <div className="bg-white rounded-[2rem] p-6 border border-slate-100 shadow-sm flex items-center gap-4">
+            <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm flex items-center gap-4">
                <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200">
                   <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.username}`} alt="av" className="w-full h-full object-cover" />
                </div>
@@ -749,7 +774,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
             </div>
 
             {/* Navigation Menu */}
-            <div className="bg-white rounded-[2rem] p-4 border border-slate-100 shadow-sm flex-1 h-fit">
+            <div className="bg-white rounded-3xl p-4 border border-slate-100 shadow-sm flex-1 h-fit">
                <nav className="space-y-1">
                   {menuItems.map((item) => {
                      const isActive = activeTab === item.id;
@@ -777,7 +802,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
          </div>
 
          {/* RIGHT CONTENT AREA */}
-         <div className="flex-1 bg-white rounded-[2.5rem] border border-slate-100 shadow-sm flex flex-col overflow-hidden relative min-h-[600px]">
+         <div className="flex-1 bg-white rounded-3xl border border-slate-100 shadow-sm flex flex-col overflow-hidden relative min-h-[600px]">
 
             {/* Sticky Header */}
             <div className="px-8 py-6 border-b border-slate-50 flex flex-col sm:flex-row items-start sm:items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-20 gap-4">
@@ -921,7 +946,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                {/* --- HARDWARE TAB --- */}
                {activeTab === 'hardware' && isAdmin && (
                   <div className="space-y-8 max-w-4xl animate-in fade-in slide-in-from-bottom-4">
-                     <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden">
                         <div className="flex items-center gap-3 mb-6 relative z-10">
                            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
                               <Printer size={24} />
@@ -987,7 +1012,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                         </div>
                      </div>
 
-                     <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden">
                         <div className="flex items-center gap-3 mb-6 relative z-10">
                            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
                               <ScanBarcode size={24} />
@@ -1023,7 +1048,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                {activeTab === 'database' && isAdmin && (
                   <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 max-w-4xl">
                      {/* Backup Card with safe backup handler */}
-                     <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-lg transition-all">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-lg transition-all">
                         <div className="relative z-10">
                            <div className="w-12 h-12 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center mb-4">
                               <Download size={24} />
@@ -1039,7 +1064,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                      </div>
 
                      {/* Import Card */}
-                     <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-lg transition-all">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-lg transition-all">
                         <div className="relative z-10">
                            <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
                               <Upload size={24} />
@@ -1111,7 +1136,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
                {activeTab === 'profile' && (
                   <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 max-w-2xl mx-auto">
-                     <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-lg relative">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-lg relative">
                         <div className="flex items-center gap-4 mb-8">
                            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden border-2 border-slate-200">
                               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.username}`} alt="av" className="w-full h-full object-cover" />
@@ -1215,15 +1240,20 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                {activeTab === 'receipts' && isAdmin && (
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4">
                      <div className="space-y-8">
-                        <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm">
+                        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
                            <div className="flex items-center gap-2 mb-6">
                               <ScrollText className="text-orange-500" size={20} />
                               <h3 className="text-lg font-black text-slate-900 uppercase">Receipt Configuration</h3>
                            </div>
                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                              <div className="space-y-2">
+                              <div className="col-span-full space-y-2">
                                  <label className="win-label">Receipt Header</label>
-                                 <input className="win-input h-12" value={settings.receiptHeader} onChange={e => setSettings(s => s ? { ...s, receiptHeader: e.target.value } : null)} />
+                                 <textarea
+                                    className="win-input p-4 h-24 resize-none"
+                                    value={settings.receiptHeader}
+                                    onChange={e => setSettings(s => s ? { ...s, receiptHeader: e.target.value } : null)}
+                                    placeholder="Enter business name and branch details..."
+                                 />
                               </div>
                               <div className="space-y-2">
                                  <label className="win-label">Tax ID / TIN</label>
@@ -1279,7 +1309,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            </div>
                         </div>
 
-                        <div className="bg-white p-8 rounded-[2rem] border border-slate-100 shadow-sm">
+                        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
                            <div className="flex items-center gap-2 mb-6">
                               <Type className="text-blue-500" size={20} />
                               <h3 className="text-lg font-black text-slate-900 uppercase">Receipt Typography</h3>
@@ -1383,7 +1413,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                         </button>
                      </div>
 
-                     <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden">
+                     <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
                         {/* Header with Clear Button */}
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-slate-50 pb-4">
                            <div>
@@ -1471,102 +1501,99 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
          </div>
 
          {/* --- USER MODAL --- */}
-         {
-            isUserModalOpen && (
-               <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-                  <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20">
-                     <div className="p-8 border-b border-slate-50 flex items-center justify-between">
-                        <h2 className="text-xl font-black text-slate-900 italic uppercase tracking-tighter">{editingUser ? 'Edit User' : 'New User'}</h2>
-                        <button onClick={() => setIsUserModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-50 transition-all"><X size={24} /></button>
-                     </div>
-                     <div className="p-8 space-y-6">
-                        <div className="grid grid-cols-2 gap-4">
-                           <div className="space-y-2">
-                              <label className="win-label">Username</label>
-                              <input className="win-input h-12" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} disabled={!!editingUser && editingUser.id !== currentUser.id} />
-                           </div>
-                           <div className="space-y-2">
-                              <label className="win-label">Full Name</label>
-                              <input className="win-input h-12" value={userForm.fullName} onChange={e => setUserForm({ ...userForm, fullName: e.target.value })} />
-                           </div>
-                        </div>
-                        <div className="space-y-2">
-                           <label className="win-label">Role</label>
-                           <select className="win-input h-12" value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value as UserRole })} disabled={editingUser?.id === currentUser.id && currentUser.role === UserRole.ADMIN}>
-                              {Object.values(UserRole).map(r => <option key={r} value={r}>{r}</option>)}
-                           </select>
-                        </div>
-
-                        {/* Added Last Login Field for visibility */}
-                        {editingUser && (
-                           <div className="space-y-2">
-                              <label className="win-label">Last Login Timestamp</label>
-                              <div className="relative">
-                                 <input
-                                    disabled
-                                    className="win-input h-12 bg-slate-50 text-slate-500 pl-10 font-mono text-xs"
-                                    value={editingUser.lastLogin ? new Date(editingUser.lastLogin).toLocaleString() : 'Never Logged In'}
-                                 />
-                                 <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                              </div>
-                           </div>
-                        )}
-
-                        <div className="space-y-2">
-                           <label className="win-label">Password {editingUser && '(Optional)'}</label>
-                           <div className="relative">
-                              <input type={showPassword ? "text" : "password"} className="win-input h-12 pr-10" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder={editingUser ? "Leave blank to keep current" : ""} />
-                              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                              </button>
-                           </div>
-                        </div>
-                        <div className="pt-4 flex gap-4">
-                           <button onClick={() => setIsUserModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-slate-200">Cancel</button>
-                           <button onClick={handleUserSave} disabled={userSaving} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-black flex items-center justify-center gap-2">
-                              {userSaving && <Loader2 size={14} className="animate-spin" />}
-                              {userSaving ? 'Saving...' : 'Save User'}
-                           </button>
-                        </div>
-                     </div>
+         <Modal
+            isOpen={isUserModalOpen}
+            onClose={() => setIsUserModalOpen(false)}
+            title={editingUser ? 'Edit User' : 'New User'}
+            maxWidth="lg"
+            noPadding
+         >
+            <div className="p-8 space-y-6">
+               <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                     <label className="win-label">Username</label>
+                     <input className="win-input h-12" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} disabled={!!editingUser && editingUser.id !== currentUser.id} />
+                  </div>
+                  <div className="space-y-2">
+                     <label className="win-label">Full Name</label>
+                     <input className="win-input h-12" value={userForm.fullName} onChange={e => setUserForm({ ...userForm, fullName: e.target.value })} />
                   </div>
                </div>
-            )
-         }
+               <div className="space-y-2">
+                  <label className="win-label">Role</label>
+                  <select className="win-input h-12" value={userForm.role} onChange={e => setUserForm({ ...userForm, role: e.target.value as UserRole })} disabled={editingUser?.id === currentUser.id && currentUser.role === UserRole.ADMIN}>
+                     {Object.values(UserRole).map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+               </div>
+
+               {/* Added Last Login Field for visibility */}
+               {editingUser && (
+                  <div className="space-y-2">
+                     <label className="win-label">Last Login Timestamp</label>
+                     <div className="relative">
+                        <input
+                           disabled
+                           className="win-input h-12 bg-slate-50 text-slate-500 pl-10 font-mono text-xs"
+                           value={editingUser.lastLogin ? new Date(editingUser.lastLogin).toLocaleString() : 'Never Logged In'}
+                        />
+                        <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                     </div>
+                  </div>
+               )}
+
+               <div className="space-y-2">
+                  <label className="win-label">Password {editingUser && '(Optional)'}</label>
+                  <div className="relative">
+                     <input type={showPassword ? "text" : "password"} className="win-input h-12 pr-10" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder={editingUser ? "Leave blank to keep current" : ""} />
+                     <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                     </button>
+                  </div>
+               </div>
+               <div className="pt-4 flex gap-4">
+                  <button onClick={() => setIsUserModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-slate-200">Cancel</button>
+                  <button onClick={handleUserSave} disabled={userSaving} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-black flex items-center justify-center gap-2">
+                     {userSaving && <Loader2 size={14} className="animate-spin" />}
+                     {userSaving ? 'Saving...' : 'Save User'}
+                  </button>
+               </div>
+            </div>
+         </Modal>
 
          {/* --- IMPORT MODAL --- */}
-         {
-            isImportModalOpen && (
-               <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-                  <div className="bg-white w-full max-w-2xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/20">
-                     <div className="p-8 border-b border-slate-50 flex items-center justify-between">
-                        <h2 className="text-xl font-black text-slate-900 italic uppercase tracking-tighter">Bulk Import Products</h2>
-                        <button onClick={() => setIsImportModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-50 transition-all"><X size={24} /></button>
-                     </div>
-                     <div className="p-8 space-y-6">
-                        <p className="text-sm text-slate-500">Paste CSV data (Name, SKU, Category, Cost, Price, Stock)</p>
-                        <textarea
-                           className="w-full h-64 p-4 bg-slate-50 rounded-2xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
-                           placeholder="iPhone 13, IPH13, Phones, 2000000, 2500000, 10..."
-                           value={importText}
-                           onChange={e => setImportText(e.target.value)}
-                        />
-                        <div className="flex gap-4">
-                           <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-slate-200">Cancel</button>
-                           <button onClick={handleImportProducts} disabled={importing} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-black disabled:opacity-70">
-                              {importing ? 'Importing...' : 'Process Import'}
-                           </button>
-                        </div>
-                     </div>
-                  </div>
+         <Modal
+            isOpen={isImportModalOpen}
+            onClose={() => setIsImportModalOpen(false)}
+            title="Bulk Import Products"
+            maxWidth="2xl"
+            noPadding
+         >
+            <div className="p-8 space-y-6">
+               <p className="text-sm text-slate-500">Paste CSV data (Name, SKU, Category, Cost, Price, Stock)</p>
+               <textarea
+                  className="w-full h-64 p-4 bg-slate-50 rounded-2xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
+                  placeholder="iPhone 13, IPH13, Phones, 2000000, 2500000, 10..."
+                  value={importText}
+                  onChange={e => setImportText(e.target.value)}
+               />
+               <div className="flex gap-4">
+                  <button onClick={() => setIsImportModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-slate-200">Cancel</button>
+                  <button onClick={handleImportProducts} disabled={importing} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-black disabled:opacity-70">
+                     {importing ? 'Importing...' : 'Process Import'}
+                  </button>
                </div>
-            )
-         }
+            </div>
+         </Modal>
 
          {
             userToDelete && (
-               <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-                  <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6">
+               <Modal
+                  isOpen={!!userToDelete}
+                  onClose={() => setUserToDelete(null)}
+                  maxWidth="sm"
+                  noPadding
+               >
+                  <div className="p-8 text-center space-y-6">
                      <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
                         <AlertTriangle size={40} strokeWidth={2} />
                      </div>
@@ -1583,34 +1610,35 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                         </button>
                      </div>
                   </div>
-               </div>
+               </Modal>
             )
          }
 
          {/* CONFIRMATION MODAL FOR CLEARING AUDIT LOGS */}
-         {
-            isClearLogsConfirmOpen && (
-               <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-                  <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6 border border-white/20">
-                     <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                        <AlertTriangle size={40} strokeWidth={2} />
-                     </div>
-                     <div>
-                        <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">System Warning</h3>
-                        <p className="text-sm text-slate-500 font-medium mt-2 leading-relaxed">
-                           You are about to permanently delete <span className="text-slate-900 font-bold">ALL Audit Logs</span>. This action cannot be undone and removes all activity history.
-                        </p>
-                     </div>
-                     <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => setIsClearLogsConfirmOpen(false)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                        <button onClick={performClearLogs} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all">
-                           {clearingLogs ? <Loader2 className="animate-spin inline mr-2" size={12} /> : null} Yes, Clear All
-                        </button>
-                     </div>
-                  </div>
+         <Modal
+            isOpen={isClearLogsConfirmOpen}
+            onClose={() => setIsClearLogsConfirmOpen(false)}
+            maxWidth="sm"
+            noPadding
+         >
+            <div className="p-8 text-center space-y-6">
+               <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
+                  <AlertTriangle size={40} strokeWidth={2} />
                </div>
-            )
-         }
+               <div>
+                  <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">System Warning</h3>
+                  <p className="text-sm text-slate-500 font-medium mt-2 leading-relaxed">
+                     You are about to permanently delete <span className="text-slate-900 font-bold">ALL Audit Logs</span>. This action cannot be undone and removes all activity history.
+                  </p>
+               </div>
+               <div className="grid grid-cols-2 gap-3">
+                  <button onClick={() => setIsClearLogsConfirmOpen(false)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
+                  <button onClick={performClearLogs} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all">
+                     {clearingLogs ? <Loader2 className="animate-spin inline mr-2" size={12} /> : null} Yes, Clear All
+                  </button>
+               </div>
+            </div>
+         </Modal>
 
       </div >
    );

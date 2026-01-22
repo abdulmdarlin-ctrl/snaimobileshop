@@ -177,7 +177,6 @@ const App: React.FC = () => {
             onNavigate={setCurrentPage}
             currentPage={currentPage}
             onMenuToggle={() => setIsSidebarOpen(!isSidebarOpen)}
-            settings={settings}
           />
           <main className="flex-1 overflow-y-auto p-4 lg:p-10 scrollbar-hide">
             <div className="max-w-[1600px] mx-auto w-full h-full">

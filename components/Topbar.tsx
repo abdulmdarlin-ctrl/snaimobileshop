@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Bell, LogOut, Settings, ChevronDown, Menu, Database, WifiOff, RefreshCw, AlertTriangle, PackageX, Globe, User as UserIcon } from 'lucide-react';
-import { User, Product, AppSettings } from '../types';
+import { Bell, LogOut, Settings, ChevronDown, Menu, Database, WifiOff, RefreshCw, AlertTriangle, PackageX, Globe, User as UserIcon, Sun, Moon, Sunrise, Sunset, CalendarDays, Sparkles, Clock, Search } from 'lucide-react';
+import { User, Product } from '../types';
 import { Page } from '../App';
 import { db } from '../db';
 
@@ -11,10 +11,9 @@ interface TopbarProps {
   currentPage: Page;
   onNavigate: (page: Page) => void;
   onMenuToggle: () => void;
-  settings: AppSettings | null;
 }
 
-const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggle, settings }) => {
+const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggle, currentPage }) => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [lowStockCount, setLowStockCount] = useState(0);
   const [lowStockItems, setLowStockItems] = useState<Product[]>([]);
@@ -53,6 +52,20 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
     return () => clearInterval(timer);
   }, []);
 
+  const [greeting, setGreeting] = useState('');
+
+
+  useEffect(() => {
+    const updateGreeting = () => {
+      const h = new Date().getHours();
+      setGreeting(h < 12 ? 'Good Morning' : h < 18 ? 'Good Afternoon' : 'Good Evening');
+    };
+    updateGreeting();
+
+    const interval = setInterval(updateGreeting, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -81,7 +94,7 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
   return (
     <header className="h-20 bg-white/80 backdrop-blur-xl flex items-center justify-between px-4 lg:px-8 z-40 shrink-0 border-b border-slate-200/60 sticky top-0 w-full transition-all duration-300 shadow-sm">
 
-      {/* Left Section: Brand & Menu */}
+      {/* Left Section: Menu Toggle (Mobile Only) */}
       <div className="flex items-center gap-3 lg:gap-5">
         <button
           onClick={onMenuToggle}
@@ -89,52 +102,33 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
         >
           <Menu size={22} strokeWidth={2} />
         </button>
-
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center text-white shadow-lg shadow-slate-900/10 overflow-hidden shrink-0">
-            {settings?.logo ? (
-              <img src={settings.logo} alt="Logo" className="w-full h-full object-cover" />
-            ) : (
-              <span className="font-black text-xs tracking-tighter">SNA</span>
-            )}
-          </div>
-
-          <div className="hidden md:flex flex-col">
-            <h1 className="text-sm font-black text-slate-900 leading-tight tracking-tight uppercase">
-              {settings?.businessName || 'SNA Mobile'}
-            </h1>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <div className={`w-1.5 h-1.5 rounded-full ${dbStatus === 'live' ? 'bg-emerald-500 animate-pulse' : 'bg-orange-500'}`} />
-              <span className="text-[10px] font-bold text-slate-400 uppercase">
-                {dbStatus === 'live' ? 'System Online' : 'Local Mode'}
-              </span>
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* Center Section: Welcome Message */}
-      <div className="flex-1 flex justify-center items-center px-4">
-        <div className="hidden md:flex flex-col items-center">
-          <span className="text-xl font-black text-slate-900">
-            Welcome to Sna! Mobile Shop System
-          </span>
-          <span className="text-xs font-bold text-slate-500">
-            Enterprise Resource Planning
-          </span>
+      {/* Center Section: Page Title & Search (Migrated from Dashboard) */}
+      <div className="flex-1 px-4 lg:px-8 flex items-center justify-between gap-8">
+        <h1 className="text-xl font-bold text-slate-900 capitalize hidden md:block">
+          {currentPage === 'sales' ? 'Point of Sale' : currentPage}
+        </h1>
+
+        <div className="flex-1 max-w-lg relative group">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <Search size={18} className="text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+          </div>
+          <input
+            type="text"
+            placeholder="Search projects, sales, repairs..."
+            className="w-full bg-slate-50 border-none rounded-full py-2.5 pl-10 pr-4 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all shadow-sm group-hover:bg-white"
+          />
         </div>
       </div>
 
       {/* Right Section: Actions & Profile */}
       <div className="flex items-center gap-2 sm:gap-4">
 
-        {/* Clock */}
+        {/* Clock - Minimal */}
         <div className="hidden lg:flex flex-col items-end mr-2">
-          <span className="text-xs font-black text-slate-700 leading-none">
+          <span className="text-xs font-bold text-slate-500">
             {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
-          <span className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">
-            {currentTime.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
           </span>
         </div>
 
@@ -153,7 +147,7 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
           {isNotificationsOpen && (
             <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden animate-in z-50">
               <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
-                <span className="text-[10px] font-black text-slate-500 uppercase">Notifications</span>
+                <span className="text-[10px] text-slate-500 uppercase">Notifications</span>
                 {lowStockCount > 0 && <span className="text-[9px] font-bold text-white bg-orange-600 px-2 py-0.5 rounded-full">{lowStockCount} Alerts</span>}
               </div>
               <div className="max-h-[300px] overflow-y-auto">
@@ -212,7 +206,7 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
           {isProfileOpen && (
             <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden py-1 animate-in z-50">
               <div className="px-4 py-2 border-b border-slate-50 mb-1">
-                <p className="text-[10px] font-black text-slate-400 uppercase">Logged as</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase">Logged as</p>
                 <p className="text-xs font-bold text-slate-900 truncate">{user.fullName || user.username}</p>
               </div>
               <button onClick={() => { onNavigate('settings'); setIsProfileOpen(false); }} className="w-full flex items-center px-4 py-2 text-xs text-slate-600 hover:bg-slate-50">

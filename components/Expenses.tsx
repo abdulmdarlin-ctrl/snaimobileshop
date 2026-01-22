@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../db';
 import { Expense, UserRole, User, ExpenseCategory } from '../types';
@@ -14,6 +13,7 @@ import {
 } from 'recharts';
 import { exportSectionToPDF } from '../utils/printExport';
 import { useToast } from './Toast';
+import Modal from './Modal';
 
 interface ExpensesProps {
    user: User;
@@ -532,207 +532,210 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
          {/* --- MODALS --- */}
 
          {/* Add/Edit Expense Modal */}
-         {isModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-white/20">
-                  <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                     <h2 className="text-lg font-bold text-slate-900">{editingId ? 'Edit Expense' : 'New Expense'}</h2>
-                     <button onClick={() => setIsModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-900" /></button>
+         <Modal
+            isOpen={isModalOpen}
+            onClose={() => setIsModalOpen(false)}
+            title={editingId ? 'Edit Expense' : 'New Expense'}
+            maxWidth="sm"
+         >
+            <form onSubmit={handleSave} className="space-y-4">
+               <div className="space-y-1.5">
+                  <label className="win-label">Category</label>
+                  <div className="relative">
+                     <select
+                        className="win-input h-10 appearance-none font-bold"
+                        value={formData.category}
+                        onChange={e => setFormData({ ...formData, category: e.target.value })}
+                     >
+                        {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
+                     </select>
+                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
                   </div>
-                  <form onSubmit={handleSave} className="p-6 space-y-4">
-                     <div className="space-y-1.5">
-                        <label className="win-label">Category</label>
-                        <div className="relative">
-                           <select
-                              className="win-input h-10 appearance-none font-bold"
-                              value={formData.category}
-                              onChange={e => setFormData({ ...formData, category: e.target.value })}
-                           >
-                              {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-                           </select>
-                           <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
-                        </div>
-                     </div>
-
-                     <div className="space-y-1.5">
-                        <label className="win-label">Description</label>
-                        <input
-                           required
-                           className="win-input h-10 font-bold"
-                           value={formData.description}
-                           onChange={e => setFormData({ ...formData, description: e.target.value })}
-                           placeholder="e.g. Electricity Bill"
-                        />
-                     </div>
-
-                     <div className="space-y-1.5">
-                        <label className="win-label">Amount (UGX)</label>
-                        <input
-                           type="number"
-                           min="0"
-                           required
-                           className="win-input h-10 font-bold"
-                           value={formData.amount}
-                           onChange={e => setFormData({ ...formData, amount: Number(e.target.value) })}
-                        />
-                     </div>
-
-                     <div className="space-y-1.5">
-                        <label className="win-label">Date</label>
-                        <input
-                           type="date"
-                           required
-                           className="win-input h-10 font-bold"
-                           value={new Date(formData.date).toISOString().split('T')[0]}
-                           onChange={e => setFormData({ ...formData, date: new Date(e.target.value).getTime() })}
-                        />
-                     </div>
-
-                     <button className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all mt-2">
-                        {editingId ? 'Update Expense' : 'Record Expense'}
-                     </button>
-                  </form>
                </div>
-            </div>
-         )}
+
+               <div className="space-y-1.5">
+                  <label className="win-label">Description</label>
+                  <input
+                     required
+                     className="win-input h-10 font-bold"
+                     value={formData.description}
+                     onChange={e => setFormData({ ...formData, description: e.target.value })}
+                     placeholder="e.g. Electricity Bill"
+                  />
+               </div>
+
+               <div className="space-y-1.5">
+                  <label className="win-label">Amount (UGX)</label>
+                  <input
+                     type="number"
+                     min="0"
+                     required
+                     className="win-input h-10 font-bold"
+                     value={formData.amount}
+                     onChange={e => setFormData({ ...formData, amount: Number(e.target.value) })}
+                  />
+               </div>
+
+               <div className="space-y-1.5">
+                  <label className="win-label">Date</label>
+                  <input
+                     type="date"
+                     required
+                     className="win-input h-10 font-bold"
+                     value={new Date(formData.date).toISOString().split('T')[0]}
+                     onChange={e => setFormData({ ...formData, date: new Date(e.target.value).getTime() })}
+                  />
+               </div>
+
+               <button className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all mt-2">
+                  {editingId ? 'Update Expense' : 'Record Expense'}
+               </button>
+            </form>
+         </Modal>
 
          {/* Categories Modal */}
-         {isCategoryModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[80vh]">
-                  <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                     <h2 className="text-lg font-bold text-slate-900">Manage Categories</h2>
-                     <button onClick={() => setIsCategoryModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-900" /></button>
+         <Modal
+            isOpen={isCategoryModalOpen}
+            onClose={() => setIsCategoryModalOpen(false)}
+            title="Manage Categories"
+            maxWidth="sm"
+            noPadding
+         >
+            <div className="flex flex-col max-h-[80vh]">
+               <div className="p-4 border-b border-slate-100 bg-white">
+                  <div className="flex gap-2">
+                     <input
+                        className="flex-1 win-input h-10 text-xs font-bold"
+                        placeholder="New Category Name"
+                        value={newCategoryName}
+                        onChange={e => setNewCategoryName(e.target.value)}
+                     />
+                     <button
+                        onClick={handleAddCategory}
+                        className="bg-slate-900 text-white px-3 rounded-lg hover:bg-black transition-colors"
+                     >
+                        <Plus size={16} />
+                     </button>
                   </div>
+               </div>
 
-                  <div className="p-4 border-b border-slate-100 bg-white">
-                     <div className="flex gap-2">
-                        <input
-                           className="flex-1 win-input h-10 text-xs font-bold"
-                           placeholder="New Category Name"
-                           value={newCategoryName}
-                           onChange={e => setNewCategoryName(e.target.value)}
-                        />
+               <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                  {categories.map(cat => (
+                     <div key={cat.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-100 group">
+                        <span className="text-xs font-bold text-slate-700">{cat.name}</span>
                         <button
-                           onClick={handleAddCategory}
-                           className="bg-slate-900 text-white px-3 rounded-lg hover:bg-black transition-colors"
+                           onClick={() => setCategoryToDelete(cat)}
+                           className="text-slate-300 hover:text-red-500 transition-colors"
                         >
-                           <Plus size={16} />
+                           <Trash2 size={14} />
                         </button>
                      </div>
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                     {categories.map(cat => (
-                        <div key={cat.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg border border-slate-100 group">
-                           <span className="text-xs font-bold text-slate-700">{cat.name}</span>
-                           <button
-                              onClick={() => setCategoryToDelete(cat)}
-                              className="text-slate-300 hover:text-red-500 transition-colors"
-                           >
-                              <Trash2 size={14} />
-                           </button>
-                        </div>
-                     ))}
-                  </div>
+                  ))}
                </div>
             </div>
-         )}
+         </Modal>
 
          {/* History Modal (Full List) */}
-         {isHistoryModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
-                  <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white">
-                     <div>
-                        <h2 className="text-lg font-bold text-slate-900">Expense History</h2>
-                        <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5">All Transactions</p>
-                     </div>
-                     <button onClick={() => setIsHistoryModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-900" /></button>
-                  </div>
-
-                  <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center gap-4">
-                     <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
-                        <input
-                           className="w-full pl-9 h-10 bg-white border border-slate-200 rounded-lg text-xs font-bold focus:outline-none focus:border-slate-300"
-                           placeholder="Search description or category..."
-                           value={historySearch}
-                           onChange={e => setHistorySearch(e.target.value)}
-                        />
-                     </div>
-                  </div>
-
-                  <div className="flex-1 overflow-y-auto">
-                     <table className="w-full text-left border-collapse">
-                        <thead className="bg-white sticky top-0 z-10 border-b border-slate-100 shadow-sm">
-                           <tr>
-                              <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
-                              <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Description</th>
-                              <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Category</th>
-                              <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Amount</th>
-                              <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
-                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-50">
-                           {expenses.filter(e =>
-                              e.description.toLowerCase().includes(historySearch.toLowerCase()) ||
-                              e.category.toLowerCase().includes(historySearch.toLowerCase())
-                           ).map(expense => (
-                              <tr key={expense.id} className="hover:bg-slate-50 transition-colors">
-                                 <td className="px-6 py-3 text-xs text-slate-500 font-mono">
-                                    {new Date(expense.date).toLocaleDateString()}
-                                 </td>
-                                 <td className="px-6 py-3 text-xs font-bold text-slate-800">
-                                    {expense.description}
-                                 </td>
-                                 <td className="px-6 py-3">
-                                    <span className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold uppercase text-slate-600">
-                                       {expense.category}
-                                    </span>
-                                 </td>
-                                 <td className="px-6 py-3 text-right text-xs font-black text-slate-900">
-                                    {Number(expense.amount).toLocaleString()}
-                                 </td>
-                                 <td className="px-6 py-3 text-right">
-                                    <div className="flex justify-end gap-2">
-                                       <button
-                                          onClick={() => {
-                                             setEditingId(expense.id!);
-                                             setFormData({
-                                                category: expense.category,
-                                                description: expense.description,
-                                                amount: Number(expense.amount),
-                                                date: expense.date
-                                             });
-                                             setIsHistoryModalOpen(false);
-                                             setIsModalOpen(true);
-                                          }}
-                                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
-                                       >
-                                          <Edit2 size={14} />
-                                       </button>
-                                       <button
-                                          onClick={() => setExpenseToDelete(expense)}
-                                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                                       >
-                                          <Trash2 size={14} />
-                                       </button>
-                                    </div>
-                                 </td>
-                              </tr>
-                           ))}
-                        </tbody>
-                     </table>
+         <Modal
+            isOpen={isHistoryModalOpen}
+            onClose={() => setIsHistoryModalOpen(false)}
+            title={
+               <div>
+                  <h2 className="text-lg font-bold text-slate-900">Expense History</h2>
+                  <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5">All Transactions</p>
+               </div>
+            }
+            maxWidth="4xl"
+            noPadding
+         >
+            <div className="flex flex-col max-h-[90vh]">
+               <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center gap-4">
+                  <div className="relative flex-1">
+                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                     <input
+                        className="w-full pl-9 h-10 bg-white border border-slate-200 rounded-lg text-xs font-bold focus:outline-none focus:border-slate-300"
+                        placeholder="Search description or category..."
+                        value={historySearch}
+                        onChange={e => setHistorySearch(e.target.value)}
+                     />
                   </div>
                </div>
+
+               <div className="flex-1 overflow-y-auto">
+                  <table className="w-full text-left border-collapse">
+                     <thead className="bg-white sticky top-0 z-10 border-b border-slate-100 shadow-sm">
+                        <tr>
+                           <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
+                           <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Description</th>
+                           <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Category</th>
+                           <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Amount</th>
+                           <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
+                        </tr>
+                     </thead>
+                     <tbody className="divide-y divide-slate-50">
+                        {expenses.filter(e =>
+                           e.description.toLowerCase().includes(historySearch.toLowerCase()) ||
+                           e.category.toLowerCase().includes(historySearch.toLowerCase())
+                        ).map(expense => (
+                           <tr key={expense.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-6 py-3 text-xs text-slate-500 font-mono">
+                                 {new Date(expense.date).toLocaleDateString()}
+                              </td>
+                              <td className="px-6 py-3 text-xs font-bold text-slate-800">
+                                 {expense.description}
+                              </td>
+                              <td className="px-6 py-3">
+                                 <span className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold uppercase text-slate-600">
+                                    {expense.category}
+                                 </span>
+                              </td>
+                              <td className="px-6 py-3 text-right text-xs font-black text-slate-900">
+                                 {Number(expense.amount).toLocaleString()}
+                              </td>
+                              <td className="px-6 py-3 text-right">
+                                 <div className="flex justify-end gap-2">
+                                    <button
+                                       onClick={() => {
+                                          setEditingId(expense.id!);
+                                          setFormData({
+                                             category: expense.category,
+                                             description: expense.description,
+                                             amount: Number(expense.amount),
+                                             date: expense.date
+                                          });
+                                          setIsHistoryModalOpen(false);
+                                          setIsModalOpen(true);
+                                       }}
+                                       className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
+                                    >
+                                       <Edit2 size={14} />
+                                    </button>
+                                    <button
+                                       onClick={() => setExpenseToDelete(expense)}
+                                       className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                       title="Delete Expense"
+                                    >
+                                       <Trash2 size={14} />
+                                    </button>
+                                 </div>
+                              </td>
+                           </tr>
+                        ))}
+                     </tbody>
+                  </table>
+               </div>
             </div>
-         )}
+         </Modal>
 
          {/* Delete Confirmation Modal (Expense) */}
-         {expenseToDelete && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6 border border-white/20">
+         <Modal
+            isOpen={!!expenseToDelete}
+            onClose={() => setExpenseToDelete(null)}
+            noPadding
+            maxWidth="sm"
+         >
+            {expenseToDelete && (
+               <div className="p-8 text-center space-y-6">
                   <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
                      <AlertTriangle size={40} strokeWidth={2} />
                   </div>
@@ -749,13 +752,18 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                      </button>
                   </div>
                </div>
-            </div>
-         )}
+            )}
+         </Modal>
 
          {/* Delete Confirmation Modal (Category) */}
-         {categoryToDelete && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6 border border-white/20">
+         <Modal
+            isOpen={!!categoryToDelete}
+            onClose={() => setCategoryToDelete(null)}
+            noPadding
+            maxWidth="sm"
+         >
+            {categoryToDelete && (
+               <div className="p-8 text-center space-y-6">
                   <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
                      <AlertTriangle size={40} strokeWidth={2} />
                   </div>
@@ -772,8 +780,8 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                      </button>
                   </div>
                </div>
-            </div>
-         )}
+            )}
+         </Modal>
       </div>
    );
 };

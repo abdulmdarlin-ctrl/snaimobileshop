@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { printSection } from '../utils/printExport';
 import { useToast } from './Toast';
+import Modal from './Modal';
 import JsBarcode from 'jsbarcode';
 
 interface RepairsProps { user: User; }
@@ -198,6 +199,17 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
       r.deviceModel.toLowerCase().includes(searchTerm.toLowerCase())
    );
 
+   // Stats Calculation
+   const repairStats = React.useMemo(() => {
+      const active = repairs.filter(r => r.status !== RepairStatus.COMPLETED && r.status !== RepairStatus.DELIVERED && r.status !== RepairStatus.CANCELLED).length;
+      const completed = repairs.filter(r => r.status === RepairStatus.COMPLETED || r.status === RepairStatus.DELIVERED).length;
+      const pendingRevenue = repairs.reduce((acc, r) => {
+         if (r.status === RepairStatus.COMPLETED || r.status === RepairStatus.DELIVERED || r.status === RepairStatus.CANCELLED) return acc;
+         return acc + (r.estimatedCost - r.depositPaid);
+      }, 0);
+      return { active, completed, pendingRevenue };
+   }, [repairs]);
+
    const getStatusColor = (status: RepairStatus) => {
       switch (status) {
          case RepairStatus.RECEIVED: return 'bg-slate-100 text-slate-600 border-slate-200';
@@ -212,37 +224,76 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
    };
 
    return (
-      <div className="space-y-6 pb-20 font-sans">
+      <div className="space-y-6 pb-20 font-sans animate-in fade-in duration-500">
 
-         {/* --- HEADER --- */}
-         <div className="flex flex-col sm:flex-row sm:items-center justify-between no-print gap-4">
-            <div className="flex items-center gap-4">
-               <div className="p-4 bg-white rounded-2xl shadow-sm border border-slate-200 text-orange-600">
-                  <Wrench size={24} strokeWidth={2.5} />
+         {/* --- CONTROL PANEL --- */}
+         <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+            <div className="relative w-full md:w-96 group">
+               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                  <Search size={18} className="text-slate-400 group-focus-within:text-orange-500 transition-colors" />
                </div>
-               <div>
-                  <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Repair Center</h1>
-                  <p className="text-sm text-slate-500 mt-1">Active Jobs: <span className="text-slate-900 font-bold">{repairs.length}</span></p>
-               </div>
+               <input
+                  type="text"
+                  placeholder="Search by customer, job ID or model..."
+                  className="w-full bg-slate-50 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-orange-500/20 focus:bg-white transition-all shadow-inner"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+               />
             </div>
-            <button
-               onClick={() => { setFormData(initialForm); setIsModalOpen(true); }}
-               className="flex items-center gap-2 px-6 py-3 bg-orange-600 text-white rounded-xl shadow-lg shadow-orange-600/20 hover:bg-orange-700 transition-all font-bold text-sm"
-            >
-               <Plus size={18} strokeWidth={2.5} />
-               <span>New Job Card</span>
-            </button>
+
+            <div className="flex items-center gap-3 w-full md:w-auto">
+               <button
+                  onClick={() => { setFormData(initialForm); setIsModalOpen(true); }}
+                  className="px-6 py-2.5 bg-orange-600 hover:bg-orange-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider shadow-lg shadow-orange-600/20 flex items-center gap-2 transition-all active:scale-95 shrink-0 ml-auto"
+               >
+                  <Plus size={16} strokeWidth={3} /> New Job Card
+               </button>
+            </div>
          </div>
 
-         {/* --- SEARCH --- */}
-         <div className="bg-white p-2 border border-slate-200 rounded-xl flex items-center relative shadow-sm">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input
-               className="w-full pl-12 h-12 bg-transparent text-sm font-medium focus:outline-none"
-               placeholder="Search by customer, job ID or model..."
-               value={searchTerm}
-               onChange={e => setSearchTerm(e.target.value)}
-            />
+         {/* --- STATS GRID --- */}
+         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow group">
+               <div>
+                  <p className="text-sm text-slate-500 font-medium mb-1">Active Jobs</p>
+                  <h3 className="text-2xl font-bold text-slate-800">{repairStats.active}</h3>
+                  <p className="text-xs text-orange-500 mt-1 font-medium flex items-center gap-1">
+                     <Clock size={12} /> In Progress
+                  </p>
+               </div>
+               <div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center text-orange-500 group-hover:scale-110 transition-transform">
+                  <Wrench size={24} />
+               </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow group">
+               <div>
+                  <p className="text-sm text-slate-500 font-medium mb-1">Completed</p>
+                  <h3 className="text-2xl font-bold text-slate-800">{repairStats.completed}</h3>
+                  <p className="text-xs text-emerald-500 mt-1 font-medium flex items-center gap-1">
+                     <CheckCircle2 size={12} /> Ready/Delivered
+                  </p>
+               </div>
+               <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center text-emerald-500 group-hover:scale-110 transition-transform">
+                  <CheckCircle2 size={24} />
+               </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow group">
+               <div>
+                  <p className="text-sm text-slate-500 font-medium mb-1">Pending Revenue</p>
+                  <h3 className="text-2xl font-bold text-slate-800">
+                     <span className="text-sm text-slate-400 mr-1">UGX</span>
+                     {(repairStats.pendingRevenue / 1000).toFixed(0)}k
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1 font-medium flex items-center gap-1">
+                     <DollarSign size={12} /> Unpaid Balances
+                  </p>
+               </div>
+               <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-500 group-hover:scale-110 transition-transform">
+                  <CreditCard size={24} />
+               </div>
+            </div>
          </div>
 
          {/* --- REPAIR GRID --- */}
@@ -318,122 +369,109 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
          </div>
 
          {/* --- JOB ENTRY MODAL --- */}
-         {isModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in !mt-0">
-               <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
+         <Modal
+            isOpen={isModalOpen}
+            onClose={closeModal}
+            title={editingRepair ? 'Update Job Details' : 'New Service Request'}
+            maxWidth="2xl"
+         >
+            <form onSubmit={handleSave} className="space-y-6">
 
-                  {/* Modal Header */}
-                  <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-orange-50 rounded-xl flex items-center justify-center text-orange-600">
-                           <Wrench size={20} strokeWidth={2} />
-                        </div>
-                        <div>
-                           <h2 className="text-lg font-bold text-slate-900">{editingRepair ? 'Update Job Details' : 'New Service Request'}</h2>
-                           <p className="text-xs text-slate-500 font-bold uppercase tracking-wide mt-0.5">Technician Dashboard</p>
-                        </div>
+               {/* Section 1: Customer */}
+               <div className="space-y-4">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Client Identity</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <div className="space-y-1.5">
+                        <label className="win-label">Customer Name</label>
+                        <input required className="win-input h-10 font-bold text-xs" placeholder="e.g. Sarah Jones" value={formData.customerName} onChange={e => setFormData({ ...formData, customerName: e.target.value })} />
                      </div>
-                     <button onClick={closeModal} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-all"><X size={20} /></button>
-                  </div>
-
-                  {/* Modal Body */}
-                  <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-6 space-y-6">
-
-                     {/* Section 1: Customer */}
-                     <div className="space-y-4">
-                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Client Identity</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                           <div className="space-y-1.5">
-                              <label className="win-label">Customer Name</label>
-                              <input required className="win-input h-10 font-bold text-xs" placeholder="e.g. Sarah Jones" value={formData.customerName} onChange={e => setFormData({ ...formData, customerName: e.target.value })} />
-                           </div>
-                           <div className="space-y-1.5">
-                              <label className="win-label">Contact Phone</label>
-                              <input required className="win-input h-10 font-bold text-xs" placeholder="+256..." value={formData.customerPhone} onChange={e => setFormData({ ...formData, customerPhone: e.target.value })} />
-                           </div>
-                        </div>
+                     <div className="space-y-1.5">
+                        <label className="win-label">Contact Phone</label>
+                        <input required className="win-input h-10 font-bold text-xs" placeholder="+256..." value={formData.customerPhone} onChange={e => setFormData({ ...formData, customerPhone: e.target.value })} />
                      </div>
-
-                     {/* Section 2: Device */}
-                     <div className="space-y-4">
-                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Device Diagnostics</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                           <div className="col-span-full space-y-1.5">
-                              <label className="win-label">Device Model / Make</label>
-                              <input required className="win-input h-10 font-bold uppercase tracking-wide text-xs" placeholder="e.g. IPHONE 13 PRO MAX" value={formData.deviceModel} onChange={e => setFormData({ ...formData, deviceModel: e.target.value })} />
-                           </div>
-                           <div className="col-span-full space-y-1.5">
-                              <label className="win-label">Reported Issue / Fault</label>
-                              <textarea required rows={2} className="win-input p-3 font-medium text-slate-600 resize-none text-xs" placeholder="Describe the problem..." value={formData.issue} onChange={e => setFormData({ ...formData, issue: e.target.value })} />
-                           </div>
-
-                           {/* Accessories Checkbox */}
-                           <div className="col-span-full bg-slate-50 rounded-xl p-4 border border-slate-100">
-                              <label className="win-label mb-2 block">Accessories Left</label>
-                              <div className="flex flex-wrap gap-2">
-                                 {commonAccessories.map(acc => (
-                                    <button
-                                       type="button"
-                                       key={acc}
-                                       onClick={() => toggleAccessory(acc)}
-                                       className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide border transition-all ${selectedAccessories.includes(acc)
-                                          ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
-                                          : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
-                                          }`}
-                                    >
-                                       {acc}
-                                    </button>
-                                 ))}
-                              </div>
-                           </div>
-                        </div>
-                     </div>
-
-                     {/* Section 3: Financials */}
-                     <div className="space-y-4">
-                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Financials & Status</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                           <div className="space-y-1.5">
-                              <label className="win-label">Estimated Cost</label>
-                              <div className="relative">
-                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-bold">UGX</span>
-                                 <input type="number" min="0" required className="win-input h-10 pl-10 font-bold text-xs" value={formData.estimatedCost || ''} onChange={e => setFormData({ ...formData, estimatedCost: Number(e.target.value) })} />
-                              </div>
-                           </div>
-                           <div className="space-y-1.5">
-                              <label className="win-label">Deposit Paid</label>
-                              <div className="relative">
-                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-bold">UGX</span>
-                                 <input type="number" min="0" required className="win-input h-10 pl-10 font-bold text-emerald-600 text-xs" value={formData.depositPaid || ''} onChange={e => setFormData({ ...formData, depositPaid: Number(e.target.value) })} />
-                              </div>
-                           </div>
-                           <div className="space-y-1.5">
-                              <label className="win-label">Current Status</label>
-                              <select className="win-input h-10 font-bold uppercase text-[10px]" value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value as RepairStatus })}>
-                                 {Object.values(RepairStatus).map(s => <option key={s} value={s}>{s}</option>)}
-                              </select>
-                           </div>
-                        </div>
-                     </div>
-
-                  </form>
-
-                  {/* Modal Footer */}
-                  <div className="p-5 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end shrink-0">
-                     <button type="button" onClick={closeModal} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-slate-100 transition-all">Cancel</button>
-                     <button onClick={handleSave} disabled={loading} className="px-6 py-2.5 bg-orange-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide shadow-lg hover:bg-orange-700 transition-all flex items-center gap-2">
-                        {loading ? <Loader2 className="animate-spin" size={14} /> : (editingRepair ? 'Update Job' : 'Create Job Ticket')}
-                     </button>
                   </div>
                </div>
-            </div>
-         )}
+
+               {/* Section 2: Device */}
+               <div className="space-y-4">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Device Diagnostics</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <div className="col-span-full space-y-1.5">
+                        <label className="win-label">Device Model / Make</label>
+                        <input required className="win-input h-10 font-bold uppercase tracking-wide text-xs" placeholder="e.g. IPHONE 13 PRO MAX" value={formData.deviceModel} onChange={e => setFormData({ ...formData, deviceModel: e.target.value })} />
+                     </div>
+                     <div className="col-span-full space-y-1.5">
+                        <label className="win-label">Reported Issue / Fault</label>
+                        <textarea required rows={2} className="win-input p-3 font-medium text-slate-600 resize-none text-xs" placeholder="Describe the problem..." value={formData.issue} onChange={e => setFormData({ ...formData, issue: e.target.value })} />
+                     </div>
+
+                     {/* Accessories Checkbox */}
+                     <div className="col-span-full bg-slate-50 rounded-xl p-4 border border-slate-100">
+                        <label className="win-label mb-2 block">Accessories Left</label>
+                        <div className="flex flex-wrap gap-2">
+                           {commonAccessories.map(acc => (
+                              <button
+                                 type="button"
+                                 key={acc}
+                                 onClick={() => toggleAccessory(acc)}
+                                 className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wide border transition-all ${selectedAccessories.includes(acc)
+                                    ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                                    : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'
+                                    }`}
+                              >
+                                 {acc}
+                              </button>
+                           ))}
+                        </div>
+                     </div>
+                  </div>
+               </div>
+
+               {/* Section 3: Financials */}
+               <div className="space-y-4">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Financials & Status</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                     <div className="space-y-1.5">
+                        <label className="win-label">Estimated Cost</label>
+                        <div className="relative">
+                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-bold">UGX</span>
+                           <input type="number" min="0" required className="win-input h-10 pl-10 font-bold text-xs" value={formData.estimatedCost || ''} onChange={e => setFormData({ ...formData, estimatedCost: Number(e.target.value) })} />
+                        </div>
+                     </div>
+                     <div className="space-y-1.5">
+                        <label className="win-label">Deposit Paid</label>
+                        <div className="relative">
+                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-[10px] font-bold">UGX</span>
+                           <input type="number" min="0" required className="win-input h-10 pl-10 font-bold text-emerald-600 text-xs" value={formData.depositPaid || ''} onChange={e => setFormData({ ...formData, depositPaid: Number(e.target.value) })} />
+                        </div>
+                     </div>
+                     <div className="space-y-1.5">
+                        <label className="win-label">Current Status</label>
+                        <select className="win-input h-10 font-bold uppercase text-[10px]" value={formData.status} onChange={e => setFormData({ ...formData, status: e.target.value as RepairStatus })}>
+                           {Object.values(RepairStatus).map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                     </div>
+                  </div>
+               </div>
+
+               <div className="pt-4 border-t border-slate-100 flex gap-3 justify-end">
+                  <button type="button" onClick={closeModal} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-slate-100 transition-all">Cancel</button>
+                  <button type="submit" disabled={loading} className="px-6 py-2.5 bg-orange-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide shadow-lg hover:bg-orange-700 transition-all flex items-center gap-2">
+                     {loading ? <Loader2 className="animate-spin" size={14} /> : (editingRepair ? 'Update Job' : 'Create Job Ticket')}
+                  </button>
+               </div>
+            </form>
+         </Modal>
 
          {/* --- RECEIPT / JOB CARD MODAL --- */}
-         {isReceiptOpen && activeRepairForReceipt && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in !mt-0">
-               <div className="bg-white rounded-2xl shadow-2xl overflow-hidden max-h-[95vh] flex flex-col w-full max-w-lg border border-white/20 m-auto">
-
+         <Modal
+            isOpen={isReceiptOpen && !!activeRepairForReceipt}
+            onClose={() => setIsReceiptOpen(false)}
+            noPadding
+            maxWidth="lg"
+         >
+            {activeRepairForReceipt && (
+               <div className="max-h-[90vh] flex flex-col">
                   {/* Print Preview Controls */}
                   <div className="bg-white border-b border-slate-100 p-4 flex justify-between items-center no-print shrink-0">
                      <h3 className="text-sm font-bold text-slate-900 uppercase tracking-widest">Job Card Preview</h3>
@@ -548,13 +586,18 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
                      </button>
                   </div>
                </div>
-            </div>
-         )}
+            )}
+         </Modal>
 
          {/* DELETE CONFIRMATION MODAL */}
-         {repairToDelete && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in !mt-0">
-               <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6 border border-white/20">
+         <Modal
+            isOpen={!!repairToDelete}
+            onClose={() => setRepairToDelete(null)}
+            noPadding
+            maxWidth="sm"
+         >
+            {repairToDelete && (
+               <div className="p-8 text-center space-y-6">
                   <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
                      <AlertTriangle size={40} strokeWidth={2} />
                   </div>
@@ -571,8 +614,8 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
                      </button>
                   </div>
                </div>
-            </div>
-         )}
+            )}
+         </Modal>
 
       </div>
    );

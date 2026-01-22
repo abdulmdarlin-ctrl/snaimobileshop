@@ -57,6 +57,8 @@ export const printSection = (selector: string, callback?: () => void) => {
             margin: 0;
             padding: 0;
           }
+
+          .whitespace-pre-wrap { white-space: pre-wrap !important; }
           
           /* Thermal Mode specific styling */
           .receipt-mode {

@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import {
   LayoutDashboard, ShoppingCart, Wrench, BarChart3, Settings as SettingsIcon,
@@ -63,7 +62,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
             {(settings?.businessName || 'S').charAt(0)}
           </div>
         )}
-        <span className={`font-black text-xs text-white tracking-widest leading-tight whitespace-nowrap transition-all duration-300 ${isOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}>
+        <span className={`font-bold text-xs text-white leading-tight whitespace-nowrap transition-all duration-300 ${isOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden'}`}>
           {settings?.businessName || 'BUSINESS SYSTEM'}
         </span>
       </div>
@@ -75,7 +74,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
 
           return (
             <div key={gIdx}>
-              <p className={`px-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 lg:hidden'}`}>
+              <p className={`px-4 text-[10px] font-bold text-slate-500 uppercase mb-3 transition-opacity duration-300 ${isOpen ? 'opacity-100' : 'opacity-0 lg:hidden'}`}>
                 {group.label}
               </p>
               <div className="space-y-1">
@@ -112,7 +111,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
         </button>
         {isOpen && (
           <div className="mt-4 text-center">
-            <p className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Crafted by ABI-TECH</p>
+            <p className="text-[9px] font-bold text-slate-600 uppercase">Crafted by ABI-TECH</p>
           </div>
         )}
       </div>

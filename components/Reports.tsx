@@ -349,23 +349,23 @@ const Reports: React.FC = () => {
    return (
       <div className="bg-[#f8fafc] min-h-screen p-4 lg:p-8 font-sans text-slate-900 space-y-8 animate-in fade-in pb-20">
 
-         {/* --- HEADER --- */}
-         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 no-print">
+         {/* --- CONTROL PANEL --- */}
+         <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm no-print sticky top-0 z-10">
             <div>
-               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Analytics Dashboard</div>
-               <h1 className="text-2xl font-black text-[#0f172a]">Financial Overview</h1>
+               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Analytics Dashboard</div>
+               <h1 className="text-xl font-black text-slate-900 tracking-tight">Financial Overview</h1>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2 lg:gap-3 w-full lg:w-auto">
                {/* Category Filter */}
-               <div className="relative">
+               <div className="relative group w-full lg:w-auto">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                     <Filter size={14} className="text-slate-400" />
+                     <Filter size={14} className="text-slate-400 group-focus-within:text-slate-600 transition-colors" />
                   </div>
                   <select
                      value={selectedCategory}
                      onChange={(e) => setSelectedCategory(e.target.value)}
-                     className="pl-9 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-sm outline-none cursor-pointer appearance-none h-full focus:ring-2 focus:ring-slate-100"
+                     className="w-full lg:w-48 pl-9 pr-8 py-2.5 bg-slate-50 border-none rounded-xl text-xs font-bold text-slate-700 shadow-inner outline-none cursor-pointer appearance-none focus:ring-2 focus:ring-slate-200 transition-all font-sans"
                   >
                      <option value="All">All Categories</option>
                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
@@ -374,27 +374,27 @@ const Reports: React.FC = () => {
                </div>
 
                {/* Time Range Filter */}
-               <div className="relative">
+               <div className="relative group w-full lg:w-auto">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                     <Calendar size={14} className="text-slate-400" />
+                     <Calendar size={14} className="text-slate-400 group-focus-within:text-slate-600 transition-colors" />
                   </div>
                   <select
                      value={timeRange}
                      onChange={(e) => setTimeRange(e.target.value as TimeRange)}
-                     className="pl-9 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 shadow-sm outline-none cursor-pointer appearance-none h-full focus:ring-2 focus:ring-slate-100"
+                     className="w-full lg:w-40 pl-9 pr-8 py-2.5 bg-slate-50 border-none rounded-xl text-xs font-bold text-slate-700 shadow-inner outline-none cursor-pointer appearance-none focus:ring-2 focus:ring-slate-200 transition-all font-sans"
                   >
                      <option value="7d">Last 7 Days</option>
                      <option value="30d">Last 30 Days</option>
                      <option value="month">This Month</option>
                      <option value="year">This Year</option>
-                     <option value="all">All Time (System)</option>
+                     <option value="all">All Time</option>
                   </select>
                   <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                </div>
 
                <button
                   onClick={() => exportSectionToPDF('#reports-container', 'SNA_Report.pdf')}
-                  className="bg-white border border-slate-200 p-2.5 rounded-xl text-slate-700 shadow-sm hover:bg-slate-50 transition-colors"
+                  className="bg-slate-900 text-white p-2.5 rounded-xl shadow-lg shadow-slate-900/20 hover:bg-black transition-all active:scale-95 ml-auto lg:ml-0"
                   title="Download PDF"
                >
                   <Download size={18} />
