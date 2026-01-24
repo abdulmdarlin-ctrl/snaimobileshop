@@ -134,12 +134,24 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [isHeldSalesModalOpen, setIsHeldSalesModalOpen] = useState(false);
    const [isHoldModalOpen, setIsHoldModalOpen] = useState(false);
    const [holdNote, setHoldNote] = useState('');
+   const [heldSalesView, setHeldSalesView] = useState<'pending' | 'completed'>('pending');
 
    useEffect(() => {
       fetchData();
       const saved = localStorage.getItem('sna_held_sales');
       if (saved) setHeldSales(JSON.parse(saved));
    }, []);
+
+   useEffect(() => {
+      const storedResumeId = sessionStorage.getItem('sna_resume_held_sale_id');
+      if (storedResumeId && heldSales.length > 0) {
+         const saleToResume = heldSales.find(s => s.id === storedResumeId);
+         if (saleToResume) {
+            handleResumeSale(saleToResume);
+            sessionStorage.removeItem('sna_resume_held_sale_id');
+         }
+      }
+   }, [heldSales]);
 
    useEffect(() => {
       if (lastSale) {
@@ -177,6 +189,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setIsHoldModalOpen(true);
    };
 
+   const [activeHeldSaleId, setActiveHeldSaleId] = useState<string | null>(null);
+
    const confirmHoldSale = () => {
       const newHeldSale = {
          id: Math.random().toString(36).substring(2, 9),
@@ -191,6 +205,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setHeldSales(updated);
       localStorage.setItem('sna_held_sales', JSON.stringify(updated));
       setCart([]);
+      setActiveHeldSaleId(null);
       setIsHoldModalOpen(false);
       showToast("Sale put on hold", 'info');
       window.dispatchEvent(new Event('storage'));
@@ -200,10 +215,23 @@ const POS: React.FC<POSProps> = ({ user }) => {
       if (cart.length > 0 && !confirm("Current cart will be cleared. Continue?")) return;
       setCart(heldSale.items);
       setPricingMode(heldSale.pricingMode);
-      setCheckoutForm(prev => ({ ...prev, customerName: heldSale.customerName === 'Walk-in' ? '' : heldSale.customerName }));
-      deleteHeldSale(heldSale.id);
+
+      // Initialize checkout form with held data
+      setCheckoutForm({
+         amountPaid: 0, // Will be auto-synced by useEffect
+         paymentMethod: 'Cash',
+         customerName: heldSale.customerName === 'Walk-in' ? '' : heldSale.customerName,
+         customerPhone: '',
+         discountPercentage: 0
+      });
+      setHasManuallyAdjustedPayment(false);
+
+      setActiveHeldSaleId(heldSale.id);
       setIsHeldSalesModalOpen(false);
       showToast("Sale resumed", 'success');
+
+      // Immediately open checkout to complete the sale
+      setIsCheckoutOpen(true);
    };
 
    const deleteHeldSale = (id: string) => {
@@ -610,9 +638,10 @@ const POS: React.FC<POSProps> = ({ user }) => {
             customerName: checkoutForm.customerName,
             customerPhone: checkoutForm.customerPhone,
             customerType: pricingMode,
-            globalDiscountPercentage: checkoutForm.discountPercentage, // Save global discount percentage
+            globalDiscountPercentage: checkoutForm.discountPercentage,
             cashierName: user.username,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            wasHeld: !!activeHeldSaleId // Mark as held sale
          };
 
          // Validation check to ensure all required fields are primitive strings or numbers
@@ -639,6 +668,11 @@ const POS: React.FC<POSProps> = ({ user }) => {
                const newStock = product.stockQuantity - item.quantity;
                await db.products.update(product.id, { stockQuantity: newStock });
             }
+         }
+
+         if (activeHeldSaleId) {
+            deleteHeldSale(activeHeldSaleId);
+            setActiveHeldSaleId(null);
          }
 
          setLastSale({ ...sale, id: result.id });
@@ -918,18 +952,15 @@ const POS: React.FC<POSProps> = ({ user }) => {
             </div>
 
             {/* Category Quick Filter */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar mask-gradient-right">
-               <div className="flex items-center gap-2 px-4 py-2 bg-slate-100 rounded-xl text-slate-500 shrink-0 border border-slate-200/50">
-                  <Filter size={14} />
-                  <span className="text-xs font-black uppercase tracking-widest">Filter</span>
-               </div>
+            {/* Category Quick Filter */}
+            <div className="flex items-center gap-3 overflow-x-auto pb-2 pt-1 px-1 no-scrollbar mask-gradient-right">
                {categories.map(cat => (
                   <button
                      key={cat}
                      onClick={() => setSelectedCategory(cat)}
-                     className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${selectedCategory === cat
-                        ? 'bg-slate-900 text-white border-slate-900 shadow-md'
-                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                     className={`px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wide whitespace-nowrap transition-all border shadow-sm ${selectedCategory === cat
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-slate-900/20 scale-105'
+                        : 'bg-white text-slate-500 border-slate-100 hover:border-slate-300 hover:bg-slate-50'
                         }`}
                   >
                      {cat}
@@ -1090,7 +1121,16 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         </div>
                         <div className="text-right min-w-[70px]">
                            <p className="text-xs font-bold text-slate-900">{item.total.toLocaleString()}</p>
-                           <button onClick={(e) => { e.stopPropagation(); openEditCartItem(item, idx); }} className="text-[11px] text-blue-500 hover:underline">Edit</button>
+                           <div className="flex items-center justify-end gap-2 mt-1">
+                              <button onClick={(e) => { e.stopPropagation(); openEditCartItem(item, idx); }} className="text-[10px] uppercase font-bold text-blue-600 hover:text-blue-700">Edit</button>
+                              <button
+                                 onClick={(e) => { e.stopPropagation(); removeFromCart(item.productId); }}
+                                 className="text-slate-400 hover:text-rose-500 transition-colors p-1 hover:bg-rose-50 rounded"
+                                 title="Remove Item"
+                              >
+                                 <Trash2 size={13} />
+                              </button>
+                           </div>
                         </div>
                      </div>
                   ))
@@ -2364,47 +2404,113 @@ const POS: React.FC<POSProps> = ({ user }) => {
                <Modal
                   isOpen={isHeldSalesModalOpen}
                   onClose={() => setIsHeldSalesModalOpen(false)}
-                  title="Held Sales"
+                  title="Held Sales Management"
                   maxWidth="md"
                   noPadding
                   contentClassName="flex-1 flex flex-col min-h-0"
                >
                   <div className="p-4 border-b border-slate-100 bg-slate-50 shrink-0">
-                     <h2 className="text-sm font-bold text-slate-900 uppercase">Pending Orders</h2>
-                     <p className="text-xs text-slate-500">Select a sale to resume</p>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/30">
-                     {heldSales.length === 0 ? (
-                        <div className="h-40 flex flex-col items-center justify-center text-slate-300">
-                           <Pause size={48} className="mb-2 opacity-20" />
-                           <p className="text-xs font-bold uppercase tracking-widest">No held sales</p>
-                        </div>
+                     <div className="flex p-1 bg-slate-200/50 rounded-xl mb-4">
+                        <button
+                           onClick={() => setHeldSalesView('pending')}
+                           className={`flex-1 py-1.5 text-xs font-bold uppercase rounded-lg transition-all ${heldSalesView === 'pending' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                           Pending ({heldSales.length})
+                        </button>
+                        <button
+                           onClick={() => setHeldSalesView('completed')}
+                           className={`flex-1 py-1.5 text-xs font-bold uppercase rounded-lg transition-all ${heldSalesView === 'completed' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                           Completed History
+                        </button>
+                     </div>
+
+                     {heldSalesView === 'pending' ? (
+                        <>
+                           <h2 className="text-sm font-bold text-slate-900 uppercase">Pending Orders</h2>
+                           <p className="text-xs text-slate-500">Select a sale to resume</p>
+                        </>
                      ) : (
-                        heldSales.map((s) => (
-                           <div key={s.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between group hover:border-amber-200 transition-all">
-                              <div className="min-w-0">
-                                 <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-black text-slate-900 truncate">{s.customerName}</span>
-                                    <span className="text-[11px] font-bold text-slate-400 uppercase bg-slate-100 px-1.5 py-0.5 rounded">{s.items.length} Items</span>
-                                 </div>
-                                 <p className="text-xs text-slate-400 font-normal">
-                                    {new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • UGX {s.total.toLocaleString()}
-                                 </p>
-                                 {s.notes && (
-                                    <p className="text-xs text-amber-600 font-bold mt-1 italic truncate max-w-[200px]">Note: {s.notes}</p>
-                                 )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                 <button onClick={() => deleteHeldSale(s.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={16} /></button>
-                                 <button
-                                    onClick={() => handleResumeSale(s)}
-                                    className="p-2.5 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all shadow-lg shadow-amber-500/20 active:scale-95"
-                                 >
-                                    <PlayCircle size={18} strokeWidth={3} />
-                                 </button>
-                              </div>
+                        <>
+                           <h2 className="text-sm font-bold text-slate-900 uppercase">Completed Held Sales</h2>
+                           <p className="text-xs text-slate-500">History of finalized hold transactions</p>
+                        </>
+                     )}
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/30">
+                     {heldSalesView === 'pending' ? (
+                        heldSales.length === 0 ? (
+                           <div className="h-40 flex flex-col items-center justify-center text-slate-300">
+                              <Pause size={48} className="mb-2 opacity-20" />
+                              <p className="text-xs font-bold uppercase tracking-widest">No held sales</p>
                            </div>
-                        ))
+                        ) : (
+                           heldSales.map((s) => (
+                              <div key={s.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between group hover:border-amber-200 transition-all">
+                                 <div className="min-w-0">
+                                    <div className="flex items-center gap-2 mb-1">
+                                       <span className="text-xs font-black text-slate-900 truncate">{s.customerName}</span>
+                                       <span className="text-[11px] font-bold text-slate-400 uppercase bg-slate-100 px-1.5 py-0.5 rounded">{s.items.length} Items</span>
+                                    </div>
+                                    <p className="text-xs text-slate-400 font-normal">
+                                       {new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • UGX {s.total.toLocaleString()}
+                                    </p>
+                                    {s.notes && (
+                                       <p className="text-xs text-amber-600 font-bold mt-1 italic truncate max-w-[200px]">Note: {s.notes}</p>
+                                    )}
+                                 </div>
+                                 <div className="flex items-center gap-2">
+                                    <button onClick={() => deleteHeldSale(s.id)} className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"><Trash2 size={16} /></button>
+                                    <button
+                                       onClick={() => handleResumeSale(s)}
+                                       className="p-2.5 bg-amber-500 text-white rounded-xl hover:bg-amber-600 transition-all shadow-lg shadow-amber-500/20 active:scale-95"
+                                    >
+                                       <PlayCircle size={18} strokeWidth={3} />
+                                    </button>
+                                 </div>
+                              </div>
+                           ))
+                        )
+                     ) : (
+                        // COMPLETED VIEW
+                        (() => {
+                           const completedHeldSales = salesHistory.filter(s => s.wasHeld);
+                           return completedHeldSales.length === 0 ? (
+                              <div className="h-40 flex flex-col items-center justify-center text-slate-300">
+                                 <Check size={48} className="mb-2 opacity-20" />
+                                 <p className="text-xs font-bold uppercase tracking-widest">No completed held sales found</p>
+                              </div>
+                           ) : (
+                              completedHeldSales.map((s) => (
+                                 <div key={s.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between group hover:border-emerald-200 transition-all opacity-75 hover:opacity-100">
+                                    <div className="min-w-0">
+                                       <div className="flex items-center gap-2 mb-1">
+                                          <span className="text-xs font-black text-slate-900 truncate">{s.customerName || 'Walk-in'}</span>
+                                          <span className="text-[11px] font-bold text-emerald-600 uppercase bg-emerald-50 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                             <Check size={10} strokeWidth={3} /> Completed
+                                          </span>
+                                       </div>
+                                       <p className="text-xs text-slate-400 font-normal">
+                                          {new Date(s.timestamp).toLocaleDateString()} {new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                       </p>
+                                       <p className="text-xs font-bold text-slate-900 mt-0.5">
+                                          UGX {s.total.toLocaleString()}
+                                       </p>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                       <button
+                                          onClick={() => { setLastSale(s); setIsReceiptOpen(true); }}
+                                          className="p-2 bg-slate-50 text-slate-400 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-all"
+                                          title="View Receipt"
+                                       >
+                                          <Receipt size={16} />
+                                       </button>
+                                    </div>
+                                 </div>
+                              ))
+                           );
+                        })()
                      )}
                   </div>
                </Modal>

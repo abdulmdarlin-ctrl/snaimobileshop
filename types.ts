@@ -94,6 +94,7 @@ export interface Customer {
   totalSpending?: number;
   visitCount?: number;
   balance?: number;
+  loyaltyPoints?: number;
 }
 
 export interface Loan {
@@ -184,6 +185,7 @@ export interface Sale {
   globalDiscountPercentage?: number; // Added to store global discount applied
   timestamp: number;
   isSynced?: boolean;
+  wasHeld?: boolean;
 }
 
 export interface Repair {
@@ -280,4 +282,6 @@ export interface AppSettings {
   aiStockForecast?: boolean;
   aiFaultDiagnosis?: boolean;
   aiPriceOptimization?: boolean;
+  allowBannerDismissal?: boolean;
+  bannerDismissalDuration?: number;
 }

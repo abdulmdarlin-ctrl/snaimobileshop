@@ -4,15 +4,14 @@ import { User, UserRole, Customer, CustomerCategory, CustomerStatus, Sale, AppSe
 import {
     Search, Edit2, Trash2, X, Users,
     Plus, Play, CheckCircle2, AlertCircle,
-    MoreHorizontal, Filter, Download, Mail,
+    Filter, Download, Mail,
     TrendingUp, Award, Clock, ChevronLeft, ChevronRight, User as UserIcon,
     Printer, FileText, MessageCircle, UserPlus, Phone, MapPin, Tag,
-    ChevronDown, Crown, RefreshCw
+    ChevronDown, RefreshCw, Star
 } from 'lucide-react';
 import { useToast } from './Toast';
 import Modal from './Modal';
 import { printSection } from '../utils/printExport';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend } from 'recharts';
 
 interface CustomersProps { user: User; }
 
@@ -21,7 +20,6 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [activeTab, setActiveTab] = useState<'All' | 'Active' | 'VIP' | 'Inactive'>('All');
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -42,8 +40,6 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
     const [isPrinting, setIsPrinting] = useState(false);
     const [settings, setSettings] = useState<AppSettings | null>(null);
 
-    const COLORS = ['#10b981', '#f43f5e', '#f59e0b', '#6366f1']; // Emerald, Rose, Amber, Indigo
-
     useEffect(() => {
         fetchData();
         fetchSettings();
@@ -52,7 +48,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
     // Reset page when filters change
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, activeTab]);
+    }, [searchTerm]);
 
     const fetchData = async () => {
         const [custData, salesData] = await Promise.all([
@@ -65,7 +61,8 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
             return {
                 ...c,
                 totalSpending: cSales.reduce((sum, s) => sum + s.total, 0),
-                visitCount: cSales.length
+                visitCount: cSales.length,
+                loyaltyPoints: Math.floor(cSales.length / 5)
             };
         }) as Customer[];
 
@@ -109,6 +106,17 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
         setLoading(false);
     };
 
+    useEffect(() => {
+        const viewCustName = sessionStorage.getItem('sna_view_customer_statement');
+        if (viewCustName && customers.length > 0) {
+            sessionStorage.removeItem('sna_view_customer_statement');
+            const customer = customers.find(c => c.name === viewCustName);
+            if (customer) {
+                handleViewStatement(customer);
+            }
+        }
+    }, [customers]);
+
     const handleSendWhatsApp = () => {
         if (!selectedCustomerForStatement) return;
 
@@ -145,7 +153,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
 
     const exportCustomersToCSV = () => {
         if (customers.length === 0) return showToast("No data to export", 'info');
-        const headers = ['Name', 'Phone', 'Email', 'Category', 'Status', 'Joined Date', 'Total Spent', 'Visits'];
+        const headers = ['Name', 'Phone', 'Email', 'Category', 'Status', 'Joined Date', 'Total Spent', 'Visits', 'Loyalty Points'];
         const rows = customers.map(c => [
             c.name,
             c.phone,
@@ -154,7 +162,8 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
             c.status,
             new Date(c.joinedDate).toLocaleDateString(),
             c.totalSpending || 0,
-            c.visitCount || 0
+            c.visitCount || 0,
+            c.loyaltyPoints || 0
         ]);
         const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -170,14 +179,9 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
     // Filter Logic
     const filteredCustomers = useMemo(() => {
         return customers.filter(c => {
-            const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone.includes(searchTerm);
-            const matchesTab = activeTab === 'All' ? true :
-                activeTab === 'VIP' ? c.category === CustomerCategory.VIP :
-                    activeTab === 'Active' ? c.status === CustomerStatus.ACTIVE :
-                        activeTab === 'Inactive' ? c.status !== CustomerStatus.ACTIVE : true;
-            return matchesSearch && matchesTab;
+            return c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone.includes(searchTerm);
         });
-    }, [customers, searchTerm, activeTab]);
+    }, [customers, searchTerm]);
 
     // Pagination Logic
     const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
@@ -188,16 +192,11 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
 
     // Stats for Widgets
     const stats = useMemo(() => {
-        const distribution = [
-            { name: 'Retail', value: customers.filter(c => c.category === CustomerCategory.RETAIL).length },
-            { name: 'Wholesale', value: customers.filter(c => c.category === CustomerCategory.WHOLESALE).length },
-            { name: 'VIP', value: customers.filter(c => c.category === CustomerCategory.VIP).length },
-        ].filter(d => d.value > 0);
-
         const recent = customers.slice(0, 5);
-
-        return { distribution, recent };
+        return { recent };
     }, [customers]);
+
+    const blacklistedCount = useMemo(() => customers.filter(c => c.status === CustomerStatus.BLACKLISTED).length, [customers]);
 
     return (
         <div className="min-h-screen bg-slate-50 p-4 lg:p-6 space-y-6 animate-in fade-in font-sans pb-24">
@@ -220,10 +219,6 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                             <UserPlus size={20} strokeWidth={2.5} />
                             <span className="text-[11px] font-bold uppercase">Add New</span>
                         </button>
-                        <button onClick={() => setActiveTab('VIP')} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-amber-50 text-amber-600 hover:bg-amber-500 hover:text-white transition-all duration-300 shadow-sm hover:shadow-amber-200 active:scale-95">
-                            <Crown size={20} strokeWidth={2.5} />
-                            <span className="text-[11px] font-bold uppercase">List VIPs</span>
-                        </button>
                         <button onClick={exportCustomersToCSV} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-all duration-300 shadow-sm hover:shadow-emerald-200 active:scale-95">
                             <Download size={20} strokeWidth={2.5} />
                             <span className="text-[11px] font-bold uppercase">Export</span>
@@ -239,7 +234,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                 <div className="xl:col-span-7 grid grid-cols-1 md:grid-cols-3 gap-4">
                     {[
                         { label: 'Total Clients', value: customers.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', trend: '+2.5%' },
-                        { label: 'Active VIPs', value: customers.filter(c => c.category === 'VIP').length, icon: Award, color: 'text-amber-600', bg: 'bg-amber-50', trend: '+10%' },
+                        { label: 'Loyalty Points', value: customers.reduce((a, c) => a + (c.loyaltyPoints || 0), 0).toLocaleString(), icon: Star, color: 'text-amber-600', bg: 'bg-amber-50', trend: 'Active' },
                         { label: 'Total Revenue', value: `${(customers.reduce((a, c) => a + (c.totalSpending || 0), 0) / 1000000).toFixed(1)}M`, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50', trend: '+12%' },
                     ].map((stat, i) => (
                         <div key={i} className="bg-white p-3.5 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between">
@@ -248,8 +243,8 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                     <stat.icon size={20} />
                                 </div>
                                 <div>
-                                    <p className="text-lg font-bold text-slate-800">{stat.value}</p>
-                                    <p className="text-[11px] font-normal text-slate-400 uppercase">{stat.label}</p>
+                                    <p className="text-xl font-bold text-slate-900">{stat.value}</p>
+                                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-tight">{stat.label}</p>
                                 </div>
                             </div>
                             <div className="flex flex-col items-end">
@@ -266,6 +261,23 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
 
                 {/* LEFT PANEL: TABLE (Cols 8) */}
                 <div className="xl:col-span-8 space-y-4">
+                    {blacklistedCount > 0 && (
+                        <div className="bg-rose-50 border border-rose-100 p-4 rounded-[2rem] flex items-center justify-between animate-in slide-in-from-top-4 shadow-sm">
+                            <div className="flex items-center gap-4">
+                                <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200 animate-bounce">
+                                    <AlertCircle size={24} strokeWidth={3} />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-black text-rose-900 uppercase tracking-tight">Security Alert</p>
+                                    <p className="text-xs text-rose-600 font-medium">You have <span className="font-bold">{blacklistedCount} blacklisted</span> clients that require attention.</p>
+                                </div>
+                            </div>
+                            <button onClick={() => setSearchTerm('Blacklisted')} className="px-5 py-2.5 bg-rose-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-rose-900/20 active:scale-95">
+                                Review List
+                            </button>
+                        </div>
+                    )}
+
                     <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
 
                         {/* Header & Tabs */}
@@ -273,18 +285,6 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                             <div>
                                 <h3 className="text-base font-bold text-slate-800">Client Directory</h3>
                                 <p className="text-xs text-slate-400 font-normal mt-0.5">Management Overview</p>
-                            </div>
-
-                            <div className="flex bg-slate-50 p-0.5 rounded-lg">
-                                {['All', 'Active', 'VIP', 'Inactive'].map(tab => (
-                                    <button
-                                        key={tab}
-                                        onClick={() => setActiveTab(tab as any)}
-                                        className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${activeTab === tab ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                    >
-                                        {tab}
-                                    </button>
-                                ))}
                             </div>
                         </div>
 
@@ -317,6 +317,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                         <th className="pl-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Client Name</th>
                                         <th className="py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Date Joined</th>
                                         <th className="py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Engagement</th>
+                                        <th className="py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Points</th>
                                         <th className="py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Spent</th>
                                         <th className="pr-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
                                         <th className="pr-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
@@ -329,32 +330,48 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                                 <div className="flex items-center gap-2.5">
                                                     <div>
                                                         <div className="flex items-center gap-1.5">
-                                                            <p className="text-xs font-bold text-slate-800">{c.name}</p>
-                                                            {c.category === CustomerCategory.VIP && <Crown size={12} className="text-amber-500 fill-amber-500" />}
+                                                            <p className="text-sm font-bold text-slate-900">{c.name}</p>
                                                         </div>
-                                                        <p className="text-[11px] text-slate-400 font-normal">{c.category}</p>
+                                                        <p className="text-xs text-slate-500 font-medium">{c.category}</p>
                                                     </div>
                                                 </div>
                                             </td>
                                             <td className="py-4">
-                                                <span className="text-xs font-normal text-slate-500">{new Date(c.joinedDate).toLocaleDateString()}</span>
+                                                <span className="text-sm font-medium text-slate-600">{new Date(c.joinedDate).toLocaleDateString()}</span>
                                             </td>
                                             <td className="py-4 w-40">
                                                 <div className="flex items-center gap-2">
                                                     <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                                         <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min((c.visitCount || 0) * 5, 100)}%` }}></div>
                                                     </div>
-                                                    <span className="text-[11px] font-bold text-slate-600">{c.visitCount || 0} <span className="font-normal text-slate-400">visits</span></span>
+                                                    <span className="text-xs font-bold text-slate-700">{c.visitCount || 0} <span className="font-medium text-slate-500">visits</span></span>
                                                 </div>
                                             </td>
                                             <td className="py-4">
-                                                <span className="text-xs font-bold text-slate-800">{(c.totalSpending || 0).toLocaleString()} <span className="text-[10px] text-slate-400 font-normal">UGX</span></span>
+                                                <div className="flex items-center gap-1 text-amber-600 font-bold text-sm">
+                                                    <Star size={12} fill="currentColor" />
+                                                    {c.loyaltyPoints || 0}
+                                                </div>
+                                            </td>
+                                            <td className="py-4">
+                                                <span className="text-sm font-bold text-slate-900">{(c.totalSpending || 0).toLocaleString()} <span className="text-xs text-slate-500 font-medium">UGX</span></span>
                                             </td>
                                             <td className="pr-4 py-4">
-                                                <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold uppercase ${c.status === 'Active' ? 'bg-emerald-50 text-emerald-600' : 'bg-slate-100 text-slate-400'
-                                                    }`}>
-                                                    {c.status}
-                                                </span>
+                                                <div className="flex flex-col gap-1">
+                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase w-fit flex items-center gap-1.5 shadow-sm ${c.status === CustomerStatus.ACTIVE ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                                                        c.status === CustomerStatus.BLACKLISTED ? 'bg-rose-600 text-white shadow-rose-200' :
+                                                            'bg-slate-100 text-slate-400'
+                                                        }`}>
+                                                        {c.status === CustomerStatus.BLACKLISTED && <AlertCircle size={12} strokeWidth={3} />}
+                                                        {c.status}
+                                                    </span>
+                                                    {(c.loyaltyPoints || 0) >= 1 && (
+                                                        <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm shadow-amber-200 w-fit flex items-center gap-1 animate-pulse">
+                                                            <Star size={10} fill="currentColor" />
+                                                            Loyal Client
+                                                        </span>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="pr-4 py-4 text-right">
                                                 <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -389,9 +406,11 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                         <tr>
                                             <td colSpan={6} className="py-20 text-center">
                                                 <div className="flex flex-col items-center justify-center text-slate-300">
-                                                    <Users size={48} className="mb-4 opacity-20" />
-                                                    <p className="text-sm font-bold uppercase tracking-widest">No clients found</p>
-                                                    <p className="text-xs mt-1">Try adjusting your search or filters</p>
+                                                    <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mb-6 border border-slate-100 shadow-inner">
+                                                        <Users size={40} className="text-slate-200" />
+                                                    </div>
+                                                    <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-400">No clients found</p>
+                                                    <p className="text-xs font-medium text-slate-400 mt-2">Try adjusting your search or filters</p>
                                                 </div>
                                             </td>
                                         </tr>
@@ -440,38 +459,6 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                 {/* RIGHT PANEL: WIDGETS (Cols 4) */}
                 <div className="xl:col-span-4 space-y-6">
 
-                    {/* Widget 1: Client Distribution (Donut) */}
-                    <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-4">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-base font-bold text-slate-800">Client Scope</h3>
-                            <button className="text-slate-300 hover:text-slate-800"><MoreHorizontal size={18} /></button>
-                        </div>
-                        <div className="h-64 relative">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <PieChart>
-                                    <Pie
-                                        data={stats.distribution}
-                                        innerRadius={60}
-                                        outerRadius={80}
-                                        paddingAngle={5}
-                                        dataKey="value"
-                                    >
-                                        {stats.distribution.map((entry, index) => (
-                                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} strokeWidth={0} />
-                                        ))}
-                                    </Pie>
-                                    <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
-                                    <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                                </PieChart>
-                            </ResponsiveContainer>
-                            {/* Center Text */}
-                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                                <span className="text-xl font-bold text-slate-800">{customers.length}</span>
-                                <span className="text-[11px] font-normal text-slate-400 uppercase">Total</span>
-                            </div>
-                        </div>
-                    </div>
-
                     {/* Widget 2: Recent Activity (List) */}
                     <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-4 flex-1">
                         <div className="flex justify-between items-center mb-4">
@@ -485,11 +472,11 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                         <UserIcon size={14} />
                                     </div>
                                     <div className="flex-1 min-w-0">
-                                        <p className="text-xs font-bold text-slate-800 truncate">{c.name}</p>
-                                        <p className="text-[11px] text-slate-400 mt-0.5 font-normal truncate">{c.category} • {c.phone}</p>
+                                        <p className="text-sm font-bold text-slate-900 truncate">{c.name}</p>
+                                        <p className="text-xs text-slate-500 mt-0.5 font-medium truncate">{c.category} • {c.phone}</p>
                                     </div>
                                     <div className="text-right shrink-0">
-                                        <p className="text-[11px] font-normal text-slate-400">{new Date(c.joinedDate).toLocaleDateString()}</p>
+                                        <p className="text-xs font-medium text-slate-500">{new Date(c.joinedDate).toLocaleDateString()}</p>
                                     </div>
                                 </div>
                             ))}
@@ -549,7 +536,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                 <div className="relative">
                                     <Tag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                     <select className="win-input pl-12 appearance-none" value={formData.category} onChange={e => setFormData({ ...formData, category: e.target.value as any })}>
-                                        {Object.values(CustomerCategory).map(c => <option key={c} value={c}>{c}</option>)}
+                                        {Object.values(CustomerCategory).filter(c => c !== CustomerCategory.VIP).map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                     <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
                                 </div>

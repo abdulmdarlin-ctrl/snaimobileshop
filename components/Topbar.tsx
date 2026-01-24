@@ -106,9 +106,23 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
 
       {/* Center Section: Page Title & Search (Migrated from Dashboard) */}
       <div className="flex-1 px-4 lg:px-8 flex items-center justify-between gap-8">
-        <h1 className="text-xl font-bold text-slate-900 capitalize hidden md:block">
-          {currentPage === 'sales' ? 'Point of Sale' : currentPage}
-        </h1>
+        <div className="hidden md:flex flex-col justify-center py-1">
+          <h1 className="text-2xl md:text-3xl font-black tracking-tighter leading-none flex items-center gap-2 mb-1">
+            <span className="text-slate-300 text-lg font-extrabold tracking-tight uppercase">Welcome To</span>
+            <span className="bg-gradient-to-r from-slate-900 via-indigo-800 to-slate-900 bg-clip-text text-transparent filter drop-shadow-sm">Snai Mobile Shop Management System</span>
+            <span className="text-2xl animate-bounce pointer-events-none">👋</span>
+          </h1>
+          <div className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200/60 text-emerald-700 text-[10px] font-black uppercase tracking-wider shadow-sm ring-1 ring-emerald-100/50">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-600"></span>
+              </span>
+              System Live
+            </span>
+            <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase border-l border-slate-200 pl-3">Manage your business operations efficiently</span>
+          </div>
+        </div>
 
         <div className="flex-1 max-w-lg relative group">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">

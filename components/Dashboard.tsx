@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { db } from '../db';
-import { Sale, Repair, Product, User, ProductType } from '../types';
+import { Sale, Repair, Product, User, ProductType, AppSettings } from '../types';
 import { Page } from '../App';
 import {
    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
-import { Search, Package, ShoppingBag, Users, TrendingUp, TrendingDown, DollarSign, Activity, Wrench, AlertTriangle, ArrowUpRight, ChevronDown, Calendar, Receipt, Pause, AlertCircle, Play, X, Clock, ArrowRight, Percent, Crown, CheckCircle2, Smartphone, Headphones, Battery, Box, Settings } from 'lucide-react';
+import { Search, Package, ShoppingBag, Users, TrendingUp, TrendingDown, DollarSign, Activity, Wrench, AlertTriangle, ArrowUpRight, ChevronDown, Calendar, Receipt, Pause, AlertCircle, Play, X, Clock, ArrowRight, Percent, Crown, CheckCircle2, Smartphone, Headphones, Battery, Box, Settings, RefreshCw } from 'lucide-react';
 
 interface DashboardProps {
    onNavigate: (page: Page) => void;
@@ -15,18 +15,23 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    const [loading, setLoading] = useState(true);
    const [greeting, setGreeting] = useState('');
-   const [timeRange, setTimeRange] = useState<'Today' | 'This Month' | 'All Time' | 'Custom'>('Today');
+   const [timeRange, setTimeRange] = useState<'Today' | 'This Month' | 'Custom'>('Today');
+   const [showLowStockBanner, setShowLowStockBanner] = useState(true);
+   const [showPendingBanner, setShowPendingBanner] = useState(true);
+   const [settings, setSettings] = useState<AppSettings | null>(null);
    const [topSellingMode, setTopSellingMode] = useState<'Quantity' | 'Revenue'>('Quantity');
    const [dashboardSearch, setDashboardSearch] = useState('');
    const [searchFilter, setSearchFilter] = useState<'All' | 'Products' | 'Sales' | 'Repairs'>('All');
    const searchInputRef = useRef<HTMLInputElement>(null);
    const [showSearchResults, setShowSearchResults] = useState(false);
+   const prevHeldCount = useRef(0);
    const [customStart, setCustomStart] = useState(new Date().toISOString().split('T')[0]);
    const [customEnd, setCustomEnd] = useState(new Date().toISOString().split('T')[0]);
    const [rawRepairs, setRawRepairs] = useState<Repair[]>([]);
    const [rawProducts, setRawProducts] = useState<Product[]>([]);
    const [stats, setStats] = useState({
       revenue: 0,
+      revenueToday: 0,
       revenueTrend: 0,
       orders: 0,
       ordersTrend: 0,
@@ -43,6 +48,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
       mmRevenue: 0,
       bankRevenue: 0
    });
+   const settingsRef = useRef<AppSettings | null>(null);
 
    const [allSales, setAllSales] = useState<Sale[]>([]);
    const [salesData, setSalesData] = useState<any[]>([]);
@@ -62,6 +68,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    const [heldTotalValue, setHeldTotalValue] = useState(0);
    const [timeTick, setTimeTick] = useState(0);
 
+   const getProductIcon = (type: ProductType) => {
+      switch (type) {
+         case ProductType.PHONE: return <Smartphone size={14} />;
+         case ProductType.ACCESSORY: return <Headphones size={14} />;
+         case ProductType.SPARE_PART: return <Battery size={14} />;
+         default: return <Box size={14} />;
+      }
+   };
+
    const getTimeAgo = (timestamp: number | null) => {
       if (!timestamp) return '';
       // Use timeTick to ensure this re-calculates
@@ -77,11 +92,44 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    };
 
    useEffect(() => {
-      const checkHeld = () => {
+      const syncStorage = () => {
          const saved = localStorage.getItem('sna_held_sales');
+         const currentSettings = settingsRef.current;
+
+         const checkVisibility = (id: string) => {
+            // Check for active snooze first
+            const snoozeVal = localStorage.getItem(`sna_snooze_${id}`);
+            if (snoozeVal) {
+               const snoozeTs = parseInt(snoozeVal, 10);
+               if (snoozeTs > Date.now()) return false;
+            }
+
+            const val = localStorage.getItem(`sna_dismiss_${id}`);
+            if (!val || currentSettings?.allowBannerDismissal === false) return true;
+            if (val === 'true') return false;
+            const ts = parseInt(val, 10);
+            if (isNaN(ts)) return true;
+
+            const duration = currentSettings?.bannerDismissalDuration ?? 86400000;
+            if (duration === 0) return false;
+            return Date.now() - ts > duration;
+         };
+
+         // Low stock banner is now always visible by default (session-based dismissal only)
+         // setShowLowStockBanner(checkVisibility('low_stock'));
+         setShowPendingBanner(checkVisibility('pending'));
+
          if (saved) {
             const parsed = JSON.parse(saved);
             setHeldSales(parsed);
+
+            // Re-show pending banner automatically if a new sale was added to the list
+            if (parsed.length > prevHeldCount.current) {
+               setShowPendingBanner(true);
+               localStorage.removeItem('sna_dismiss_pending');
+               localStorage.removeItem('sna_snooze_pending');
+            }
+            prevHeldCount.current = parsed.length;
 
             // Calculate total value of all held sales
             const total = parsed.reduce((sum: number, sale: any) => {
@@ -97,14 +145,26 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             }
          }
          setHeldSales([]);
+         prevHeldCount.current = 0;
          setHeldTotalValue(0);
          setHeldSalesInfo({ count: 0, oldestTimestamp: null });
       };
-      checkHeld();
-      window.addEventListener('storage', checkHeld);
+      syncStorage();
+      window.addEventListener('storage', syncStorage);
       // Listen for custom events for same-tab updates
-      return () => window.removeEventListener('storage', checkHeld);
+      return () => window.removeEventListener('storage', syncStorage);
    }, []);
+
+   useEffect(() => {
+      settingsRef.current = settings;
+      // Trigger a check when settings load
+      window.dispatchEvent(new Event('storage'));
+   }, [settings]);
+
+   // Re-check expiration when time ticks
+   useEffect(() => {
+      window.dispatchEvent(new Event('storage'));
+   }, [timeTick]);
 
    useEffect(() => {
       const updateGreeting = () => {
@@ -119,16 +179,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
    useEffect(() => {
       const fetchData = async () => {
-         const [sales, repairs, products, stockLogs] = await Promise.all([
+         const [sales, repairs, products, stockLogs, sets] = await Promise.all([
             db.sales.toArray(),
             db.repairs.toArray(),
             db.products.toArray(),
-            db.stockLogs.toArray()
+            db.stockLogs.toArray(),
+            db.settings.toCollection().first()
          ]);
 
          setAllSales(sales.sort((a, b) => b.timestamp - a.timestamp));
          setRawRepairs(repairs);
          setRawProducts(products);
+         setSettings(sets || null);
 
          // --- Chart Data (Last 7 Days) ---
          const last7Days = [...Array(7)].map((_, i) => {
@@ -272,7 +334,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
       }
    };
 
-   // Calculate stats based on timeRange
+   // Calculate stats and Chart Data based on timeRange
    useEffect(() => {
       if (loading) return;
 
@@ -282,16 +344,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
       let currentSales: Sale[] = [];
       let previousSales: Sale[] = [];
+      let chartGrouping: 'hour' | 'day' | 'month' = 'day';
 
       if (timeRange === 'Today') {
          currentSales = allSales.filter(s => s.timestamp >= todayStart);
          const yesterdayStart = todayStart - 86400000;
          previousSales = allSales.filter(s => s.timestamp >= yesterdayStart && s.timestamp < todayStart);
+         chartGrouping = 'hour';
       } else if (timeRange === 'This Month') {
          currentSales = allSales.filter(s => s.timestamp >= monthStart);
          const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
          const lastMonthEnd = monthStart;
          previousSales = allSales.filter(s => s.timestamp >= lastMonthStart && s.timestamp < lastMonthEnd);
+         chartGrouping = 'day';
       } else if (timeRange === 'Custom') {
          const start = new Date(customStart).setHours(0, 0, 0, 0);
          const end = new Date(customEnd).setHours(23, 59, 59, 999);
@@ -301,10 +366,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          const prevStart = start - duration;
          const prevEnd = start;
          previousSales = allSales.filter(s => s.timestamp >= prevStart && s.timestamp < prevEnd);
+         chartGrouping = 'day';
       } else {
          // All Time
          currentSales = allSales;
-         previousSales = [];
+         previousSales = []; // No comparison for all time
+         chartGrouping = 'month';
       }
 
       const revenue = currentSales.reduce((sum, s) => sum + s.total, 0);
@@ -326,19 +393,75 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
       }, 0);
       const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
 
-      // --- Calculate Today's Specific Stats ---
+      const qtySold = currentSales.reduce((acc, s) => acc + s.items.reduce((sum, i) => sum + i.quantity, 0), 0);
+
+      // --- New Dynamic Chart Data Generation ---
+      const chartMap = new Map<string, { date: string, fullDate: string, revenue: number, orders: number }>();
+
+      // Initialize chart buckets based on range (optional but good for empty gaps)
+      // For simplicity, we will just map existing sales and sort them, or fill standard gaps if 'Today'
+
+      if (timeRange === 'Today') {
+         for (let i = 0; i < 24; i++) {
+            const label = `${i}:00`;
+            chartMap.set(i.toString(), { date: label, fullDate: label, revenue: 0, orders: 0 });
+         }
+      }
+
+      currentSales.forEach(s => {
+         const d = new Date(s.timestamp);
+         let key = '';
+         let label = '';
+
+         if (chartGrouping === 'hour') {
+            key = d.getHours().toString();
+            label = `${d.getHours()}:00`;
+         } else if (chartGrouping === 'day') {
+            key = d.toISOString().split('T')[0];
+            label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+         } else {
+            key = `${d.getFullYear()}-${d.getMonth()}`;
+            label = d.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+         }
+
+         const existing = chartMap.get(key) || { date: label, fullDate: key, revenue: 0, orders: 0 };
+         existing.revenue += s.total;
+         existing.orders += 1;
+         chartMap.set(key, existing);
+      });
+
+      // Convert map to sorted array
+      const dynamicChartData = Array.from(chartMap.values()).sort((a, b) => {
+         // Sort logic depends on keys used, but simple string compare works for ISO dates and H depends on numeric
+         if (chartGrouping === 'hour') return parseInt(a.fullDate) - parseInt(b.fullDate); // This might need robust key
+         return a.fullDate.localeCompare(b.fullDate);
+      });
+
+      // Fix sort for Hour which used :00 label as fullDate in init loop? 
+      // Actually, let's just re-sort properly.
+      if (chartGrouping === 'hour') {
+         dynamicChartData.sort((a, b) => parseInt(a.date) - parseInt(b.date));
+      } else {
+         dynamicChartData.sort((a, b) => new Date(a.fullDate).getTime() - new Date(b.fullDate).getTime());
+      }
+
+      setSalesData(dynamicChartData);
+
+
+      // --- Calculate Today's Specific Stats (Keep for reference or specific use if needed, but we mostly use filtered now) ---
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
       const salesToday = allSales.filter(s => s.timestamp >= startOfToday);
       const invoicesToday = salesToday.length;
-      const qtySoldToday = salesToday.reduce((acc, s) => acc + s.items.reduce((sum, i) => sum + i.quantity, 0), 0),
-         profitToday = salesToday.reduce((acc, s) => {
-            const saleProfit = s.items.reduce((itemAcc, i) => {
-               const product = rawProducts.find(p => p.id === i.productId);
-               const cost = (product?.costPrice || 0) * i.quantity;
-               return itemAcc + (i.total - cost);
-            }, 0);
-            return acc + saleProfit;
+      const revenueToday = salesToday.reduce((sum, s) => sum + s.total, 0);
+      const qtySoldToday = salesToday.reduce((acc, s) => acc + s.items.reduce((sum, i) => sum + i.quantity, 0), 0);
+      const profitToday = salesToday.reduce((acc, s) => {
+         const saleProfit = s.items.reduce((itemAcc, i) => {
+            const product = rawProducts.find(p => p.id === i.productId);
+            const cost = (product?.costPrice || 0) * i.quantity;
+            return itemAcc + (i.total - cost);
          }, 0);
+         return acc + saleProfit;
+      }, 0);
       const inventoryValue = rawProducts.reduce((sum, p) => sum + (p.stockQuantity * p.costPrice), 0);
 
       // --- Calculate Top Products for this time range ---
@@ -367,8 +490,24 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          const name = s.customerName || '-';
          customerMap.set(name, (customerMap.get(name) || 0) + s.total);
       });
+
+      const prevCustomerMap = new Map<string, number>();
+      previousSales.forEach(s => {
+         const name = s.customerName || '-';
+         prevCustomerMap.set(name, (prevCustomerMap.get(name) || 0) + s.total);
+      });
+
       const topCustList = Array.from(customerMap.entries())
-         .map(([name, amount]) => ({ name, amount }))
+         .map(([name, amount]) => {
+            const prevAmount = prevCustomerMap.get(name) || 0;
+            let trend = 0;
+            if (prevAmount > 0) {
+               trend = ((amount - prevAmount) / prevAmount) * 100;
+            } else {
+               trend = previousSales.length > 0 ? 100 : 0;
+            }
+            return { name, amount, trend };
+         })
          .sort((a, b) => b.amount - a.amount)
          .slice(0, 5);
       setTopCustomers(topCustList);
@@ -383,14 +522,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
       setStats(prev => ({
          ...prev,
-         revenue, revenueTrend, orders, ordersTrend, margin,
+         revenue, revenueToday, revenueTrend, orders, ordersTrend, margin,
          repairs: rawRepairs.filter(r => r.status !== 'Delivered' && r.status !== 'Cancelled').length,
          inventoryCount: rawProducts.length,
          lowStockCount: rawProducts.filter(p => p.stockQuantity <= p.reorderLevel).length,
          invoicesToday, qtySoldToday, inventoryValue, profitToday,
          topCustomer: topCust,
          // New V2 Stats
-         cashRevenue, mmRevenue, bankRevenue
+         cashRevenue, mmRevenue, bankRevenue,
+         // Filtered Stats
+         profit, qtySold
       }));
 
       // --- Calculate Category Data ---
@@ -428,19 +569,19 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
          {/* --- DASHBOARD HEADER --- */}
          {/* --- WELCOME BANNER --- */}
-         <div className="w-full flex items-center justify-between bg-[#0f172a] border border-slate-800 rounded-3xl p-4 shadow-2xl group relative overflow-hidden transition-all duration-500 hover:shadow-rose-950/10 mb-4">
+         <div className="w-full flex items-center justify-between bg-[#0f172a] border border-slate-800 rounded-3xl p-3 shadow-2xl group relative overflow-hidden transition-all duration-500 hover:shadow-rose-950/10 mb-4">
             {/* Background Decor */}
             <div className="absolute top-0 right-0 w-64 h-64 bg-rose-600/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none group-hover:bg-rose-600/10 transition-colors duration-700"></div>
             <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-600/5 rounded-full blur-2xl -ml-8 -mb-8 pointer-events-none"></div>
 
             {/* Left: Avatar + Welcome Text */}
-            <div className="flex items-center gap-7 relative z-10">
+            <div className="flex items-center gap-4 relative z-10">
                <div className="relative shrink-0">
                   {/* Avatar Glow */}
                   <div className="absolute inset-0 bg-rose-600/20 blur-2xl rounded-full scale-150 animate-pulse"></div>
 
                   {/* Avatar Container */}
-                  <div className="relative w-16 h-16 rounded-[1.5rem] bg-[#020617] p-1 border border-slate-700/50 shadow-2xl group-hover:border-rose-600/50 transition-all duration-500 overflow-visible">
+                  <div className="relative w-12 h-12 rounded-2xl bg-[#020617] p-1 border border-slate-700/50 shadow-2xl group-hover:border-rose-600/50 transition-all duration-500 overflow-visible">
                      <div className="w-full h-full rounded-[1.2rem] overflow-hidden bg-slate-900 ring-1 ring-white/5">
                         <img
                            src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}&backgroundColor=0f172a`}
@@ -457,11 +598,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                </div>
 
                <div className="flex flex-col">
-                  <p className="text-xs text-slate-400 font-normal mb-0.5">
-                     {new Date().getHours() < 12 ? 'Good Morning' : new Date().getHours() < 18 ? 'Good Afternoon' : 'Good Evening'},
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">
+                     Logged As
                   </p>
-                  <h2 className="text-xl lg:text-2xl font-bold text-white leading-tight tracking-tight uppercase">
-                     {user.username}
+                  <h2 className="text-lg lg:text-xl font-bold text-white leading-tight tracking-tight">
+                     {(user.username.toLowerCase() === 'admin') ? 'System Administrator' : user.username}
                   </h2>
                   <div className="flex items-center gap-3 mt-1.5">
                      <div className="px-2 py-0.5 rounded-lg bg-slate-800/80 border border-slate-700/50 flex items-center gap-1.5">
@@ -476,34 +617,80 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                </div>
             </div>
 
-            {/* Right: Progress Widget */}
-            <div className="hidden xl:flex flex-col items-end gap-2 pl-8 border-l border-slate-800 ml-6 min-w-[200px] relative z-10">
-               <div className="flex items-center gap-6 w-full justify-between">
-                  <span className="text-[11px] font-bold text-slate-500 uppercase">Daily Performance</span>
-                  <span className="text-xs font-bold text-rose-500 bg-rose-500/10 px-2 py-1 rounded-lg">75% Complete</span>
+            {/* Right: Date Filter Widget */}
+            <div className="hidden xl:flex flex-col items-end gap-3 pl-8 border-l border-slate-800 ml-6 min-w-[280px] relative z-10">
+               <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-700/50 backdrop-blur-md">
+                  {['Today', 'This Month', 'Custom'].map((range) => (
+                     <button
+                        key={range}
+                        onClick={() => setTimeRange(range as any)}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${timeRange === range
+                           ? 'bg-white text-slate-900 shadow-lg scale-105'
+                           : 'text-slate-400 hover:text-white hover:bg-white/5'
+                           }`}
+                     >
+                        {range === 'This Month' ? 'Monthly' : range}
+                     </button>
+                  ))}
                </div>
 
-               <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden shadow-inner ring-1 ring-white/5">
-                  <div className="h-full w-[75%] bg-gradient-to-r from-rose-600 to-rose-400 rounded-full shadow-[0_0_15px_rgba(225,29,72,0.4)] relative">
+               {timeRange === 'Custom' && (
+                  <div className="flex items-center gap-2 animate-in slide-in-from-right-2 fade-in">
+                     <input
+                        type="date"
+                        value={customStart}
+                        onChange={(e) => setCustomStart(e.target.value)}
+                        className="bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white font-bold outline-none focus:border-rose-500 transition-colors"
+                     />
+                     <span className="text-slate-600 font-bold">-</span>
+                     <input
+                        type="date"
+                        value={customEnd}
+                        onChange={(e) => setCustomEnd(e.target.value)}
+                        className="bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white font-bold outline-none focus:border-rose-500 transition-colors"
+                     />
                   </div>
-               </div>
-
-               <div className="flex items-center justify-between w-full mt-1">
-                  <p className="text-[11px] text-slate-500 font-bold uppercase">15 / 20 Invoices</p>
-                  <div className="flex -space-x-1.5 grayscale brightness-50 group-hover:grayscale-0 group-hover:brightness-100 transition-all duration-500">
-                     {[1, 2, 3].map(i => (
-                        <div key={i} className="w-5 h-5 rounded-full border-2 border-slate-900 bg-slate-800 text-[10px] flex items-center justify-center text-slate-400 overflow-hidden">
-                           <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=user${i}`} alt="user" />
-                        </div>
-                     ))}
-                  </div>
-               </div>
+               )}
             </div>
          </div>
 
+         {/* --- HIDDEN ALERTS INDICATORS --- */}
+         {((!showLowStockBanner && lowStockItems.length > 0) || (!showPendingBanner && heldSales.length > 0)) && (
+            <div className="flex flex-wrap gap-3 mb-2 animate-in fade-in slide-in-from-top-2">
+               {!showLowStockBanner && lowStockItems.length > 0 && (
+                  <button
+                     onClick={() => setShowLowStockBanner(true)}
+                     className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 rounded-full border border-rose-100 hover:bg-rose-100 transition-all shadow-sm group"
+                  >
+                     <AlertTriangle size={14} />
+                     <span className="text-[10px] font-black uppercase tracking-widest">
+                        {lowStockItems.length} Low Stock Hidden
+                     </span>
+                     <RefreshCw size={12} className="ml-1 opacity-40 group-hover:rotate-180 transition-transform duration-500" />
+                  </button>
+               )}
+               {!showPendingBanner && heldSales.length > 0 && (
+                  <button
+                     onClick={() => {
+                        setShowPendingBanner(true);
+                        localStorage.removeItem('sna_dismiss_pending');
+                        localStorage.removeItem('sna_snooze_pending');
+                     }}
+                     className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-full border border-amber-100 hover:bg-amber-100 transition-all shadow-sm group"
+                  >
+                     <Pause size={14} fill="currentColor" strokeWidth={0} />
+                     <span className="text-[10px] font-black uppercase tracking-widest">
+                        {heldSales.length} Pending Sales Hidden
+                     </span>
+                     <RefreshCw size={12} className="ml-1 opacity-40 group-hover:rotate-180 transition-transform duration-500" />
+                  </button>
+               )}
+            </div>
+         )}
+
          {/* --- PENDING TRANSACTIONS ALERT --- */}
-         {heldSales.length > 0 && (
-            <div className="w-full bg-amber-50/50 border border-amber-200 border-t-[3px] border-t-amber-400 rounded-3xl overflow-hidden relative group/ticker mb-4 shadow-sm transition-all duration-500">
+         {showPendingBanner && heldSales.length > 0 && (
+            <div className="w-full bg-amber-50/40 backdrop-blur-md border border-amber-200/50 border-t-[3px] border-t-amber-400 rounded-3xl overflow-hidden relative group/ticker mb-4 shadow-xl shadow-amber-900/5 transition-all duration-500">
                <div className="flex items-center p-3 md:px-5 md:py-4">
                   {/* Left Side: Pause Icon Card with Glow */}
                   <div className="relative shrink-0">
@@ -534,7 +721,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   {/* Right Side: Actions */}
                   <div className="flex items-center gap-2">
                      <button
-                        onClick={() => onNavigate('sales')}
+                        onClick={() => {
+                           // Resume the most recent held sale
+                           if (heldSales.length > 0) {
+                              const recent = [...heldSales].sort((a, b) => b.timestamp - a.timestamp)[0];
+                              sessionStorage.setItem('sna_resume_held_sale_id', recent.id);
+                              onNavigate('sales');
+                           }
+                        }}
                         className="flex items-center gap-2 bg-amber-950 px-4 py-2.5 rounded-xl shadow-lg shadow-amber-900/10 text-white group/btn hover:bg-black transition-all duration-300"
                      >
                         <span className="text-xs font-bold uppercase">Resume Now</span>
@@ -547,6 +741,32 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      >
                         <ChevronDown size={18} strokeWidth={2.5} />
                      </button>
+
+                     {settings?.allowBannerDismissal !== false && (
+                        <div className="flex items-center gap-1">
+                           <button
+                              onClick={() => {
+                                 setShowPendingBanner(false);
+                                 localStorage.setItem('sna_snooze_pending', (Date.now() + 3600000).toString());
+                              }}
+                              className="hidden md:flex items-center gap-1.5 px-2 py-1 text-amber-700 hover:bg-amber-100/50 rounded-lg transition-all text-[10px] font-bold uppercase"
+                              title="Snooze for 1 hour"
+                           >
+                              <Clock size={14} />
+                              Snooze
+                           </button>
+                           <button
+                              onClick={() => {
+                                 setShowPendingBanner(false);
+                                 localStorage.setItem('sna_dismiss_pending', Date.now().toString());
+                              }}
+                              className="p-1.5 text-amber-700 hover:text-amber-900 hover:bg-amber-100/50 rounded-lg transition-all"
+                              title="Dismiss"
+                           >
+                              <X size={18} />
+                           </button>
+                        </div>
+                     )}
                   </div>
                </div>
 
@@ -585,7 +805,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                               </div>
 
                               <button
-                                 onClick={() => onNavigate('sales')}
+                                 onClick={() => {
+                                    sessionStorage.setItem('sna_resume_held_sale_id', sale.id);
+                                    onNavigate('sales');
+                                 }}
                                  className="w-full py-2.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-bold uppercase border border-amber-100 hover:bg-amber-950 hover:text-white hover:border-amber-950 transition-all flex items-center justify-center gap-2"
                               >
                                  Resume Sale
@@ -600,8 +823,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          )}
 
          {/* --- LOW STOCK ALERT TICKER --- */}
-         {lowStockItems.length > 0 && (
-            <div className="w-full bg-rose-50/30 border-t-[3px] border-rose-500 rounded-3xl overflow-hidden relative group/ticker mb-4 shadow-sm">
+         {showLowStockBanner && lowStockItems.length > 0 && (
+            <div className="w-full bg-rose-50/20 backdrop-blur-md border border-rose-100/50 border-t-[3px] border-rose-500 rounded-3xl overflow-hidden relative group/ticker mb-4 shadow-xl shadow-rose-900/5">
                {/* Shimmer Effect */}
                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full animate-[shimmer_3s_infinite] pointer-events-none"></div>
 
@@ -644,22 +867,127 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   </div>
 
                   {/* Right Side: Manage Link */}
-                  <div className="px-8 border-l border-rose-100/50 hidden md:block z-20">
+                  <div className="px-4 md:px-8 border-l border-rose-100/50 flex items-center gap-4 z-20">
                      <button
                         onClick={() => onNavigate('inventory')}
-                        className="flex items-center gap-2 text-rose-500 hover:text-rose-600 font-black text-xs uppercase tracking-widest group/manage transition-colors"
+                        className="hidden md:flex items-center gap-2 text-rose-500 hover:text-rose-600 font-black text-xs uppercase tracking-widest group/manage transition-colors"
                      >
                         Manage
                         <ArrowRight size={16} className="group-hover/manage:translate-x-1 transition-transform" />
                      </button>
+
+                     {settings?.allowBannerDismissal !== false && (
+                        <button
+                           onClick={() => setShowLowStockBanner(false)}
+                           className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-100/50 rounded-lg transition-all"
+                           title="Dismiss"
+                        >
+                           <X size={18} />
+                        </button>
+                     )}
                   </div>
                </div>
             </div>
          )}
 
+         {/* --- QUICK STATS CARDS --- */}
+         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
+            {/* Sales Card */}
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-blue-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+               <div className="relative z-10">
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-all duration-500 shadow-inner">
+                     <DollarSign size={16} strokeWidth={2.5} />
+                  </div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{timeRange === 'Today' ? 'Sales Today' : timeRange === 'This Month' ? 'Sales Monthly' : timeRange === 'Custom' ? 'Sales Custom' : 'Total Revenue'}</p>
+                  <h3 className="text-lg font-black text-slate-900 tracking-tighter">
+                     <span className="text-sm text-slate-400 mr-1 font-normal">UGX</span>
+                     {(stats.revenue || 0).toLocaleString()}
+                  </h3>
+                  <div className="flex items-center gap-2 mt-4">
+                     <div className={`flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-black ${stats.revenueTrend >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                        {stats.revenueTrend >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                        {Math.abs(stats.revenueTrend || 0).toFixed(1)}%
+                     </div>
+                     <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">vs prev</span>
+                  </div>
+               </div>
+            </div>
+
+            {/* Profit Card */}
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-emerald-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+               <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+               <div className="relative z-10">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-500 shadow-inner">
+                     <TrendingUp size={16} strokeWidth={2.5} />
+                  </div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{timeRange === 'Today' ? 'Profit Today' : 'Profit Period'}</p>
+                  <h3 className="text-lg font-black text-slate-900 tracking-tighter">
+                     <span className="text-sm text-slate-400 mr-1 font-normal">UGX</span>
+                     {/* @ts-ignore */}
+                     {(stats.profit || 0).toLocaleString()}
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-4 flex items-center gap-2">
+                     <CheckCircle2 size={12} className="text-emerald-500" /> Net Earnings
+                  </p>
+               </div>
+            </div>
+
+            {/* Profit Margin */}
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-amber-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+               <div className="absolute top-0 right-0 w-32 h-32 bg-amber-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+               <div className="relative z-10">
+                  <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3 group-hover:bg-amber-600 group-hover:text-white transition-all duration-500 shadow-inner">
+                     <Percent size={16} strokeWidth={2.5} />
+                  </div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Profit Margin</p>
+                  <h3 className="text-lg font-black text-slate-900 tracking-tighter">{(stats.margin || 0).toFixed(1)}%</h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-4 flex items-center gap-2">
+                     <CheckCircle2 size={12} className="text-emerald-500" /> Healthy Performance
+                  </p>
+               </div>
+            </div>
+
+            {/* QTY Sold */}
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-rose-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+               <div className="absolute top-0 right-0 w-32 h-32 bg-rose-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+               <div className="relative z-10">
+                  <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mb-3 group-hover:bg-rose-600 group-hover:text-white transition-all duration-500 shadow-inner">
+                     <ShoppingBag size={16} strokeWidth={2.5} />
+                  </div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">QTY Sold</p>
+                  <h3 className="text-lg font-black text-slate-900 tracking-tighter">
+                     {/* @ts-ignore */}
+                     {(stats.qtySold || 0)} <span className="text-sm text-slate-400 font-normal">Units</span>
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-4 flex items-center gap-2">
+                     <Activity size={12} className="text-rose-500" /> Volume
+                  </p>
+               </div>
+            </div>
+
+            {/* Inventory Value */}
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-violet-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+               <div className="absolute top-0 right-0 w-32 h-32 bg-violet-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+               <div className="relative z-10">
+                  <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center mb-3 group-hover:bg-violet-600 group-hover:text-white transition-all duration-500 shadow-inner">
+                     <Package size={16} strokeWidth={2.5} />
+                  </div>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Stock Value</p>
+                  <h3 className="text-lg font-black text-slate-900 tracking-tighter">
+                     <span className="text-sm text-slate-400 mr-1 font-normal">UGX</span>
+                     {(stats.inventoryValue || 0).toLocaleString()}
+                  </h3>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-4 flex items-center gap-2">
+                     <Activity size={12} className="text-violet-500" /> Asset Total
+                  </p>
+               </div>
+            </div>
+         </div>
+
          {/* --- TOP ROW (Sales Overview & Category Dist) --- */}
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-8 border border-slate-100 shadow-sm flex flex-col md:flex-row gap-8">
+            <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex flex-col md:flex-row gap-6">
 
                {/* Chart Area */}
                <div className="flex-1 min-w-0 flex flex-col">
@@ -670,20 +998,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                         </div>
                         <h3 className="text-lg font-black text-slate-900">Sales Overview</h3>
                      </div>
-                     <div className="flex bg-slate-50 p-1 rounded-xl">
-                        {['Today', 'This Month', 'All Time'].map(t => (
-                           <button
-                              key={t}
-                              onClick={() => setTimeRange(t as any)}
-                              className={`px-3 py-1.5 text-xs font-bold uppercase rounded-lg transition-all ${timeRange === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                           >
-                              {t === 'This Month' ? 'Monthly' : t}
-                           </button>
-                        ))}
-                     </div>
+
                   </div>
 
-                  <div className="flex-1 h-[300px] w-full relative">
+                  <div className="flex-1 h-[180px] w-full relative">
                      <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={salesData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                            <defs>
@@ -711,7 +1029,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                </div>
 
                {/* Side Stats Panel */}
-               <div className="w-full md:w-64 shrink-0 flex flex-col gap-6 border-t md:border-t-0 md:border-l border-slate-100 pt-6 md:pt-0 md:pl-8">
+               <div className="w-full md:w-56 shrink-0 flex flex-col gap-4 border-t md:border-t-0 md:border-l border-slate-100 pt-4 md:pt-0 md:pl-6">
 
                   {/* Total Stat */}
                   <div>
@@ -760,7 +1078,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
             {/* CATEGORY DISTRIBUTION (Audience Demographics Style) - Spans 4 Cols */}
-            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl p-6 border border-slate-100 shadow-sm flex flex-col">
+            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex flex-col">
                <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
                      <Users size={20} />
@@ -769,15 +1087,15 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                </div>
 
                {/* Chart */}
-               <div className="h-48 w-full relative mb-6">
+               <div className="h-32 w-full relative mb-4">
                   <ResponsiveContainer width="100%" height="100%">
                      <PieChart>
                         <Pie
                            data={categoryData}
                            cx="50%"
                            cy="50%"
-                           innerRadius={60}
-                           outerRadius={80}
+                           innerRadius={45}
+                           outerRadius={60}
                            paddingAngle={5}
                            dataKey="value"
                         >
@@ -790,13 +1108,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   </ResponsiveContainer>
                   {/* Center Text */}
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                     <span className="text-2xl font-black text-slate-900">{stats.qtySoldToday}</span>
+                     <span className="text-xl font-black text-slate-900">{stats.qtySoldToday}</span>
                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Items</span>
                   </div>
                </div>
 
                {/* Legend / Stats List */}
-               <div className="flex-1 space-y-4 overflow-y-auto pr-1 custom-scrollbar">
+               <div className="flex-1 space-y-3 overflow-y-auto pr-1 custom-scrollbar">
                   {categoryData.length > 0 ? categoryData.map((cat, idx) => (
                      <div key={idx}>
                         <div className="flex justify-between items-center mb-1.5">
@@ -828,7 +1146,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
             {/* RECENT ACTIVITY (Schedule Content Style) - Spans 8 Cols */}
-            <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-3">
                <div className="flex justify-between items-center mb-5">
                   <div className="flex items-center gap-2.5">
                      <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
@@ -887,8 +1205,90 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                </div>
             </div>
 
+            {/* TOP SELLING ITEMS (Leaderboard Style) - Spans 4 Cols */}
+            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 flex flex-col">
+               <div className="flex justify-between items-center mb-5">
+                  <div className="flex items-center gap-2.5">
+                     <div className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center">
+                        <TrendingUp size={16} />
+                     </div>
+                     <h3 className="text-base font-bold text-slate-900">Top Selling</h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                     <button onClick={() => onNavigate('reports')} className="text-[10px] font-black text-blue-500 hover:text-blue-600 uppercase tracking-widest transition-colors mr-1">
+                        View All
+                     </button>
+                     <button onClick={() => onNavigate('inventory')} className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors" title="View Inventory">
+                        <ArrowRight size={14} />
+                     </button>
+                     <div className="flex bg-slate-50 p-0.5 rounded-lg">
+                        <button
+                           onClick={() => setTopSellingMode('Quantity')}
+                           className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${topSellingMode === 'Quantity' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
+                        >
+                           Qty
+                        </button>
+                        <button
+                           onClick={() => setTopSellingMode('Revenue')}
+                           className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${topSellingMode === 'Revenue' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
+                        >
+                           Rev
+                        </button>
+                     </div>
+                  </div>
+               </div>
+
+               <div className="space-y-4 flex-1">
+                  {topProducts.map((item, idx) => (
+                     <div key={idx} className="group cursor-pointer" onClick={() => onNavigate('inventory')}>
+                        <div className="flex justify-between items-start mb-1.5">
+                           <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-rose-50 group-hover:text-rose-500 transition-all">
+                                 {getProductIcon(item.product.type)}
+                              </div>
+                              <div className="min-w-0">
+                                 <p className="text-xs font-bold text-slate-700 truncate group-hover:text-rose-600 transition-colors">{item.product.name}</p>
+                                 <div className="flex items-center gap-2">
+                                    <span className="text-[9px] font-black text-slate-300 uppercase">#{idx + 1}</span>
+                                    {item.product.stockQuantity <= item.product.reorderLevel && (
+                                       <span className="flex items-center gap-0.5 text-[9px] font-bold text-orange-500 uppercase">
+                                          <AlertTriangle size={8} /> Low Stock
+                                       </span>
+                                    )}
+                                 </div>
+                              </div>
+                           </div>
+                           <div className="text-right">
+                              <p className="text-xs font-black text-slate-900">
+                                 {topSellingMode === 'Quantity' ? `${item.count} sold` : `UGX ${(item.revenue / 1000).toFixed(0)}k`}
+                              </p>
+                              <div className={`flex items-center justify-end gap-0.5 text-[9px] font-bold ${item.trend >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                                 {item.trend >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                                 {Math.abs(item.trend).toFixed(0)}%
+                              </div>
+                           </div>
+                        </div>
+                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                           <div
+                              className="h-full bg-gradient-to-r from-rose-500 to-rose-400 rounded-full transition-all duration-1000 group-hover:brightness-110"
+                              style={{
+                                 width: `${((topSellingMode === 'Quantity' ? item.count : item.revenue) / (topSellingMode === 'Quantity' ? topProducts[0].count : topProducts[0].revenue)) * 100}%`
+                              }}
+                           />
+                        </div>
+                     </div>
+                  ))}
+                  {topProducts.length === 0 && (
+                     <div className="flex flex-col items-center justify-center py-10 text-slate-300">
+                        <TrendingUp size={32} className="mb-2 opacity-20" />
+                        <p className="text-xs font-bold uppercase tracking-widest">No sales data</p>
+                     </div>
+                  )}
+               </div>
+            </div>
+
             {/* TOP CUSTOMERS (Most Engaged Style) - Spans 4 Cols */}
-            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-5">
+            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-3">
                <div className="flex items-center gap-2.5 mb-5">
                   <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
                      <Crown size={16} />
@@ -898,7 +1298,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
                <div className="space-y-5">
                   {topCustomers.map((cust, idx) => (
-                     <div key={idx} className="flex items-center gap-3 group border-b border-slate-50 last:border-0 pb-3 last:pb-0">
+                     <div
+                        key={idx}
+                        onClick={() => {
+                           sessionStorage.setItem('sna_view_customer_statement', cust.name);
+                           onNavigate('customers');
+                        }}
+                        className="flex items-center gap-3 group border-b border-slate-50 last:border-0 pb-3 last:pb-0 cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-lg transition-all relative"
+                     >
                         <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-100 group-hover:border-blue-200 transition-colors shrink-0">
                            <img
                               src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${cust.name}&backgroundColor=b6e3f4`}
@@ -920,6 +1327,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                         <div className="text-right">
                            <span className="block text-xs font-bold text-slate-900">{(cust.amount / 1000).toFixed(0)}k</span>
                            <span className="block text-[11px] font-bold text-slate-400 uppercase leading-none">Spent</span>
+                           <div className={`flex items-center justify-end gap-0.5 text-[9px] font-bold mt-1 ${cust.trend >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                              {cust.trend >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                              {Math.abs(cust.trend).toFixed(0)}%
+                           </div>
                         </div>
                      </div>
                   ))}
