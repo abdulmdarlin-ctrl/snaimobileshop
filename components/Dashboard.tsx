@@ -1356,204 +1356,562 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
          </div>
 
-         {/* --- CASHIER DASHBOARD - Sales Focus --- */}
-         {isCashier && (
+         {/* --- MANAGER DASHBOARD - Business Operations Focus --- */}
+         {isManager && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
-               {/* Cashier Quick Stats */}
-               <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
-                  <div className="flex items-center gap-3 mb-6">
-                     <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
-                        <DollarSign size={20} />
+               {/* Manager Quick Stats Row */}
+               <div className="col-span-1 lg:col-span-12 grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                     <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-400 uppercase">Revenue</span>
+                        <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
+                           <DollarSign size={16} />
+                        </div>
                      </div>
-                     <h3 className="text-lg font-black text-slate-900">Today's Performance</h3>
+                     <h4 className="text-xl font-black text-slate-900">
+                        <span className="text-sm">UGX</span> {(stats.revenue || 0).toLocaleString()}
+                     </h4>
+                     <p className="text-xs text-slate-500 mt-1">Total Sales</p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                     <div className="bg-blue-50 rounded-xl p-4 text-center">
-                        <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-3">
-                           <DollarSign size={24} />
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                     <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-400 uppercase">Orders</span>
+                        <div className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center">
+                           <ShoppingBag size={16} />
                         </div>
-                        <h4 className="text-2xl font-black text-blue-900">
-                           <span className="text-sm">UGX</span>
-                           {(stats.revenueToday || 0).toLocaleString()}
-                        </h4>
-                        <p className="text-xs font-bold text-blue-600 uppercase">Sales Today</p>
                      </div>
-                     <div className="bg-emerald-50 rounded-xl p-4 text-center">
-                        <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
-                           <Receipt size={24} />
+                     <h4 className="text-xl font-black text-slate-900">{stats.orders || 0}</h4>
+                     <p className="text-xs text-slate-500 mt-1">Transactions</p>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                     <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-400 uppercase">Active Repairs</span>
+                        <div className="w-8 h-8 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center">
+                           <Wrench size={16} />
                         </div>
-                        <h4 className="text-2xl font-black text-emerald-900">{stats.invoicesToday || 0}</h4>
-                        <p className="text-xs font-bold text-emerald-600 uppercase">Invoices</p>
                      </div>
-                     <div className="bg-amber-50 rounded-xl p-4 text-center">
-                        <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-3">
-                           <ShoppingBag size={24} />
+                     <h4 className="text-xl font-black text-slate-900">{stats.repairs || 0}</h4>
+                     <p className="text-xs text-slate-500 mt-1">In Progress</p>
+                  </div>
+
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                     <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold text-slate-400 uppercase">Low Stock</span>
+                        <div className="w-8 h-8 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center">
+                           <AlertTriangle size={16} />
                         </div>
-                        <h4 className="text-2xl font-black text-amber-900">{stats.qtySoldToday || 0}</h4>
-                        <p className="text-xs font-bold text-amber-600 uppercase">Items Sold</p>
+                     </div>
+                     <h4 className="text-xl font-black text-slate-900">{stats.lowStockCount || 0}</h4>
+                     <p className="text-xs text-orange-500 mt-1">Needs Reorder</p>
+                  </div>
+               </div>
+
+               {/* Manager Main Content */}
+               <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                  <div className="flex items-center justify-between mb-6">
+                     <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-indigo-50 text-indigo-500 flex items-center justify-center">
+                           <Activity size={20} />
+                        </div>
+                        <h3 className="text-lg font-black text-slate-900">Business Performance</h3>
+                     </div>
+                     <div className="flex gap-2">
+                        <button onClick={() => onNavigate('reports')} className="px-4 py-2 bg-indigo-50 text-indigo-600 text-xs font-bold rounded-lg hover:bg-indigo-100 transition-colors">
+                           View Reports
+                        </button>
+                     </div>
+                  </div>
+
+                  {/* Manager Metrics Grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+                     <div className="bg-slate-50 rounded-xl p-4">
+                        <p className="text-xs text-slate-500 mb-1">Today's Sales</p>
+                        <h4 className="text-lg font-bold text-slate-900">UGX {(stats.revenueToday || 0).toLocaleString()}</h4>
+                     </div>
+                     <div className="bg-slate-50 rounded-xl p-4">
+                        <p className="text-xs text-slate-500 mb-1">Invoices Today</p>
+                        <h4 className="text-lg font-bold text-slate-900">{stats.invoicesToday || 0}</h4>
+                     </div>
+                     <div className="bg-slate-50 rounded-xl p-4">
+                        <p className="text-xs text-slate-500 mb-1">Items Sold Today</p>
+                        <h4 className="text-lg font-bold text-slate-900">{stats.qtySoldToday || 0}</h4>
                      </div>
                   </div>
 
                   {/* Quick Actions */}
-                  <div>
-                     <h4 className="text-sm font-bold text-slate-900 mb-4">Quick Actions</h4>
-                     <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => onNavigate('sales')} className="py-3 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
-                           <ShoppingBag size={16} /> New Sale
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                     <button onClick={() => onNavigate('sales')} className="p-3 bg-blue-50 text-blue-700 rounded-xl text-xs font-bold hover:bg-blue-100 transition-colors text-center">
+                        Sales (POS)
+                     </button>
+                     <button onClick={() => onNavigate('inventory')} className="p-3 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold hover:bg-emerald-100 transition-colors text-center">
+                        Inventory
+                     </button>
+                     <button onClick={() => onNavigate('repairs')} className="p-3 bg-purple-50 text-purple-700 rounded-xl text-xs font-bold hover:bg-purple-100 transition-colors text-center">
+                        Repairs
+                     </button>
+                     <button onClick={() => onNavigate('customers')} className="p-3 bg-gray-50 text-gray-700 rounded-xl text-xs font-bold hover:bg-gray-100 transition-colors text-center">
+                        Customers
+                     </button>
+                  </div>
+               </div>
+
+               {/* Manager Side Panel */}
+               <div className="col-span-1 lg:col-span-4 space-y-4">
+                  {/* Inventory Summary */}
+                  <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                     <h4 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                        <Package size={16} className="text-slate-400" />
+                        Inventory Summary
+                     </h4>
+                     <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                           <span className="text-sm text-slate-600">Total Products</span>
+                           <span className="text-sm font-bold text-slate-900">{stats.inventoryCount || 0}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                           <span className="text-sm text-slate-600">Low Stock Items</span>
+                           <span className="text-sm font-bold text-orange-600">{stats.lowStockCount || 0}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                           <span className="text-sm text-slate-600">Active Repairs</span>
+                           <span className="text-sm font-bold text-purple-600">{stats.repairs || 0}</span>
+                        </div>
+                     </div>
+                     <button onClick={() => onNavigate('inventory')} className="w-full mt-4 py-2 bg-slate-100 text-slate-700 text-xs font-bold rounded-lg hover:bg-slate-200 transition-colors">
+                        Manage Inventory
+                     </button>
+                  </div>
+
+                  {/* Recent Activity Summary */}
+                  <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                     <h4 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                        <Clock size={16} className="text-slate-400" />
+                        Recent Activity
+                     </h4>
+                     <div className="space-y-2">
+                        {recentActivity.slice(0, 3).map((item, idx) => (
+                           <div key={idx} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg">
+                              <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+                              <span className="text-xs text-slate-600 truncate flex-1">{item.title}</span>
+                           </div>
+                        ))}
+                        {recentActivity.length === 0 && (
+                           <p className="text-xs text-slate-400 text-center py-2">No recent activity</p>
+                        )}
+                     </div>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* --- CASHIER DASHBOARD - Point of Sale Focus --- */}
+         {isCashier && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+               {/* Cashier Main Panel */}
+               <div className="col-span-1 lg:col-span-8 space-y-6">
+                  {/* Sales Performance Cards */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                     <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-4 rounded-2xl text-white shadow-lg">
+                        <div className="flex items-center justify-between mb-2">
+                           <span className="text-xs font-bold opacity-80 uppercase">Sales Today</span>
+                           <DollarSign size={16} className="opacity-60" />
+                        </div>
+                        <h4 className="text-xl font-black">UGX {(stats.revenueToday || 0).toLocaleString()}</h4>
+                        <p className="text-xs opacity-60 mt-1">Today's revenue</p>
+                     </div>
+
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                           <span className="text-xs font-bold text-slate-400 uppercase">Invoices</span>
+                           <Receipt size={16} className="text-emerald-500" />
+                        </div>
+                        <h4 className="text-xl font-black text-slate-900">{stats.invoicesToday || 0}</h4>
+                        <p className="text-xs text-slate-500 mt-1">Transactions</p>
+                     </div>
+
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                           <span className="text-xs font-bold text-slate-400 uppercase">Items Sold</span>
+                           <ShoppingBag size={16} className="text-amber-500" />
+                        </div>
+                        <h4 className="text-xl font-black text-slate-900">{stats.qtySoldToday || 0}</h4>
+                        <p className="text-xs text-slate-500 mt-1">Units</p>
+                     </div>
+
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <div className="flex items-center justify-between mb-2">
+                           <span className="text-xs font-bold text-slate-400 uppercase">Avg Sale</span>
+                           <TrendingUp size={16} className="text-blue-500" />
+                        </div>
+                        <h4 className="text-xl font-black text-slate-900">
+                           UGX {stats.invoicesToday > 0 ? Math.round((stats.revenueToday || 0) / stats.invoicesToday).toLocaleString() : '0'}
+                        </h4>
+                        <p className="text-xs text-slate-500 mt-1">Per invoice</p>
+                     </div>
+                  </div>
+
+                  {/* Main Quick Actions */}
+                  <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+                     <h3 className="text-lg font-black text-slate-900 mb-4">Quick Actions</h3>
+                     <div className="grid grid-cols-2 gap-4">
+                        <button onClick={() => onNavigate('sales')} className="group p-4 bg-blue-50 hover:bg-blue-100 rounded-xl transition-all text-left">
+                           <div className="w-12 h-12 bg-blue-500 text-white rounded-lg flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                              <ShoppingBag size={24} />
+                           </div>
+                           <h4 className="font-bold text-slate-900">New Sale</h4>
+                           <p className="text-xs text-slate-500">Process POS transaction</p>
                         </button>
-                        <button onClick={() => onNavigate('customers')} className="py-3 bg-gray-600 text-white text-sm font-bold rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center gap-2">
-                           <Users size={16} /> Add Customer
+
+                        <button onClick={() => onNavigate('customers')} className="group p-4 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-all text-left">
+                           <div className="w-12 h-12 bg-emerald-500 text-white rounded-lg flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                              <Users size={24} />
+                           </div>
+                           <h4 className="font-bold text-slate-900">Add Customer</h4>
+                           <p className="text-xs text-slate-500">Register new client</p>
                         </button>
-                        <button onClick={() => onNavigate('repairs')} className="py-3 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-2">
-                           <Wrench size={16} /> New Repair
+
+                        <button onClick={() => onNavigate('repairs')} className="group p-4 bg-purple-50 hover:bg-purple-100 rounded-xl transition-all text-left">
+                           <div className="w-12 h-12 bg-purple-500 text-white rounded-lg flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                              <Wrench size={24} />
+                           </div>
+                           <h4 className="font-bold text-slate-900">New Repair</h4>
+                           <p className="text-xs text-slate-500">Create job card</p>
                         </button>
-                        <button onClick={() => onNavigate('expenses')} className="py-3 bg-orange-600 text-white text-sm font-bold rounded-lg hover:bg-orange-700 transition-colors flex items-center justify-center gap-2">
-                           <DollarSign size={16} /> Add Expense
+
+                        <button onClick={() => onNavigate('expenses')} className="group p-4 bg-orange-50 hover:bg-orange-100 rounded-xl transition-all text-left">
+                           <div className="w-12 h-12 bg-orange-500 text-white rounded-lg flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                              <DollarSign size={24} />
+                           </div>
+                           <h4 className="font-bold text-slate-900">Add Expense</h4>
+                           <p className="text-xs text-slate-500">Record spending</p>
                         </button>
+                     </div>
+                  </div>
+
+                  {/* Payment Methods Summary */}
+                  <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                     <h4 className="text-sm font-bold text-slate-900 mb-4">Today's Payment Methods</h4>
+                     <div className="grid grid-cols-3 gap-3">
+                        <div className="text-center p-3 bg-slate-50 rounded-xl">
+                           <p className="text-xs text-slate-500 mb-1">Cash</p>
+                           <p className="font-bold text-slate-900">UGX {(stats.cashRevenue || 0).toLocaleString()}</p>
+                        </div>
+                        <div className="text-center p-3 bg-slate-50 rounded-xl">
+                           <p className="text-xs text-slate-500 mb-1">Mobile Money</p>
+                           <p className="font-bold text-slate-900">UGX {(stats.mmRevenue || 0).toLocaleString()}</p>
+                        </div>
+                        <div className="text-center p-3 bg-slate-50 rounded-xl">
+                           <p className="text-xs text-slate-500 mb-1">Bank</p>
+                           <p className="font-bold text-slate-900">UGX {(stats.bankRevenue || 0).toLocaleString()}</p>
+                        </div>
                      </div>
                   </div>
                </div>
 
                {/* Cashier Side Panel */}
                <div className="col-span-1 lg:col-span-4 space-y-4">
-                  <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
-                     <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center">
-                           <Wrench size={20} />
-                        </div>
-                        <h3 className="text-lg font-black text-slate-900">Active Repairs</h3>
-                     </div>
-                     <div className="text-center py-4">
-                        <h4 className="text-3xl font-black text-purple-600">{stats.repairs || 0}</h4>
-                        <p className="text-xs text-slate-500">Jobs in progress</p>
-                     </div>
-                  </div>
-
-                  <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
-                     <div className="flex items-center gap-3 mb-4">
-                        <div className="w-10 h-10 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center">
-                           <AlertTriangle size={20} />
-                        </div>
-                        <h3 className="text-lg font-black text-slate-900">Low Stock</h3>
-                     </div>
-                     <div className="text-center py-4">
-                        <h4 className="text-3xl font-black text-orange-600">{stats.lowStockCount || 0}</h4>
-                        <p className="text-xs text-slate-500">Items need reorder</p>
-                     </div>
-                  </div>
-               </div>
-            </div>
-         )}
-
-         {/* --- TECHNICIAN DASHBOARD - Repair Focus --- */}
-         {isTechnician && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
-               <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
-                  <div className="flex items-center gap-3 mb-6">
-                     <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
+                  {/* Active Repairs Alert */}
+                  <div className="bg-gradient-to-br from-purple-500 to-purple-600 p-4 rounded-2xl text-white shadow-lg">
+                     <div className="flex items-center gap-3 mb-3">
                         <Wrench size={20} />
+                        <span className="font-bold">Active Repairs</span>
                      </div>
-                     <h3 className="text-lg font-black text-slate-900">Repair Status Overview</h3>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                     <div className="bg-blue-50 rounded-xl p-4 text-center">
-                        <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-3">
-                           <Clock size={24} />
-                        </div>
-                        <h4 className="text-2xl font-black text-blue-900">{stats.repairs || 0}</h4>
-                        <p className="text-xs font-bold text-blue-600 uppercase">My Active Jobs</p>
-                     </div>
-                     <div className="bg-emerald-50 rounded-xl p-4 text-center">
-                        <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
-                           <CheckCircle2 size={24} />
-                        </div>
-                        <h4 className="text-2xl font-black text-emerald-900">--</h4>
-                        <p className="text-xs font-bold text-emerald-600 uppercase">Completed Today</p>
-                     </div>
-                     <div className="bg-amber-50 rounded-xl p-4 text-center">
-                        <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-3">
-                           <AlertCircle size={24} />
-                        </div>
-                        <h4 className="text-2xl font-black text-amber-900">--</h4>
-                        <p className="text-xs font-bold text-amber-600 uppercase">Pending</p>
-                     </div>
-                  </div>
-
-                  <div className="mt-6">
-                     <button onClick={() => onNavigate('repairs')} className="w-full py-3 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors">
-                        View All Repairs
+                     <h4 className="text-3xl font-black">{stats.repairs || 0}</h4>
+                     <p className="text-xs opacity-60 mt-1">Jobs awaiting completion</p>
+                     <button onClick={() => onNavigate('repairs')} className="mt-3 w-full py-2 bg-white/20 hover:bg-white/30 rounded-lg text-xs font-bold transition-colors">
+                        View Repairs
                      </button>
                   </div>
-               </div>
 
-               <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
-                  <div className="flex items-center gap-3 mb-6">
-                     <div className="w-10 h-10 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center">
-                        <Package size={20} />
+                  {/* Low Stock Alert */}
+                  <div className="bg-white p-4 rounded-2xl border border-orange-100 shadow-sm">
+                     <div className="flex items-center gap-3 mb-3">
+                        <div className="w-10 h-10 bg-orange-50 text-orange-500 rounded-full flex items-center justify-center">
+                           <AlertTriangle size={20} />
+                        </div>
+                        <div>
+                           <h4 className="font-bold text-slate-900">Low Stock Alert</h4>
+                           <p className="text-xs text-slate-500">Items need reorder</p>
+                        </div>
                      </div>
-                     <h3 className="text-lg font-black text-slate-900">Parts Inventory</h3>
-                  </div>
-
-                  <div className="space-y-3">
-                     <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                        <span className="text-sm font-bold text-slate-900">Available Parts</span>
-                        <span className="text-sm font-bold text-emerald-600">{stats.inventoryCount || 0}</span>
-                     </div>
-                     <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
-                        <span className="text-sm font-bold text-slate-900">Low Stock Items</span>
-                        <span className="text-sm font-bold text-amber-600">{stats.lowStockCount || 0}</span>
-                     </div>
-                  </div>
-
-                  <div className="mt-4">
-                     <button onClick={() => onNavigate('inventory')} className="w-full py-2 bg-amber-100 text-amber-700 text-xs font-bold rounded-lg hover:bg-amber-200 transition-colors">
+                     <h4 className="text-2xl font-black text-orange-600">{stats.lowStockCount || 0}</h4>
+                     <button onClick={() => onNavigate('inventory')} className="mt-3 w-full py-2 bg-orange-50 text-orange-700 rounded-lg text-xs font-bold hover:bg-orange-100 transition-colors">
                         Check Inventory
                      </button>
                   </div>
+
+                  {/* Top Selling Items */}
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                     <h4 className="text-sm font-bold text-slate-900 mb-3">Top Selling Today</h4>
+                     <div className="space-y-2">
+                        {topProducts.slice(0, 3).map((item, idx) => (
+                           <div key={idx} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg">
+                              <span className="text-xs font-bold text-slate-400 w-4">#{idx + 1}</span>
+                              <span className="text-xs text-slate-700 flex-1 truncate">{item.product?.name || 'Product'}</span>
+                              <span className="text-xs font-bold text-slate-900">{item.count}</span>
+                           </div>
+                        ))}
+                        {topProducts.length === 0 && (
+                           <p className="text-xs text-slate-400 text-center py-2">No sales today</p>
+                        )}
+                     </div>
+                  </div>
                </div>
             </div>
          )}
 
-         {/* --- AUDITOR DASHBOARD - Read Only Overview --- */}
+         {/* --- TECHNICIAN DASHBOARD - Repair Workshop Focus --- */}
+         {isTechnician && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+               <div className="col-span-1 lg:col-span-8 space-y-6">
+                  {/* Repair Stats */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                     <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100">
+                        <div className="flex items-center gap-2 mb-2">
+                           <Clock size={16} className="text-blue-500" />
+                           <span className="text-xs font-bold text-blue-600 uppercase">Active</span>
+                        </div>
+                        <h4 className="text-2xl font-black text-blue-900">{stats.repairs || 0}</h4>
+                        <p className="text-xs text-blue-500">In Progress</p>
+                     </div>
+
+                     <div className="bg-emerald-50 p-4 rounded-2xl border border-emerald-100">
+                        <div className="flex items-center gap-2 mb-2">
+                           <CheckCircle2 size={16} className="text-emerald-500" />
+                           <span className="text-xs font-bold text-emerald-600 uppercase">Completed</span>
+                        </div>
+                        <h4 className="text-2xl font-black text-emerald-900">--</h4>
+                        <p className="text-xs text-emerald-500">Today</p>
+                     </div>
+
+                     <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100">
+                        <div className="flex items-center gap-2 mb-2">
+                           <AlertCircle size={16} className="text-amber-500" />
+                           <span className="text-xs font-bold text-amber-600 uppercase">Pending</span>
+                        </div>
+                        <h4 className="text-2xl font-black text-amber-900">--</h4>
+                        <p className="text-xs text-amber-500">Waiting</p>
+                     </div>
+
+                     <div className="bg-purple-50 p-4 rounded-2xl border border-purple-100">
+                        <div className="flex items-center gap-2 mb-2">
+                           <Wrench size={16} className="text-purple-500" />
+                           <span className="text-xs font-bold text-purple-600 uppercase">Total</span>
+                        </div>
+                        <h4 className="text-2xl font-black text-purple-900">{stats.repairs || 0}</h4>
+                        <p className="text-xs text-purple-500">My Jobs</p>
+                     </div>
+                  </div>
+
+                  {/* Repair Actions */}
+                  <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+                     <h3 className="text-lg font-black text-slate-900 mb-4">Workshop Actions</h3>
+                     <div className="grid grid-cols-2 gap-4">
+                        <button onClick={() => onNavigate('repairs')} className="group p-4 bg-blue-50 hover:bg-blue-100 rounded-xl transition-all text-left">
+                           <div className="w-12 h-12 bg-blue-500 text-white rounded-lg flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                              <Wrench size={24} />
+                           </div>
+                           <h4 className="font-bold text-slate-900">View Repairs</h4>
+                           <p className="text-xs text-slate-500">Manage job cards</p>
+                        </button>
+
+                        <button onClick={() => onNavigate('inventory')} className="group p-4 bg-amber-50 hover:bg-amber-100 rounded-xl transition-all text-left">
+                           <div className="w-12 h-12 bg-amber-500 text-white rounded-lg flex items-center justify-center mb-3 group-hover:scale-110 transition-transform">
+                              <Package size={24} />
+                           </div>
+                           <h4 className="font-bold text-slate-900">Parts Inventory</h4>
+                           <p className="text-xs text-slate-500">Check spare parts</p>
+                        </button>
+                     </div>
+                  </div>
+
+                  {/* Recent Repairs List */}
+                  <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                     <h4 className="text-sm font-bold text-slate-900 mb-4">Recent Repair Jobs</h4>
+                     <div className="space-y-2">
+                        {rawRepairs.slice(0, 5).map((repair, idx) => (
+                           <div key={idx} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                              <div className="flex items-center gap-3">
+                                 <div className={`w-2 h-2 rounded-full ${repair.status === 'In Repair' ? 'bg-blue-500' : repair.status === 'Completed' ? 'bg-emerald-500' : 'bg-amber-500'}`}></div>
+                                 <div>
+                                    <p className="text-xs font-bold text-slate-900">{repair.deviceModel}</p>
+                                    <p className="text-xs text-slate-500">{repair.customerName}</p>
+                                 </div>
+                              </div>
+                              <span className="text-xs font-bold text-slate-600">{repair.status}</span>
+                           </div>
+                        ))}
+                        {rawRepairs.length === 0 && (
+                           <p className="text-xs text-slate-400 text-center py-4">No active repairs</p>
+                        )}
+                     </div>
+                  </div>
+               </div>
+
+               {/* Technician Side Panel */}
+               <div className="col-span-1 lg:col-span-4 space-y-4">
+                  {/* Parts Availability */}
+                  <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                     <h4 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
+                        <Package size={16} className="text-amber-500" />
+                        Parts Availability
+                     </h4>
+                     <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                           <span className="text-sm text-slate-600">Available Parts</span>
+                           <span className="text-sm font-bold text-emerald-600">{stats.inventoryCount || 0}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                           <span className="text-sm text-slate-600">Low Stock</span>
+                           <span className="text-sm font-bold text-amber-600">{stats.lowStockCount || 0}</span>
+                        </div>
+                     </div>
+                     <button onClick={() => onNavigate('inventory')} className="w-full mt-4 py-2 bg-amber-100 text-amber-700 text-xs font-bold rounded-lg hover:bg-amber-200 transition-colors">
+                        Check Parts
+                     </button>
+                  </div>
+
+                  {/* Quick Stats */}
+                  <div className="bg-gradient-to-br from-slate-700 to-slate-800 p-4 rounded-2xl text-white shadow-lg">
+                     <h4 className="text-sm font-bold mb-4">Workshop Status</h4>
+                     <div className="space-y-3">
+                        <div className="flex justify-between items-center">
+                           <span className="text-xs opacity-80">Inventory Items</span>
+                           <span className="font-bold">{stats.inventoryCount || 0}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                           <span className="text-xs opacity-80">Total Products</span>
+                           <span className="font-bold">{stats.inventoryCount || 0}</span>
+                        </div>
+                     </div>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* --- AUDITOR DASHBOARD - Financial Overview --- */}
          {isAuditor && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
-               <div className="col-span-1 lg:col-span-12 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
-                  <div className="flex items-center gap-3 mb-6">
-                     <div className="w-10 h-10 rounded-full bg-slate-50 text-slate-500 flex items-center justify-center">
-                        <Activity size={20} />
+               <div className="col-span-1 lg:col-span-12">
+                  {/* Auditor Summary Cards */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <p className="text-xs text-slate-500 mb-1">Total Revenue</p>
+                        <h4 className="text-lg font-black text-slate-900">UGX {(stats.revenue || 0).toLocaleString()}</h4>
                      </div>
-                     <h3 className="text-lg font-black text-slate-900">Business Overview (Read-Only)</h3>
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <p className="text-xs text-slate-500 mb-1">Today's Sales</p>
+                        <h4 className="text-lg font-black text-slate-900">UGX {(stats.revenueToday || 0).toLocaleString()}</h4>
+                     </div>
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <p className="text-xs text-slate-500 mb-1">Total Orders</p>
+                        <h4 className="text-lg font-black text-slate-900">{stats.orders || 0}</h4>
+                     </div>
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <p className="text-xs text-slate-500 mb-1">Products</p>
+                        <h4 className="text-lg font-black text-slate-900">{stats.inventoryCount || 0}</h4>
+                     </div>
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <p className="text-xs text-slate-500 mb-1">Active Repairs</p>
+                        <h4 className="text-lg font-black text-slate-900">{stats.repairs || 0}</h4>
+                     </div>
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <p className="text-xs text-slate-500 mb-1">Low Stock</p>
+                        <h4 className="text-lg font-black text-orange-600">{stats.lowStockCount || 0}</h4>
+                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                     <div className="bg-slate-50 rounded-xl p-4 text-center">
-                        <h4 className="text-xl font-black text-slate-900">
-                           <span className="text-sm">UGX</span>
-                           {(stats.revenue || 0).toLocaleString()}
-                        </h4>
-                        <p className="text-xs font-bold text-slate-500 uppercase mt-1">Total Revenue</p>
+                  {/* Auditor Detailed View */}
+                  <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
+                     <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center gap-3">
+                           <div className="w-10 h-10 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center">
+                              <Activity size={20} />
+                           </div>
+                           <div>
+                              <h3 className="text-lg font-black text-slate-900">Business Audit Overview</h3>
+                              <p className="text-xs text-slate-500">Read-only financial summary</p>
+                           </div>
+                        </div>
+                        <div className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold">
+                           Auditor View
+                        </div>
                      </div>
-                     <div className="bg-slate-50 rounded-xl p-4 text-center">
-                        <h4 className="text-xl font-black text-slate-900">{stats.orders || 0}</h4>
-                        <p className="text-xs font-bold text-slate-500 uppercase mt-1">Total Orders</p>
-                     </div>
-                     <div className="bg-slate-50 rounded-xl p-4 text-center">
-                        <h4 className="text-xl font-black text-slate-900">{stats.inventoryCount || 0}</h4>
-                        <p className="text-xs font-bold text-slate-500 uppercase mt-1">Products</p>
-                     </div>
-                     <div className="bg-slate-50 rounded-xl p-4 text-center">
-                        <h4 className="text-xl font-black text-slate-900">{stats.repairs || 0}</h4>
-                        <p className="text-xs font-bold text-slate-500 uppercase mt-1">Active Repairs</p>
-                     </div>
-                  </div>
 
-                  <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                     <p className="text-xs text-blue-600 text-center">
-                        <Activity size={12} className="inline mr-1" />
-                        Auditor view - No actions available. Data is for review purposes only.
-                     </p>
+                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Sales Summary */}
+                        <div className="p-4 bg-slate-50 rounded-xl">
+                           <h4 className="text-sm font-bold text-slate-900 mb-3">Sales Summary</h4>
+                           <div className="space-y-2">
+                              <div className="flex justify-between text-xs">
+                                 <span className="text-slate-500">Cash Sales</span>
+                                 <span className="font-bold text-slate-900">UGX {(stats.cashRevenue || 0).toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                 <span className="text-slate-500">Mobile Money</span>
+                                 <span className="font-bold text-slate-900">UGX {(stats.mmRevenue || 0).toLocaleString()}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                 <span className="text-slate-500">Bank Transfer</span>
+                                 <span className="font-bold text-slate-900">UGX {(stats.bankRevenue || 0).toLocaleString()}</span>
+                              </div>
+                              <div className="pt-2 border-t border-slate-200">
+                                 <div className="flex justify-between text-xs">
+                                    <span className="font-bold text-slate-700">Total Revenue</span>
+                                    <span className="font-black text-slate-900">UGX {(stats.revenue || 0).toLocaleString()}</span>
+                                 </div>
+                              </div>
+                           </div>
+                        </div>
+
+                        {/* Inventory Status */}
+                        <div className="p-4 bg-slate-50 rounded-xl">
+                           <h4 className="text-sm font-bold text-slate-900 mb-3">Inventory Status</h4>
+                           <div className="space-y-2">
+                              <div className="flex justify-between text-xs">
+                                 <span className="text-slate-500">Total Products</span>
+                                 <span className="font-bold text-slate-900">{stats.inventoryCount || 0}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                 <span className="text-slate-500">Low Stock Alerts</span>
+                                 <span className="font-bold text-orange-600">{stats.lowStockCount || 0}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                 <span className="text-slate-500">Active Repairs</span>
+                                 <span className="font-bold text-purple-600">{stats.repairs || 0}</span>
+                              </div>
+                           </div>
+                        </div>
+
+                        {/* Transaction Summary */}
+                        <div className="p-4 bg-slate-50 rounded-xl">
+                           <h4 className="text-sm font-bold text-slate-900 mb-3">Transactions</h4>
+                           <div className="space-y-2">
+                              <div className="flex justify-between text-xs">
+                                 <span className="text-slate-500">Today's Invoices</span>
+                                 <span className="font-bold text-slate-900">{stats.invoicesToday || 0}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                 <span className="text-slate-500">Items Sold Today</span>
+                                 <span className="font-bold text-slate-900">{stats.qtySoldToday || 0}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                 <span className="text-slate-500">Total Orders</span>
+                                 <span className="font-bold text-slate-900">{stats.orders || 0}</span>
+                              </div>
+                           </div>
+                        </div>
+                     </div>
+
+                     {/* Auditor Notice */}
+                     <div className="mt-6 p-4 bg-blue-50 rounded-xl border border-blue-100">
+                        <div className="flex items-center gap-2 text-blue-600">
+                           <Activity size={16} />
+                           <span className="text-xs font-bold">Auditor Access: View-only permissions. No actions or modifications allowed.</span>
+                        </div>
+                     </div>
                   </div>
                </div>
             </div>
