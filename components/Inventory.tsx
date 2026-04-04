@@ -54,6 +54,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
    // RBAC Permissions
    const canEdit = [UserRole.ADMIN, UserRole.MANAGER].includes(user.role);
    const canDelete = user.role === UserRole.ADMIN;
+   const isAdmin = user.role === UserRole.ADMIN;
 
    const initialForm: Partial<Product> = {
       name: '',
@@ -376,7 +377,8 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                </div>
             </div>
 
-            {/* Inventory Value */}
+            {/* Inventory Value - ADMIN ONLY */}
+            {isAdmin && (
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
                <div>
                   <p className="text-sm text-slate-500 font-normal mb-1">Total Value</p>
@@ -392,6 +394,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                   <DollarSign size={24} />
                </div>
             </div>
+            )}
 
             {/* Low Stock */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">

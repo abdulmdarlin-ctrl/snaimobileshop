@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { db } from '../db';
-import { Sale, Repair, Product, User, ProductType, AppSettings } from '../types';
+import { Sale, Repair, Product, User, ProductType, AppSettings, UserRole } from '../types';
 import { Page } from '../App';
 import {
    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
@@ -67,6 +67,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    const [isPendingExpanded, setIsPendingExpanded] = useState(false);
    const [heldTotalValue, setHeldTotalValue] = useState(0);
    const [timeTick, setTimeTick] = useState(0);
+
+   // Role-based flags
+   const isAdmin = user.role === UserRole.ADMIN;
+   const isManager = user.role === UserRole.MANAGER;
+   const isCashier = user.role === UserRole.CASHIER;
+   const isTechnician = user.role === UserRole.TECHNICIAN;
+   const isAuditor = user.role === UserRole.AUDITOR;
 
    const getProductIcon = (type: ProductType) => {
       switch (type) {
@@ -891,6 +898,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          )}
 
          {/* --- QUICK STATS CARDS --- */}
+         
+         {/* ADMIN DASHBOARD - Full Access */}
+         {isAdmin && (
          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
             {/* Sales Card */}
             <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-blue-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
@@ -966,7 +976,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                </div>
             </div>
 
-            {/* Inventory Value */}
+            {/* Inventory Value - ADMIN ONLY */}
+            {isAdmin && (
             <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-violet-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
                <div className="absolute top-0 right-0 w-32 h-32 bg-violet-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
                <div className="relative z-10">
@@ -983,9 +994,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   </p>
                </div>
             </div>
+            )}
          </div>
 
-         {/* --- TOP ROW (Sales Overview & Category Dist) --- */}
+         {/* --- TOP ROW (Sales Overview & Category Dist) - ADMIN & MANAGER ONLY --- */}
+         {(isAdmin || isManager) && (
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex flex-col md:flex-row gap-6">
 
@@ -1141,6 +1154,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
          </div>
+         )}
 
          {/* --- BOTTOM ROW (Activity & Customers) --- */}
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1341,6 +1355,209 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
          </div>
+
+         {/* --- CASHIER DASHBOARD - Sales Focus --- */}
+         {isCashier && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+               {/* Cashier Quick Stats */}
+               <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                  <div className="flex items-center gap-3 mb-6">
+                     <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
+                        <DollarSign size={20} />
+                     </div>
+                     <h3 className="text-lg font-black text-slate-900">Today's Performance</h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                     <div className="bg-blue-50 rounded-xl p-4 text-center">
+                        <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-3">
+                           <DollarSign size={24} />
+                        </div>
+                        <h4 className="text-2xl font-black text-blue-900">
+                           <span className="text-sm">UGX</span>
+                           {(stats.revenueToday || 0).toLocaleString()}
+                        </h4>
+                        <p className="text-xs font-bold text-blue-600 uppercase">Sales Today</p>
+                     </div>
+                     <div className="bg-emerald-50 rounded-xl p-4 text-center">
+                        <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+                           <Receipt size={24} />
+                        </div>
+                        <h4 className="text-2xl font-black text-emerald-900">{stats.invoicesToday || 0}</h4>
+                        <p className="text-xs font-bold text-emerald-600 uppercase">Invoices</p>
+                     </div>
+                     <div className="bg-amber-50 rounded-xl p-4 text-center">
+                        <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-3">
+                           <ShoppingBag size={24} />
+                        </div>
+                        <h4 className="text-2xl font-black text-amber-900">{stats.qtySoldToday || 0}</h4>
+                        <p className="text-xs font-bold text-amber-600 uppercase">Items Sold</p>
+                     </div>
+                  </div>
+
+                  {/* Quick Actions */}
+                  <div>
+                     <h4 className="text-sm font-bold text-slate-900 mb-4">Quick Actions</h4>
+                     <div className="grid grid-cols-2 gap-3">
+                        <button onClick={() => onNavigate('sales')} className="py-3 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2">
+                           <ShoppingBag size={16} /> New Sale
+                        </button>
+                        <button onClick={() => onNavigate('customers')} className="py-3 bg-gray-600 text-white text-sm font-bold rounded-lg hover:bg-gray-700 transition-colors flex items-center justify-center gap-2">
+                           <Users size={16} /> Add Customer
+                        </button>
+                        <button onClick={() => onNavigate('repairs')} className="py-3 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center gap-2">
+                           <Wrench size={16} /> New Repair
+                        </button>
+                        <button onClick={() => onNavigate('expenses')} className="py-3 bg-orange-600 text-white text-sm font-bold rounded-lg hover:bg-orange-700 transition-colors flex items-center justify-center gap-2">
+                           <DollarSign size={16} /> Add Expense
+                        </button>
+                     </div>
+                  </div>
+               </div>
+
+               {/* Cashier Side Panel */}
+               <div className="col-span-1 lg:col-span-4 space-y-4">
+                  <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                     <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-full bg-purple-50 text-purple-500 flex items-center justify-center">
+                           <Wrench size={20} />
+                        </div>
+                        <h3 className="text-lg font-black text-slate-900">Active Repairs</h3>
+                     </div>
+                     <div className="text-center py-4">
+                        <h4 className="text-3xl font-black text-purple-600">{stats.repairs || 0}</h4>
+                        <p className="text-xs text-slate-500">Jobs in progress</p>
+                     </div>
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                     <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center">
+                           <AlertTriangle size={20} />
+                        </div>
+                        <h3 className="text-lg font-black text-slate-900">Low Stock</h3>
+                     </div>
+                     <div className="text-center py-4">
+                        <h4 className="text-3xl font-black text-orange-600">{stats.lowStockCount || 0}</h4>
+                        <p className="text-xs text-slate-500">Items need reorder</p>
+                     </div>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* --- TECHNICIAN DASHBOARD - Repair Focus --- */}
+         {isTechnician && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+               <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                  <div className="flex items-center gap-3 mb-6">
+                     <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
+                        <Wrench size={20} />
+                     </div>
+                     <h3 className="text-lg font-black text-slate-900">Repair Status Overview</h3>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                     <div className="bg-blue-50 rounded-xl p-4 text-center">
+                        <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-3">
+                           <Clock size={24} />
+                        </div>
+                        <h4 className="text-2xl font-black text-blue-900">{stats.repairs || 0}</h4>
+                        <p className="text-xs font-bold text-blue-600 uppercase">My Active Jobs</p>
+                     </div>
+                     <div className="bg-emerald-50 rounded-xl p-4 text-center">
+                        <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3">
+                           <CheckCircle2 size={24} />
+                        </div>
+                        <h4 className="text-2xl font-black text-emerald-900">--</h4>
+                        <p className="text-xs font-bold text-emerald-600 uppercase">Completed Today</p>
+                     </div>
+                     <div className="bg-amber-50 rounded-xl p-4 text-center">
+                        <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-3">
+                           <AlertCircle size={24} />
+                        </div>
+                        <h4 className="text-2xl font-black text-amber-900">--</h4>
+                        <p className="text-xs font-bold text-amber-600 uppercase">Pending</p>
+                     </div>
+                  </div>
+
+                  <div className="mt-6">
+                     <button onClick={() => onNavigate('repairs')} className="w-full py-3 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors">
+                        View All Repairs
+                     </button>
+                  </div>
+               </div>
+
+               <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                  <div className="flex items-center gap-3 mb-6">
+                     <div className="w-10 h-10 rounded-full bg-amber-50 text-amber-500 flex items-center justify-center">
+                        <Package size={20} />
+                     </div>
+                     <h3 className="text-lg font-black text-slate-900">Parts Inventory</h3>
+                  </div>
+
+                  <div className="space-y-3">
+                     <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                        <span className="text-sm font-bold text-slate-900">Available Parts</span>
+                        <span className="text-sm font-bold text-emerald-600">{stats.inventoryCount || 0}</span>
+                     </div>
+                     <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                        <span className="text-sm font-bold text-slate-900">Low Stock Items</span>
+                        <span className="text-sm font-bold text-amber-600">{stats.lowStockCount || 0}</span>
+                     </div>
+                  </div>
+
+                  <div className="mt-4">
+                     <button onClick={() => onNavigate('inventory')} className="w-full py-2 bg-amber-100 text-amber-700 text-xs font-bold rounded-lg hover:bg-amber-200 transition-colors">
+                        Check Inventory
+                     </button>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* --- AUDITOR DASHBOARD - Read Only Overview --- */}
+         {isAuditor && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+               <div className="col-span-1 lg:col-span-12 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+                  <div className="flex items-center gap-3 mb-6">
+                     <div className="w-10 h-10 rounded-full bg-slate-50 text-slate-500 flex items-center justify-center">
+                        <Activity size={20} />
+                     </div>
+                     <h3 className="text-lg font-black text-slate-900">Business Overview (Read-Only)</h3>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                     <div className="bg-slate-50 rounded-xl p-4 text-center">
+                        <h4 className="text-xl font-black text-slate-900">
+                           <span className="text-sm">UGX</span>
+                           {(stats.revenue || 0).toLocaleString()}
+                        </h4>
+                        <p className="text-xs font-bold text-slate-500 uppercase mt-1">Total Revenue</p>
+                     </div>
+                     <div className="bg-slate-50 rounded-xl p-4 text-center">
+                        <h4 className="text-xl font-black text-slate-900">{stats.orders || 0}</h4>
+                        <p className="text-xs font-bold text-slate-500 uppercase mt-1">Total Orders</p>
+                     </div>
+                     <div className="bg-slate-50 rounded-xl p-4 text-center">
+                        <h4 className="text-xl font-black text-slate-900">{stats.inventoryCount || 0}</h4>
+                        <p className="text-xs font-bold text-slate-500 uppercase mt-1">Products</p>
+                     </div>
+                     <div className="bg-slate-50 rounded-xl p-4 text-center">
+                        <h4 className="text-xl font-black text-slate-900">{stats.repairs || 0}</h4>
+                        <p className="text-xs font-bold text-slate-500 uppercase mt-1">Active Repairs</p>
+                     </div>
+                  </div>
+
+                  <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                     <p className="text-xs text-blue-600 text-center">
+                        <Activity size={12} className="inline mr-1" />
+                        Auditor view - No actions available. Data is for review purposes only.
+                     </p>
+                  </div>
+               </div>
+            </div>
+         )}
 
       </div >
    );
