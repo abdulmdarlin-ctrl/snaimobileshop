@@ -996,8 +996,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
             )}
          </div>
+         )}
 
-         {/* --- TOP ROW (Sales Overview & Category Dist) - ADMIN & MANAGER ONLY --- */}
          {(isAdmin || isManager) && (
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex flex-col md:flex-row gap-6">
