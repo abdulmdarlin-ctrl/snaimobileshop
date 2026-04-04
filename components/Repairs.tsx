@@ -251,6 +251,60 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
       }
    };
 
+   // Collect payment for repair service and record as sale
+   const collectRepairPayment = async (repair: Repair, amount: number, paymentMethod: string = 'Cash') => {
+      try {
+         if (!repair.id || amount <= 0) return;
+
+         const timestamp = Date.now();
+         
+         // Create sale record for repair service
+         const sale: Sale = {
+            receiptNo: `SVC-${timestamp.toString().slice(-6)}`,
+            items: [{
+               productId: 'repair-service',
+               name: `Repair Service - ${repair.deviceModel}`,
+               quantity: 1,
+               price: amount,
+               total: amount,
+               originalPrice: amount
+            }],
+            subtotal: amount,
+            discount: 0,
+            tax: 0,
+            total: amount,
+            amountPaid: amount,
+            balance: 0,
+            paymentMethod: paymentMethod as any,
+            cashierName: user.fullName || user.username || 'Technician',
+            customerName: repair.customerName,
+            customerPhone: repair.customerPhone,
+            customerType: 'Retail',
+            timestamp: timestamp,
+            isSynced: false,
+            wasHeld: false
+         };
+
+         await db.sales.add(sale);
+         
+         // Update repair with new deposit amount
+         const newDeposit = (repair.depositPaid || 0) + amount;
+         await db.repairs.update(repair.id, {
+            depositPaid: newDeposit,
+            isPaid: newDeposit >= repair.estimatedCost
+         });
+
+         showToast(`Payment of UGX ${amount.toLocaleString()} recorded. Receipt: ${sale.receiptNo}`, 'success');
+         
+         // Refresh repairs data
+         await fetchRepairs();
+         
+      } catch (error) {
+         console.error('Error collecting repair payment:', error);
+         showToast('Failed to record payment', 'error');
+      }
+   };
+
    const handleSendWhatsApp = () => {
       if (!activeRepairForReceipt) return;
       const businessName = settings?.businessName || 'SNA Repair Center';
@@ -467,9 +521,21 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
                            UGX {(repair.estimatedCost - repair.depositPaid).toLocaleString()}
                         </p>
                      </div>
-                     <div className="text-right">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">Job ID</p>
-                        <p className="text-xs font-mono font-bold text-slate-900">{repair.jobCardNo}</p>
+                     <div className="flex items-center gap-2">
+                        {(repair.estimatedCost - repair.depositPaid) > 0 && (
+                           <button
+                              onClick={() => collectRepairPayment(repair, repair.estimatedCost - repair.depositPaid)}
+                              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1"
+                              title="Collect full payment"
+                           >
+                              <DollarSign size={12} />
+                              Pay
+                           </button>
+                        )}
+                        <div className="text-right">
+                           <p className="text-[10px] font-bold text-slate-400 uppercase">Job ID</p>
+                           <p className="text-xs font-mono font-bold text-slate-900">{repair.jobCardNo}</p>
+                        </div>
                      </div>
                   </div>
                </div>
