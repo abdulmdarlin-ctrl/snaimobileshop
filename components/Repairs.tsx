@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../db';
-import { Repair, RepairStatus, User, UserRole, AppSettings } from '../types';
+import { Repair, RepairStatus, User, UserRole, AppSettings, Sale, SaleItem, Product } from '../types';
 import {
    Plus, Search, X, Trash2, Printer,
    Wrench, User as UserIcon, Clock, AlertCircle,
@@ -142,6 +142,12 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
 
          // Refresh & Open Receipt
          await fetchRepairs();
+         
+         // Create sale from parts if any were sold
+         if (formData.partsUsed && formData.partsUsed.length > 0) {
+            await createSaleFromRepair(finalData, timestamp);
+         }
+         
          closeModal();
 
          // Open Receipt automatically for new repairs or major updates
@@ -154,6 +160,81 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
          showToast(`Validation Error: ${err.message}`, 'error');
       } finally {
          setLoading(false);
+      }
+   };
+
+   // Create sale from repair parts and update inventory
+   const createSaleFromRepair = async (repair: Repair, timestamp: number) => {
+      try {
+         if (!repair.partsUsed || repair.partsUsed.length === 0) return;
+
+         // Get all products for lookup
+         const allProducts = await db.products.toArray();
+         
+         // Build sale items and update inventory
+         const saleItems: SaleItem[] = [];
+         let subtotal = 0;
+
+         for (const part of repair.partsUsed) {
+            const product = allProducts.find(p => p.id === part.productId);
+            if (product) {
+               const itemTotal = part.cost || product.selling_price || 0;
+               subtotal += itemTotal;
+
+               saleItems.push({
+                  productId: part.productId,
+                  name: part.name || product.name,
+                  quantity: 1,
+                  price: itemTotal,
+                  total: itemTotal,
+                  originalPrice: product.selling_price || 0
+               });
+
+               // Update inventory - reduce stock
+               const newStock = Math.max(0, (product.stockQuantity || 0) - 1);
+               await db.products.update(product.id!, { stockQuantity: newStock });
+
+               // Create stock log
+               await db.stockLogs.add({
+                  productId: part.productId,
+                  productName: part.name || product.name,
+                  previousStock: product.stockQuantity || 0,
+                  newStock: newStock,
+                  changeAmount: -1,
+                  reason: 'Repair Sale',
+                  note: `Used in repair: ${repair.jobCardNo}`,
+                  user: user.fullName || user.username || 'System',
+                  timestamp: Date.now()
+               });
+            }
+         }
+
+         // Create sale record
+         const sale: Sale = {
+            receiptNo: `REP-${timestamp.toString().slice(-6)}`,
+            items: saleItems,
+            subtotal: subtotal,
+            discount: 0,
+            tax: 0,
+            total: subtotal,
+            amountPaid: subtotal,
+            balance: 0,
+            paymentMethod: 'Cash',
+            cashierName: user.fullName || user.username || 'Technician',
+            customerName: repair.customerName,
+            customerPhone: repair.customerPhone,
+            customerType: 'Retail',
+            timestamp: timestamp,
+            isSynced: false,
+            wasHeld: false
+         };
+
+         await db.sales.add(sale);
+         showToast(`Sale created from repair parts: ${sale.receiptNo}`, 'success');
+
+      } catch (error) {
+         console.error('Error creating sale from repair:', error);
+         showToast('Failed to create sale from repair parts', 'error');
       }
    };
 

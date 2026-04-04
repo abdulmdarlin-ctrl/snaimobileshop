@@ -38,10 +38,8 @@ const App: React.FC = () => {
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
-  // Initialize page based on user role immediately
-  const [currentPage, setCurrentPage] = useState<Page>(() => {
-    return (user && user.role === UserRole.CASHIER) ? 'sales' : 'dashboard';
-  });
+  // Initialize page - all users start on dashboard
+  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
   const [dbStatus, setDbStatus] = useState<'live' | 'mock'>('live');
@@ -91,11 +89,8 @@ const App: React.FC = () => {
     // Use safeStringify to prevent circular reference errors if User object contains Firestore/DOM refs
     const storage = rememberMe ? localStorage : sessionStorage;
     storage.setItem('sna_user', safeStringify(u));
-    if (u.role === UserRole.CASHIER) {
-      setCurrentPage('sales');
-    } else {
-      setCurrentPage('dashboard');
-    }
+    // All users go to dashboard after login
+    setCurrentPage('dashboard');
   };
 
   const handleLogout = () => {
