@@ -75,6 +75,20 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    const isTechnician = user.role === UserRole.TECHNICIAN;
    const isAuditor = user.role === UserRole.AUDITOR;
 
+   // Date filtering helper - non-admin users only see today and yesterday data
+   const filterDataByRole = <T extends { timestamp?: number }>(data: T[]): T[] => {
+      if (isAdmin) return data; // Admin sees all data
+      
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const yesterday = today - 24 * 60 * 60 * 1000;
+      
+      return data.filter(item => {
+         if (!item.timestamp) return false;
+         return item.timestamp >= yesterday;
+      });
+   };
+
    const getProductIcon = (type: ProductType) => {
       switch (type) {
          case ProductType.PHONE: return <Smartphone size={14} />;
@@ -194,8 +208,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             db.settings.toCollection().first()
          ]);
 
-         setAllSales(sales.sort((a, b) => b.timestamp - a.timestamp));
-         setRawRepairs(repairs);
+         setAllSales(filterDataByRole(sales).sort((a, b) => b.timestamp - a.timestamp));
+         setRawRepairs(filterDataByRole(repairs));
          setRawProducts(products);
          setSettings(sets || null);
 
