@@ -204,6 +204,12 @@ export interface Repair {
   timestamp: number;
   completionDate?: number;
   isPaid: boolean;
+  saleInfo?: {
+    receiptNo: string;
+    items: { name: string; price: number }[];
+    total: number;
+    paymentMethod?: string;
+  };
 }
 
 export interface Supplier {

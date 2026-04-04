@@ -230,6 +230,19 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
          };
 
          await db.sales.add(sale);
+         
+         // Update repair with sale info
+         if (repair.id) {
+            await db.repairs.update(repair.id, {
+               saleInfo: {
+                  receiptNo: sale.receiptNo,
+                  items: saleItems.map(item => ({ name: item.name, price: item.price })),
+                  total: subtotal,
+                  paymentMethod: sale.paymentMethod
+               }
+            });
+         }
+         
          showToast(`Sale created from repair parts: ${sale.receiptNo}`, 'success');
 
       } catch (error) {
@@ -658,6 +671,31 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
                               <span className="font-bold text-sm">{(activeRepairForReceipt.estimatedCost - activeRepairForReceipt.depositPaid).toLocaleString()}</span>
                            </div>
                         </div>
+
+                        {/* PARTS SOLD - Show if sale info exists */}
+                        {activeRepairForReceipt.saleInfo && (
+                           <>
+                              <div className="text-center font-bold mb-2 text-[10px]">--------------------------------</div>
+                              <div className="mb-3">
+                                 <div className="font-bold uppercase text-[9px] mb-1">Parts Sold:</div>
+                                 <div className="space-y-0.5">
+                                    {activeRepairForReceipt.saleInfo.items.map((item, i) => (
+                                       <div key={i} className="flex justify-between text-[10px]">
+                                          <span className="flex-1">{item.name}</span>
+                                          <span className="font-bold">{item.price.toLocaleString()}</span>
+                                       </div>
+                                    ))}
+                                 </div>
+                                 <div className="flex justify-between border-t border-dashed border-black pt-1 mt-1">
+                                    <span className="font-bold text-[10px]">Parts Total:</span>
+                                    <span className="font-bold">{activeRepairForReceipt.saleInfo.total.toLocaleString()}</span>
+                                 </div>
+                                 <div className="text-center text-[9px] mt-1">
+                                    Sale Receipt: {activeRepairForReceipt.saleInfo.receiptNo}
+                                 </div>
+                              </div>
+                           </>
+                        )}
 
                         {/* BARCODE */}
                         <div className="flex flex-col items-center justify-center my-4 overflow-hidden">
