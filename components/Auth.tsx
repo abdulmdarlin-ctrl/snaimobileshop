@@ -1,13 +1,13 @@
+import { activeStaffProfile } from '../utils/staff';
 
 import React, { useState, useEffect } from 'react';
-import { signInWithEmailAndPassword, sendPasswordResetEmail, createUserWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, sendPasswordResetEmail, signOut, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, dbInstance } from '../firebaseConfig';
 import { db } from '../db';
 import { User, UserRole } from '../types';
 import { Lock, ArrowRight, Mail, AlertTriangle, Loader2, CheckCircle2, Eye, EyeOff, ShieldCheck, Target } from 'lucide-react';
 import brandLogo from '../assets/SNAI-LOGO.png';
-import loginBg from '../assets/image (23).png';
 
 interface AuthProps { onLogin: (user: User, rememberMe: boolean) => void; }
 
@@ -60,63 +60,30 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
         loginEmail = `${loginEmail}@sna.erp`;
       }
 
-      let firebaseUser;
-      try {
-        const userCredential = await signInWithEmailAndPassword(auth, loginEmail, password);
-        firebaseUser = userCredential.user;
-      } catch (loginErr: any) {
-        const isDefaultAdmin = (loginEmail.toLowerCase() === 'admin@s.com' || loginEmail.toLowerCase() === 'admin@sna.erp') && password === '123456';
-        if ((loginErr.code === 'auth/user-not-found' || loginErr.code === 'auth/invalid-credential' || loginErr.code === 'auth/invalid-login-credentials') && isDefaultAdmin) {
-          const createCredential = await createUserWithEmailAndPassword(auth, loginEmail, password);
-          firebaseUser = createCredential.user;
-        } else {
-          throw loginErr;
-        }
-      }
-
+      await setPersistence(auth, rememberMe ? browserLocalPersistence : browserSessionPersistence);
+      const { user: firebaseUser } = await signInWithEmailAndPassword(auth, loginEmail, password);
       if (firebaseUser) {
-        if (!dbInstance) throw new Error("Database unavailable");
-        let appUser: User | undefined;
-
-        try {
-          const userDocRef = doc(dbInstance, 'users', firebaseUser.uid);
-          const userDoc = await getDoc(userDocRef);
-          if (userDoc.exists()) {
-            const data = userDoc.data() as User;
-            appUser = { ...data, id: firebaseUser.uid };
-            setDoc(userDocRef, { lastLogin: Date.now() }, { merge: true }).catch(console.warn);
-          }
-        } catch (fetchErr: any) {
-          console.warn("Profile sync warning:", fetchErr);
+        if (!dbInstance) throw new Error('Database unavailable');
+        const userDocRef = doc(dbInstance, 'users', firebaseUser.uid);
+        const userDoc = await getDoc(userDocRef);
+        if (!userDoc.exists()) {
+          await signOut(auth);
+          throw Object.assign(new Error('Ask an administrator to create your staff profile.'), { code: 'app/missing-profile' });
         }
-
+        const appUser = activeStaffProfile(userDoc.data(), firebaseUser.uid);
         if (!appUser) {
-          const isSpecificAdmin = loginEmail.includes('admin');
-          appUser = {
-            id: firebaseUser.uid,
-            username: identifier.includes('@') ? identifier.split('@')[0] : identifier,
-            fullName: isSpecificAdmin ? 'System Administrator' : 'User',
-            role: isSpecificAdmin ? UserRole.ADMIN : UserRole.CASHIER,
-            isActive: true,
-            lastLogin: Date.now(),
-            phone: ''
-          };
-          const userDocRef = doc(dbInstance, 'users', firebaseUser.uid);
-          await setDoc(userDocRef, appUser);
+          await signOut(auth);
+          throw Object.assign(new Error('Your staff account is suspended or has no valid role. Contact an administrator.'), { code: 'app/inactive-profile' });
         }
-
-        if (appUser.isActive === false) {
-          setError('Account has been suspended.');
-          setLoading(false);
-          return;
-        }
-
+        await setDoc(userDocRef, { lastLogin: Date.now() }, { merge: true });
+        localStorage.removeItem('sna_token');
+        sessionStorage.removeItem('sna_token');
         const storage = rememberMe ? localStorage : sessionStorage;
         storage.setItem('sna_token', await firebaseUser.getIdToken());
         onLogin(appUser, rememberMe);
       }
     } catch (err: any) {
-      setError(getFriendlyErrorMessage(err.code));
+      setError(err.code?.startsWith('app/') ? err.message : getFriendlyErrorMessage(err.code));
       setShake(true);
       setTimeout(() => setShake(false), 500);
     } finally {
@@ -149,73 +116,22 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="min-h-screen w-full flex bg-[#0f172a] font-sans selection:bg-rose-500/30">
-      <style>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-4px); }
-          20%, 40%, 60%, 80% { transform: translateX(4px); }
-        }
-        .animate-shake { animation: shake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
-      `}</style>
-
-      {/* LEFT SIDE: Hero Content */}
-      <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden items-center justify-center">
-        {/* Blurred Shop Background */}
-        <div className="absolute inset-0 z-0">
-          <img
-            src={loginBg}
-            alt="Storefront Background"
-            className="w-full h-full object-cover blur-[2px] opacity-40 mix-blend-luminosity brightness-50"
-          />
-          <div className="absolute inset-0 bg-black/40"></div>
-        </div>
-
-        {/* Branding Content */}
-        <div className="relative z-10 px-20 max-w-2xl py-20 flex flex-col h-full justify-center">
-          <div className="w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center backdrop-blur-md mb-8 border border-white/20">
-            <img src={logo} alt="SNA!" className="w-10 h-10 object-contain" />
-          </div>
-
-          <h1 className="text-5xl font-bold text-white mb-8 leading-[1.15]">
-            Manage your shop <br />
-            with <span className="text-[#ef4444]">confidence.</span>
-          </h1>
-
-          <p className="text-lg text-slate-300 leading-relaxed font-medium mb-12 max-w-lg">
-            ABITECH Systems provides the tools you need to track inventory, manage sales, and grow your business efficiently.
-          </p>
-
-          <div className="space-y-6">
-            <div className="flex items-center gap-4 text-white">
-              <div className="w-5 h-5 rounded-full border border-rose-500/50 flex items-center justify-center text-rose-500 shrink-0">
-                <Target size={12} strokeWidth={3} />
-              </div>
-              <span className="text-sm font-medium">Real-time Inventory Tracking</span>
-            </div>
-            <div className="flex items-center gap-4 text-white">
-              <div className="w-5 h-5 rounded-full border border-rose-500/50 flex items-center justify-center text-rose-500 shrink-0">
-                <Target size={12} strokeWidth={3} />
-              </div>
-              <span className="text-sm font-medium">Advanced Sales Analytics</span>
-            </div>
-            <div className="flex items-center gap-4 text-white">
-              <div className="w-5 h-5 rounded-full border border-rose-500/50 flex items-center justify-center text-rose-500 shrink-0">
-                <Target size={12} strokeWidth={3} />
-              </div>
-              <span className="text-sm font-medium">Secure Cloud Backup</span>
-            </div>
-          </div>
+    <div className="auth-screen min-h-screen w-full flex bg-[#0f172a] font-sans selection:bg-rose-500/30">
+      <div className="hidden lg:flex lg:w-2/5 bg-slate-900 items-center p-16">
+        <div className="max-w-sm">
+          <img src={logo} alt="SNA Mobile Shop" className="w-16 h-16 object-contain bg-white rounded-lg p-2 mb-8" />
+          <h1 className="text-3xl font-semibold text-white mb-4">SNA Mobile Shop</h1>
+          <p className="text-base text-slate-300 leading-relaxed">Sales, inventory and repair management.</p>
         </div>
       </div>
 
       {/* RIGHT SIDE: Login Form */}
-      <div className="flex-1 flex flex-col justify-center items-center p-8 bg-[#0f172a]">
-        <div className={`w-full max-w-[420px] ${shake ? 'animate-shake' : ''}`}>
+      <div className="auth-form flex-1 flex flex-col justify-center items-center p-8 bg-white">
+        <div className="w-full max-w-[380px]">
           {/* Header */}
           <div className="mb-10 text-center lg:text-left">
             <h2 className="text-4xl font-bold text-white mb-3">
-              {isResetMode ? 'Reset Access' : 'Welcome back'}
+              {isResetMode ? 'Reset Access' : 'Sign in'}
             </h2>
             <p className="text-slate-400 text-sm font-medium">
               {isResetMode ? 'Enter your details to recover access.' : 'Please enter your details to sign in.'}
@@ -226,13 +142,13 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
           <form onSubmit={isResetMode ? handlePasswordReset : handleSubmit} className="space-y-6">
             {error && (
               <div className="bg-rose-500/10 border border-rose-500/50 text-rose-400 p-4 rounded-xl text-[11px] font-bold uppercase flex items-center gap-3">
-                <AlertTriangle size={16} className="shrink-0" />
+                <AlertTriangle size={16} className="shrink-0" strokeWidth={1.75} />
                 {error}
               </div>
             )}
             {resetMessage && (
               <div className="bg-emerald-500/10 border border-emerald-500/50 text-emerald-400 p-4 rounded-xl text-[11px] font-bold uppercase flex items-center gap-3">
-                <CheckCircle2 size={16} className="shrink-0" />
+                <CheckCircle2 size={16} className="shrink-0" strokeWidth={1.75} />
                 {resetMessage}
               </div>
             )}
@@ -240,11 +156,11 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-slate-500 uppercase ml-1">Email or Username</label>
               <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
                 <input
                   type="text"
                   required
-                  className="w-full h-12 bg-white text-slate-900 rounded-xl pl-12 pr-4 outline-none font-medium text-sm shadow-inner transition-all focus:ring-2 focus:ring-rose-500"
+                  className="w-full h-12 bg-white text-slate-900 rounded-xl pl-12 pr-4 outline-none font-medium text-sm  transition-all focus:ring-2 focus:ring-rose-500"
                   placeholder="admin"
                   value={identifier}
                   onChange={e => setIdentifier(e.target.value)}
@@ -259,17 +175,17 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
                   <button type="button" onClick={() => setIsResetMode(true)} className="text-[10px] font-bold text-rose-500 uppercase hover:text-rose-400 transition-colors">Forgot password?</button>
                 </div>
                 <div className="relative">
-                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                  <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
                   <input
                     type={showPassword ? "text" : "password"}
                     required
-                    className="w-full h-12 bg-white text-slate-900 rounded-xl pl-12 pr-12 outline-none font-medium text-sm shadow-inner transition-all focus:ring-2 focus:ring-rose-500"
+                    className="w-full h-12 bg-white text-slate-900 rounded-xl pl-12 pr-12 outline-none font-medium text-sm  transition-all focus:ring-2 focus:ring-rose-500"
                     placeholder="••••••"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                   />
                   <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                    {showPassword ? <EyeOff size={18} strokeWidth={1.75} /> : <Eye size={18} strokeWidth={1.75} />}
                   </button>
                 </div>
               </div>
@@ -291,12 +207,12 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full h-12 bg-[#ef4444] hover:bg-[#dc2626] text-white font-bold uppercase rounded-xl transition-all shadow-lg shadow-rose-900/40 flex items-center justify-center gap-2 active:scale-[0.98] disabled:opacity-50"
+              className="w-full h-12 bg-[#ef4444] hover:bg-[#dc2626] text-white font-bold uppercase rounded-xl transition-all   flex items-center justify-center gap-2  disabled:opacity-50"
             >
-              {loading ? <Loader2 size={18} className="animate-spin" /> : (
+              {loading ? <Loader2 size={18} className="animate-spin" strokeWidth={1.75} /> : (
                 <>
                   <span>{isResetMode ? 'Reset Access' : 'Sign in'}</span>
-                  <ArrowRight size={18} strokeWidth={2.5} />
+                  <ArrowRight size={18} strokeWidth={1.75} />
                 </>
               )}
             </button>
@@ -308,8 +224,8 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
               Don't have an account? <span className="text-slate-400">Contact your administrator.</span>
             </p>
             <div className="flex items-center justify-center gap-2 opacity-50 grayscale hover:grayscale-0 transition-all cursor-default">
-              <ShieldCheck size={12} className="text-slate-500" />
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Crafted by ABITECH</span>
+              <ShieldCheck size={14} className="text-slate-500" strokeWidth={1.75} />
+              <span className="text-[10px] font-bold text-slate-500 uppercase">ABITECH</span>
             </div>
           </div>
         </div>

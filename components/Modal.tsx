@@ -57,22 +57,23 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
     };
 
     return createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 backdrop-blur-sm bg-slate-900/60 animate-in fade-in duration-200">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 backdrop-blur-sm bg-slate-900/60   duration-200">
             {/* Overlay Click to Close */}
             <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
 
             {/* Modal Content */}
-            <div className={`relative w-full ${maxWidthClasses[maxWidth]} bg-white rounded-[2rem] shadow-2xl flex flex-col max-h-[90vh] animate-in zoom-in-95 duration-200 border border-white/20 overflow-hidden`}>
+            <div className={`relative w-full ${maxWidthClasses[maxWidth]} bg-white rounded-[2rem] flex flex-col max-h-[90vh] border border-slate-200 overflow-hidden`}>
                 {title && (
                     <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50 shrink-0">
                         {typeof title === 'string' ? (
                             <h2 className="text-xl font-black text-slate-900 tracking-tight">{title}</h2>
                         ) : title}
                         <button
+                            aria-label="Close dialog"
                             onClick={onClose}
                             className="p-2 rounded-xl text-slate-400 hover:text-slate-900 hover:bg-slate-100 transition-colors"
                         >
-                            <X size={20} strokeWidth={2.5} />
+                            <X size={20} strokeWidth={1.75} />
                         </button>
                     </div>
                 )}

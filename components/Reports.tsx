@@ -1,3 +1,5 @@
+import { useToast } from './Toast';
+import { saleReceipts, outstandingAmount, itemNetValue } from '../utils/pos';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../db';
@@ -15,6 +17,7 @@ import { exportSectionToPDF } from '../utils/printExport';
 type TimeRange = '7d' | '30d' | 'month' | 'year' | 'all';
 
 const Reports: React.FC = () => {
+   const { showToast } = useToast();
    const [loading, setLoading] = useState(true);
    const [timeRange, setTimeRange] = useState<TimeRange>('30d');
    const [selectedCategory, setSelectedCategory] = useState('All');
@@ -40,7 +43,7 @@ const Reports: React.FC = () => {
                db.expenses.toArray()
             ]);
             setData({ sales, repairs, products, expenses });
-         } finally {
+         } catch (error) { showToast('Could not load reports. Please refresh and retry.', 'error'); } finally {
             setLoading(false);
          }
       };
@@ -50,7 +53,7 @@ const Reports: React.FC = () => {
    // Derived Categories
    const categories = useMemo(() => {
       const cats = new Set(data.products.map(p => p.category));
-      return ['All', ...Array.from(cats).sort()];
+      return Array.from(cats).filter(Boolean).sort();
    }, [data.products]);
 
    // --- ANALYTICS ENGINE ---
@@ -107,6 +110,17 @@ const Reports: React.FC = () => {
       const getProductCat = (pid: string) => products.find(p => p.id === pid)?.category || 'General';
       const isCatMatch = (cat: string) => selectedCategory === 'All' || cat === selectedCategory;
 
+      const categoryShare = (sale: Sale) => {
+         if (selectedCategory === 'All') return 1;
+         const total = sale.items.reduce((sum, item) => sum + item.total, 0);
+         return total > 0 ? sale.items.filter(i => isCatMatch(getProductCat(i.productId))).reduce((sum, i) => sum + i.total, 0) / total : 0;
+      };
+      const receipts = sales.flatMap(sale => saleReceipts(sale).map(p => ({ ...p, amount: p.amount * categoryShare(sale) })));
+      const currentReceipts = receipts.filter(p => p.timestamp >= startCurrent && p.timestamp <= now.getTime());
+      const received = currentReceipts.reduce((sum, p) => sum + p.amount, 0);
+      const previousReceived = receipts.filter(p => p.timestamp >= startPrevious && p.timestamp < endPrevious).reduce((sum, p) => sum + p.amount, 0);
+      const outstanding = sales.reduce((sum, sale) => sum + outstandingAmount(sale) * categoryShare(sale), 0);
+
       // Metrics Helper
       const calcMetrics = (sList: Sale[], rList: Repair[], eList: Expense[]) => {
          let revenue = 0;
@@ -120,13 +134,13 @@ const Reports: React.FC = () => {
             s.items.forEach(i => {
                const cat = getProductCat(i.productId);
                if (isCatMatch(cat)) {
-                  revenue += i.total;
+                  revenue += itemNetValue(s, i);
                   itemsCount += i.quantity;
                   hasCategoryItem = true;
 
                   // COGS
                   const prod = products.find(p => p.id === i.productId);
-                  const unitCost = (prod?.costPrice && prod.costPrice > 0) ? prod.costPrice : (i.price * 0.7);
+                  const unitCost = i.costPrice ?? prod?.costPrice ?? 0;
                   cost += (unitCost * i.quantity);
                }
             });
@@ -144,7 +158,7 @@ const Reports: React.FC = () => {
                orderCount += 1;
 
                const partsCost = r.partsUsed ? r.partsUsed.reduce((p, part) => p + part.cost, 0) : 0;
-               cost += partsCost > 0 ? partsCost : (val * 0.2);
+               cost += partsCost;
             });
          }
 
@@ -166,14 +180,21 @@ const Reports: React.FC = () => {
 
       // --- Chart Data ---
       const dailyData = new Map();
-      const daysToGen = timeRange === '7d' ? 7 : timeRange === '30d' ? 30 : timeRange === 'month' ? 31 : 12;
-
+      const monthly = timeRange === 'year' || timeRange === 'all';
+      const dateKey = (timestamp: number) => {
+         const date = new Date(timestamp);
+         const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+         return monthly ? month : `${month}-${String(date.getDate()).padStart(2, '0')}`;
+      };
       if (timeRange !== 'all') {
-         for (let i = 0; i < daysToGen; i++) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+         const cursor = new Date(startCurrent);
+         cursor.setHours(0, 0, 0, 0);
+         if (monthly) cursor.setDate(1);
+         while (cursor.getTime() <= now.getTime()) {
+            const key = dateKey(cursor.getTime());
             dailyData.set(key, { date: key, revenue: 0, profit: 0, expenses: 0, orders: 0 });
+            if (monthly) cursor.setMonth(cursor.getMonth() + 1);
+            else cursor.setDate(cursor.getDate() + 1);
          }
       }
 
@@ -186,16 +207,16 @@ const Reports: React.FC = () => {
          s.items.forEach(i => {
             const cat = getProductCat(i.productId);
             if (isCatMatch(cat)) {
-               dailyRev += i.total;
+               dailyRev += itemNetValue(s, i);
                const prod = products.find(p => p.id === i.productId);
-               const unitCost = (prod?.costPrice && prod.costPrice > 0) ? prod.costPrice : (i.price * 0.7);
+               const unitCost = i.costPrice ?? prod?.costPrice ?? 0;
                dailyCost += (unitCost * i.quantity);
                hasItem = true;
             }
          });
 
          if (dailyRev > 0 || hasItem) {
-            const d = new Date(s.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const d = dateKey(s.timestamp);
             if (!dailyData.has(d) && timeRange === 'all') dailyData.set(d, { date: d, revenue: 0, profit: 0, expenses: 0, orders: 0 });
             if (dailyData.has(d)) {
                const entry = dailyData.get(d);
@@ -208,30 +229,26 @@ const Reports: React.FC = () => {
 
       if (selectedCategory === 'All') {
          curRepairs.forEach(r => {
-            const d = new Date(r.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const d = dateKey(r.timestamp);
             if (!dailyData.has(d) && timeRange === 'all') dailyData.set(d, { date: d, revenue: 0, profit: 0, expenses: 0, orders: 0 });
             if (dailyData.has(d)) {
                const entry = dailyData.get(d);
                const val = r.isPaid ? r.estimatedCost : r.depositPaid;
                entry.revenue += val;
                entry.orders += 1;
-               entry.profit += (val * 0.3);
+               const partsCost = (r.partsUsed || []).reduce((sum, part) => sum + part.cost, 0);
+               entry.profit += val - partsCost;
             }
          });
 
          curExpenses.forEach(e => {
-            const d = new Date(e.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            const d = dateKey(e.date);
             if (!dailyData.has(d) && timeRange === 'all') dailyData.set(d, { date: d, revenue: 0, profit: 0, expenses: 0, orders: 0 });
             if (dailyData.has(d)) dailyData.get(d).expenses += Number(e.amount);
          });
       }
 
-      let chartData = Array.from(dailyData.values());
-      if (timeRange === 'all') {
-         chartData.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      } else {
-         chartData = chartData.reverse();
-      }
+      const chartData = Array.from(dailyData.values()).sort((a, b) => a.date.localeCompare(b.date)).map(entry => ({ ...entry, profit: entry.profit - entry.expenses }));
 
       // --- Splits Data ---
       // 1. Revenue by Category
@@ -240,7 +257,7 @@ const Reports: React.FC = () => {
          const cat = getProductCat(i.productId);
          // Include in pie chart only if it matches filter (which means 100% if single cat selected)
          if (isCatMatch(cat)) {
-            catRevenue[cat] = (catRevenue[cat] || 0) + i.total;
+            catRevenue[cat] = (catRevenue[cat] || 0) + itemNetValue(s, i);
          }
       }));
       const splitRevenue = Object.entries(catRevenue).map(([name, value]) => ({ name, value }));
@@ -255,11 +272,8 @@ const Reports: React.FC = () => {
 
       // 3. Payment Methods (for matching sales)
       const payMethods: Record<string, number> = {};
-      curSales.forEach(s => {
-         const hasMatch = s.items.some(i => isCatMatch(getProductCat(i.productId)));
-         if (hasMatch) {
-            payMethods[s.paymentMethod] = (payMethods[s.paymentMethod] || 0) + 1;
-         }
+      currentReceipts.forEach(p => {
+         payMethods[p.method] = (payMethods[p.method] || 0) + p.amount;
       });
       const splitMethods = Object.entries(payMethods).map(([name, value]) => ({ name, value }));
 
@@ -270,10 +284,10 @@ const Reports: React.FC = () => {
             const cat = getProductCat(i.productId);
             if (isCatMatch(cat)) {
                if (!catStats[cat]) catStats[cat] = { revenue: 0, count: 0, cost: 0 };
-               catStats[cat].revenue += i.total;
+               catStats[cat].revenue += itemNetValue(s, i);
                catStats[cat].count += i.quantity;
                const prod = products.find(p => p.id === i.productId);
-               const unitCost = (prod?.costPrice && prod.costPrice > 0) ? prod.costPrice : (i.price * 0.7);
+               const unitCost = i.costPrice ?? prod?.costPrice ?? 0;
                catStats[cat].cost += (unitCost * i.quantity);
             }
          });
@@ -290,13 +304,13 @@ const Reports: React.FC = () => {
       }));
 
       if (selectedCategory === 'All') {
-         const repairRevenue = curRepairs.reduce((a, r) => a + (r.isPaid ? r.estimatedCost : 0), 0);
+         const repairRevenue = curRepairs.reduce((a, r) => a + (r.isPaid ? r.estimatedCost : r.depositPaid), 0);
          if (repairRevenue > 0) {
             const repairCost = curRepairs.reduce((sum, r) => {
                const partsCost = r.partsUsed ? r.partsUsed.reduce((p, part) => p + part.cost, 0) : 0;
                return sum + partsCost;
             }, 0);
-            const finalRepairCost = repairCost > 0 ? repairCost : (repairRevenue * 0.2);
+            const finalRepairCost = repairCost;
             tableRows.push({
                category: 'Repair Services',
                revenue: repairRevenue,
@@ -311,9 +325,11 @@ const Reports: React.FC = () => {
 
       return {
          overview: [
+            { title: 'Sales money received', value: received, change: getChange(received, previousReceived), format: 'currency' },
+            { title: 'Unpaid sales balances (all dates)', value: outstanding, change: 0, format: 'currency' },
             { title: 'Total Transactions', value: current.orders, change: getChange(current.orders, previous.orders), format: 'number' },
-            { title: 'Avg Order Value', value: current.orders ? current.revenue / current.orders : 0, change: getChange(current.revenue / current.orders, previous.revenue / previous.orders), format: 'currency' },
-            { title: 'Gross Revenue', value: current.revenue, change: getChange(current.revenue, previous.revenue), format: 'currency' },
+            { title: 'Avg Order Value', value: current.orders ? current.revenue / current.orders : 0, change: getChange(current.orders ? current.revenue / current.orders : 0, previous.orders ? previous.revenue / previous.orders : 0), format: 'currency' },
+            { title: 'Net sales & services (includes unpaid)', value: current.revenue, change: getChange(current.revenue, previous.revenue), format: 'currency' },
             { title: 'Net Profit', value: current.profit, change: getChange(current.profit, previous.profit), format: 'currency' },
             { title: 'Items Sold', value: current.items, change: getChange(current.items, previous.items), format: 'number' },
             { title: 'Profit Margin', value: current.revenue ? (current.profit / current.revenue) * 100 : 0, change: 0, format: 'percent' },
@@ -347,10 +363,10 @@ const Reports: React.FC = () => {
    const COLORS = ['#0f172a', '#e11d48', '#64748b', '#cbd5e1', '#f59e0b', '#10b981'];
 
    return (
-      <div className="bg-[#f8fafc] min-h-screen p-4 lg:p-8 font-sans text-slate-900 space-y-8 animate-in fade-in pb-20">
+      <div className="bg-[#f8fafc] min-h-screen p-4 lg:p-8 font-sans text-slate-900 space-y-8   pb-20">
 
          {/* --- CONTROL PANEL --- */}
-         <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm no-print sticky top-0 z-10">
+         <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100  no-print sticky top-0 z-10">
             <div>
                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Analytics Dashboard</div>
                <h1 className="text-xl font-black text-slate-900 tracking-tight">Financial Overview</h1>
@@ -360,28 +376,28 @@ const Reports: React.FC = () => {
                {/* Category Filter */}
                <div className="relative group w-full lg:w-auto">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                     <Filter size={14} className="text-slate-400 group-focus-within:text-slate-600 transition-colors" />
+                     <Filter size={14} className="text-slate-400 group-focus-within:text-slate-600 transition-colors" strokeWidth={1.75} />
                   </div>
                   <select
                      value={selectedCategory}
                      onChange={(e) => setSelectedCategory(e.target.value)}
-                     className="w-full lg:w-48 pl-9 pr-8 py-2.5 bg-slate-50 border-none rounded-xl text-xs font-bold text-slate-700 shadow-inner outline-none cursor-pointer appearance-none focus:ring-2 focus:ring-slate-200 transition-all font-sans"
+                     className="w-full lg:w-48 pl-9 pr-8 py-2.5 bg-slate-50 border-none rounded-xl text-xs font-bold text-slate-700  outline-none cursor-pointer appearance-none focus:ring-2 focus:ring-slate-200 transition-all font-sans"
                   >
                      <option value="All">All Categories</option>
                      {categories.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
-                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" strokeWidth={1.75} />
                </div>
 
                {/* Time Range Filter */}
                <div className="relative group w-full lg:w-auto">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                     <Calendar size={14} className="text-slate-400 group-focus-within:text-slate-600 transition-colors" />
+                     <Calendar size={14} className="text-slate-400 group-focus-within:text-slate-600 transition-colors" strokeWidth={1.75} />
                   </div>
                   <select
                      value={timeRange}
                      onChange={(e) => setTimeRange(e.target.value as TimeRange)}
-                     className="w-full lg:w-40 pl-9 pr-8 py-2.5 bg-slate-50 border-none rounded-xl text-xs font-bold text-slate-700 shadow-inner outline-none cursor-pointer appearance-none focus:ring-2 focus:ring-slate-200 transition-all font-sans"
+                     className="w-full lg:w-40 pl-9 pr-8 py-2.5 bg-slate-50 border-none rounded-xl text-xs font-bold text-slate-700  outline-none cursor-pointer appearance-none focus:ring-2 focus:ring-slate-200 transition-all font-sans"
                   >
                      <option value="7d">Last 7 Days</option>
                      <option value="30d">Last 30 Days</option>
@@ -389,15 +405,15 @@ const Reports: React.FC = () => {
                      <option value="year">This Year</option>
                      <option value="all">All Time</option>
                   </select>
-                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" strokeWidth={1.75} />
                </div>
 
                <button
                   onClick={() => exportSectionToPDF('#reports-container', 'SNA_Report.pdf')}
-                  className="bg-slate-900 text-white p-2.5 rounded-xl shadow-lg shadow-slate-900/20 hover:bg-black transition-all active:scale-95 ml-auto lg:ml-0"
+                  className="bg-slate-900 text-white p-2.5 rounded-xl   hover:bg-black transition-all  ml-auto lg:ml-0"
                   title="Download PDF"
                >
-                  <Download size={18} />
+                  <Download size={18} strokeWidth={1.75} />
                </button>
             </div>
          </div>
@@ -407,7 +423,7 @@ const Reports: React.FC = () => {
             {/* --- OVERVIEW CARDS --- */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5">
                {analytics.overview.map((item, i) => (
-                  <div key={i} className="bg-white rounded-[20px] p-4 shadow-sm border border-slate-200 flex flex-col justify-between min-h-[100px]">
+                  <div key={i} className="bg-white rounded-[20px] p-4  border border-slate-200 flex flex-col justify-between min-h-[100px]">
                      <div>
                         <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">{item.title}</p>
                         <h3 className="text-2xl font-bold text-[#0f172a] mt-1">
@@ -420,11 +436,11 @@ const Reports: React.FC = () => {
                         <div className="flex items-center gap-1 mt-2">
                            {item.change >= 0 ? (
                               <span className="flex items-center text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-full">
-                                 <TrendingUp size={10} className="mr-1" /> +{item.change.toFixed(1)}%
+                                 <TrendingUp size={14} className="mr-1" strokeWidth={1.75} /> +{item.change.toFixed(1)}%
                               </span>
                            ) : (
                               <span className="flex items-center text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded-full">
-                                 <TrendingDown size={10} className="mr-1" /> {item.change.toFixed(1)}%
+                                 <TrendingDown size={14} className="mr-1" strokeWidth={1.75} /> {item.change.toFixed(1)}%
                               </span>
                            )}
                            <span className="text-[9px] text-slate-400 ml-1">vs prev</span>
@@ -437,10 +453,10 @@ const Reports: React.FC = () => {
             {/* --- CHARTS ROW --- */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                {/* Chart 1: Revenue vs Profit */}
-               <div className="bg-white p-6 rounded-[20px] shadow-sm border border-slate-200">
+               <div className="bg-white p-6 rounded-[20px]  border border-slate-200">
                   <div className="flex justify-between items-start mb-6">
                      <div>
-                        <h3 className="text-lg font-bold text-[#0f172a]">Revenue vs Profit</h3>
+                        <h3 className="text-lg font-bold text-[#0f172a]">Sales value vs profit (includes unpaid sales)</h3>
                         <div className="flex items-center gap-4 mt-2">
                            <div className="flex items-center gap-1 text-[10px] text-slate-400 font-bold">
                               <span className="w-2 h-2 rounded-full bg-[#0f172a]"></span> Revenue
@@ -450,7 +466,7 @@ const Reports: React.FC = () => {
                            </div>
                         </div>
                      </div>
-                     <button className="bg-slate-50 p-2 rounded-lg text-[#0f172a]"><TrendingUp size={16} /></button>
+                     <button className="bg-slate-50 p-2 rounded-lg text-[#0f172a]"><TrendingUp size={16} strokeWidth={1.75} /></button>
                   </div>
                   <div className="h-[200px] w-full">
                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
@@ -464,7 +480,7 @@ const Reports: React.FC = () => {
                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                            <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} tickFormatter={val => `${val / 1000}k`} />
-                           <Tooltip contentStyle={{ borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                           <Tooltip contentStyle={{ borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: 'none' }} />
                            <Area type="monotone" dataKey="revenue" stroke="#0f172a" strokeWidth={3} fill="url(#colorRev)" />
                            <Line type="monotone" dataKey="profit" stroke="#e11d48" strokeWidth={3} dot={false} />
                         </AreaChart>
@@ -473,13 +489,13 @@ const Reports: React.FC = () => {
                </div>
 
                {/* Chart 2: Expenses Trend */}
-               <div className="bg-white p-6 rounded-[20px] shadow-sm border border-slate-200">
+               <div className="bg-white p-6 rounded-[20px]  border border-slate-200">
                   <div className="flex justify-between items-start mb-6">
                      <div>
                         <h3 className="text-lg font-bold text-[#0f172a]">Expense Trend</h3>
                         <p className="text-[10px] font-bold text-slate-400 mt-1">Daily Spending</p>
                      </div>
-                     <div className="bg-slate-50 p-2 rounded-lg text-[#f59e0b]"><TrendingDown size={16} /></div>
+                     <div className="bg-slate-50 p-2 rounded-lg text-[#f59e0b]"><TrendingDown size={16} strokeWidth={1.75} /></div>
                   </div>
                   <div className="h-[200px] w-full">
                      {selectedCategory === 'All' ? (
@@ -488,7 +504,7 @@ const Reports: React.FC = () => {
                               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                               <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
                               <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} tickFormatter={val => `${val / 1000}k`} />
-                              <Tooltip contentStyle={{ borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                              <Tooltip contentStyle={{ borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: 'none' }} />
                               <Line type="monotone" dataKey="expenses" stroke="#f59e0b" strokeWidth={3} dot={{ r: 3, fill: '#f59e0b' }} />
                            </LineChart>
                         </ResponsiveContainer>
@@ -501,13 +517,13 @@ const Reports: React.FC = () => {
                </div>
 
                {/* Chart 3: Sales Count */}
-               <div className="bg-white p-6 rounded-[20px] shadow-sm border border-slate-200">
+               <div className="bg-white p-6 rounded-[20px]  border border-slate-200">
                   <div className="flex justify-between items-start mb-6">
                      <div>
                         <h3 className="text-lg font-bold text-[#0f172a]">Sales Activity</h3>
                         <p className="text-[10px] font-bold text-slate-400 mt-1">Transaction Volume</p>
                      </div>
-                     <div className="bg-slate-50 p-2 rounded-lg text-[#10b981]"><TrendingUp size={16} /></div>
+                     <div className="bg-slate-50 p-2 rounded-lg text-[#10b981]"><TrendingUp size={16} strokeWidth={1.75} /></div>
                   </div>
                   <div className="h-[200px] w-full">
                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
@@ -521,7 +537,7 @@ const Reports: React.FC = () => {
                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                            <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#64748b' }} />
-                           <Tooltip contentStyle={{ borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                           <Tooltip contentStyle={{ borderRadius: '10px', border: '1px solid #e2e8f0', boxShadow: 'none' }} />
                            <Area type="monotone" dataKey="orders" stroke="#10b981" strokeWidth={3} fill="url(#colorOrd)" />
                         </AreaChart>
                      </ResponsiveContainer>
@@ -532,8 +548,8 @@ const Reports: React.FC = () => {
             {/* --- SPLITS ROW (Donuts) --- */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                {/* Split 1: Revenue Categories */}
-               <div className="bg-white p-6 rounded-[20px] shadow-sm border border-slate-200 flex flex-col">
-                  <h3 className="text-sm font-bold text-[#0f172a] mb-6">Revenue Sources</h3>
+               <div className="bg-white p-6 rounded-[20px]  border border-slate-200 flex flex-col">
+                  <h3 className="text-sm font-bold text-[#0f172a] mb-6">Sales value by category</h3>
                   <div className="flex items-center justify-between flex-1">
                      <div className="w-[120px] h-[120px]">
                         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
@@ -567,7 +583,7 @@ const Reports: React.FC = () => {
                </div>
 
                {/* Split 2: Expense Categories */}
-               <div className="bg-white p-6 rounded-[20px] shadow-sm border border-slate-200 flex flex-col">
+               <div className="bg-white p-6 rounded-[20px]  border border-slate-200 flex flex-col">
                   <h3 className="text-sm font-bold text-[#0f172a] mb-6">Cost Breakdown</h3>
                   <div className="flex items-center justify-between flex-1">
                      {selectedCategory === 'All' ? (
@@ -600,8 +616,8 @@ const Reports: React.FC = () => {
                </div>
 
                {/* Split 3: Payment Methods */}
-               <div className="bg-white p-6 rounded-[20px] shadow-sm border border-slate-200 flex flex-col">
-                  <h3 className="text-sm font-bold text-[#0f172a] mb-6">Payment Methods</h3>
+               <div className="bg-white p-6 rounded-[20px]  border border-slate-200 flex flex-col">
+                  <h3 className="text-sm font-bold text-[#0f172a] mb-6">Sales money received by method</h3>
                   <div className="flex items-center justify-between flex-1">
                      <div className="w-[120px] h-[120px]">
                         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
@@ -619,7 +635,7 @@ const Reports: React.FC = () => {
                                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[(i + 4) % COLORS.length] }}></span>
                                  <span className="text-slate-400 font-medium">{item.name}</span>
                               </div>
-                              <span className="font-bold text-[#0f172a]">{item.value}</span>
+                              <span className="font-bold text-[#0f172a]">UGX {item.value.toLocaleString()}</span>
                            </div>
                         ))}
                      </div>
@@ -628,10 +644,10 @@ const Reports: React.FC = () => {
             </div>
 
             {/* --- DATA TABLE --- */}
-            <div className="bg-white rounded-[20px] p-6 shadow-sm border border-slate-200">
+            <div className="bg-white rounded-[20px] p-6  border border-slate-200">
                <div className="flex justify-between items-center mb-6">
                   <h3 className="text-lg font-bold text-[#0f172a]">Detailed Performance</h3>
-                  <button className="text-[#0f172a] bg-slate-50 p-2 rounded-lg"><MoreHorizontal size={16} /></button>
+                  <button className="text-[#0f172a] bg-slate-50 p-2 rounded-lg"><MoreHorizontal size={16} strokeWidth={1.75} /></button>
                </div>
 
                <div className="overflow-x-auto">
@@ -640,7 +656,7 @@ const Reports: React.FC = () => {
                         <tr className="border-b border-slate-100">
                            {[
                               { id: 'category', label: 'Category Name', align: 'left' },
-                              { id: 'revenue', label: 'Total Revenue', align: 'right' },
+                              { id: 'revenue', label: 'Sales value', align: 'right' },
                               { id: 'itemsSold', label: 'Items Sold', align: 'right' },
                               { id: 'totalCost', label: 'Total Cost (Est)', align: 'right' },
                               { id: 'avgPrice', label: 'Avg Price / Item', align: 'right' },
@@ -654,7 +670,7 @@ const Reports: React.FC = () => {
                               >
                                  <div className={`flex items-center gap-1 ${col.align === 'right' ? 'justify-end' : 'justify-start'}`}>
                                     {col.label}
-                                    <ArrowUpDown size={12} className={`text-slate-300 ${sortConfig.key === col.id ? 'text-rose-500' : ''}`} />
+                                    <ArrowUpDown size={14} className={`text-slate-300 ${sortConfig.key === col.id ? 'text-rose-500' : ''}`} strokeWidth={1.75} />
                                  </div>
                               </th>
                            ))}

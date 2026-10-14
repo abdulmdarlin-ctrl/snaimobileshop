@@ -1,3 +1,5 @@
+import { useToast } from './Toast';
+import { saleReceipts, outstandingAmount, itemNetValue, getSaleType } from '../utils/pos';
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { db } from '../db';
 import { Sale, Repair, Product, User, ProductType, AppSettings } from '../types';
@@ -5,7 +7,7 @@ import { Page } from '../App';
 import {
    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
-import { Search, Package, ShoppingBag, Users, TrendingUp, TrendingDown, DollarSign, Activity, Wrench, AlertTriangle, ArrowUpRight, ChevronDown, Calendar, Receipt, Pause, AlertCircle, Play, X, Clock, ArrowRight, Percent, Crown, CheckCircle2, Smartphone, Headphones, Battery, Box, Settings, RefreshCw } from 'lucide-react';
+import { Search, Package, ShoppingBag, Users, TrendingUp, TrendingDown, Banknote, Activity, Wrench, AlertTriangle, ArrowUpRight, ChevronDown, Calendar, Receipt, Pause, AlertCircle, Play, X, Clock, ArrowRight, Percent, BadgeCheck, CheckCircle2, Smartphone, Headphones, Battery, Box, Settings, RefreshCw } from 'lucide-react';
 
 interface DashboardProps {
    onNavigate: (page: Page) => void;
@@ -13,6 +15,7 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
+   const { showToast } = useToast();
    const [loading, setLoading] = useState(true);
    const [greeting, setGreeting] = useState('');
    const [timeRange, setTimeRange] = useState<'Today' | 'This Month' | 'Custom'>('Today');
@@ -30,6 +33,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    const [rawRepairs, setRawRepairs] = useState<Repair[]>([]);
    const [rawProducts, setRawProducts] = useState<Product[]>([]);
    const [stats, setStats] = useState({
+      outstanding: 0,
       revenue: 0,
       revenueToday: 0,
       revenueTrend: 0,
@@ -70,10 +74,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
    const getProductIcon = (type: ProductType) => {
       switch (type) {
-         case ProductType.PHONE: return <Smartphone size={14} />;
-         case ProductType.ACCESSORY: return <Headphones size={14} />;
-         case ProductType.SPARE_PART: return <Battery size={14} />;
-         default: return <Box size={14} />;
+         case ProductType.PHONE: return <Smartphone size={14} strokeWidth={1.75} />;
+         case ProductType.ACCESSORY: return <Headphones size={14} strokeWidth={1.75} />;
+         case ProductType.SPARE_PART: return <Battery size={14} strokeWidth={1.75} />;
+         default: return <Box size={14} strokeWidth={1.75} />;
       }
    };
 
@@ -120,7 +124,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          setShowPendingBanner(checkVisibility('pending'));
 
          if (saved) {
-            const parsed = JSON.parse(saved);
+            let parsed: any[] = [];
+            try {
+               const value = JSON.parse(saved);
+               if (Array.isArray(value)) parsed = value.filter(sale => sale && Array.isArray(sale.items) && sale.items.every((item: any) => item && Number.isFinite(item.price) && Number.isFinite(item.quantity)));
+            } catch { /* Keep corrupt storage untouched so it can be recovered. */ }
             setHeldSales(parsed);
 
             // Re-show pending banner automatically if a new sale was added to the list
@@ -179,6 +187,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
    useEffect(() => {
       const fetchData = async () => {
+         try {
          const [sales, repairs, products, stockLogs, sets] = await Promise.all([
             db.sales.toArray(),
             db.repairs.toArray(),
@@ -226,7 +235,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                title: `Sale #${s.receiptNo}`,
                desc: s.customerName || '-',
                amount: s.total,
-               status: 'Paid',
+               status: getSaleType(s),
                saleObject: s
             })),
             ...repairs.map(r => ({
@@ -251,7 +260,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          setRecentActivity(activities);
 
          setLowStockItems(products.filter(p => p.stockQuantity <= p.reorderLevel).sort((a, b) => a.stockQuantity - b.stockQuantity));
-         setLoading(false);
+         } catch (error) { showToast('Could not load dashboard data. Please refresh and retry.', 'error'); }
+         finally { setLoading(false); }
       };
 
       fetchData();
@@ -374,8 +384,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          chartGrouping = 'month';
       }
 
-      const revenue = currentSales.reduce((sum, s) => sum + s.total, 0);
-      const prevRevenue = previousSales.reduce((sum, s) => sum + s.total, 0);
+      const receipts = allSales.flatMap(saleReceipts);
+      const start = timeRange === 'Today' ? todayStart : timeRange === 'This Month' ? monthStart : new Date(customStart).setHours(0, 0, 0, 0);
+      const end = timeRange === 'Custom' ? new Date(customEnd).setHours(23, 59, 59, 999) + 1 : now.getTime() + 1;
+      const previousStart = timeRange === 'Today' ? todayStart - 86400000 : timeRange === 'This Month' ? new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime() : start - (end - start);
+      const currentReceipts = receipts.filter(p => p.timestamp >= start && p.timestamp < end);
+      const revenue = currentReceipts.reduce((sum, p) => sum + p.amount, 0);
+      const prevRevenue = receipts.filter(p => p.timestamp >= previousStart && p.timestamp < start).reduce((sum, p) => sum + p.amount, 0);
       const revenueTrend = prevRevenue === 0 ? (revenue > 0 ? 100 : 0) : ((revenue - prevRevenue) / prevRevenue) * 100;
 
       const orders = currentSales.length;
@@ -386,12 +401,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
       const profit = currentSales.reduce((acc, s) => {
          const saleProfit = s.items.reduce((itemAcc, i) => {
             const product = rawProducts.find(p => p.id === i.productId);
-            const cost = (product?.costPrice || 0) * i.quantity;
-            return itemAcc + (i.total - cost);
+            const cost = (i.costPrice ?? product?.costPrice ?? 0) * i.quantity;
+            return itemAcc + (itemNetValue(s, i) - cost);
          }, 0);
          return acc + saleProfit;
       }, 0);
-      const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+      const salesValue = currentSales.reduce((sum, sale) => sum + sale.total, 0);
+      const margin = salesValue > 0 ? (profit / salesValue) * 100 : 0;
 
       const qtySold = currentSales.reduce((acc, s) => acc + s.items.reduce((sum, i) => sum + i.quantity, 0), 0);
 
@@ -408,7 +424,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          }
       }
 
-      currentSales.forEach(s => {
+      [...currentSales.map(s => ({ timestamp: s.timestamp, amount: 0, orders: 1 })), ...currentReceipts.map(p => ({ ...p, orders: 0 }))].forEach(s => {
          const d = new Date(s.timestamp);
          let key = '';
          let label = '';
@@ -425,8 +441,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          }
 
          const existing = chartMap.get(key) || { date: label, fullDate: key, revenue: 0, orders: 0 };
-         existing.revenue += s.total;
-         existing.orders += 1;
+         existing.revenue += s.amount;
+         existing.orders += s.orders;
          chartMap.set(key, existing);
       });
 
@@ -437,7 +453,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          return a.fullDate.localeCompare(b.fullDate);
       });
 
-      // Fix sort for Hour which used :00 label as fullDate in init loop? 
+      // Fix sort for Hour which used :00 label as fullDate in init loop?
       // Actually, let's just re-sort properly.
       if (chartGrouping === 'hour') {
          dynamicChartData.sort((a, b) => parseInt(a.date) - parseInt(b.date));
@@ -452,13 +468,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
       const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
       const salesToday = allSales.filter(s => s.timestamp >= startOfToday);
       const invoicesToday = salesToday.length;
-      const revenueToday = salesToday.reduce((sum, s) => sum + s.total, 0);
+      const revenueToday = receipts.filter(p => p.timestamp >= todayStart && p.timestamp < end).reduce((sum, p) => sum + p.amount, 0);
       const qtySoldToday = salesToday.reduce((acc, s) => acc + s.items.reduce((sum, i) => sum + i.quantity, 0), 0);
       const profitToday = salesToday.reduce((acc, s) => {
          const saleProfit = s.items.reduce((itemAcc, i) => {
             const product = rawProducts.find(p => p.id === i.productId);
-            const cost = (product?.costPrice || 0) * i.quantity;
-            return itemAcc + (i.total - cost);
+            const cost = (i.costPrice ?? product?.costPrice ?? 0) * i.quantity;
+            return itemAcc + (itemNetValue(s, i) - cost);
          }, 0);
          return acc + saleProfit;
       }, 0);
@@ -515,13 +531,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
       // --- V2 Stats Aggregation ---
       // Revenue Breakdown (Cash vs Mobile Money vs Bank)
-      const cashRevenue = currentSales.filter(s => s.paymentMethod === 'Cash').reduce((sum, s) => sum + s.total, 0);
-      const mmRevenue = currentSales.filter(s => s.paymentMethod === 'Mobile Money').reduce((sum, s) => sum + s.total, 0);
-      const bankRevenue = currentSales.filter(s => s.paymentMethod === 'Bank').reduce((sum, s) => sum + s.total, 0);
+      const cashRevenue = currentReceipts.filter(p => p.method === 'Cash').reduce((sum, p) => sum + p.amount, 0);
+      const mmRevenue = currentReceipts.filter(p => p.method === 'Mobile Money').reduce((sum, p) => sum + p.amount, 0);
+      const bankRevenue = currentReceipts.filter(p => p.method === 'Bank').reduce((sum, p) => sum + p.amount, 0);
 
 
       setStats(prev => ({
          ...prev,
+         outstanding: allSales.reduce((sum, sale) => sum + outstandingAmount(sale), 0),
          revenue, revenueToday, revenueTrend, orders, ordersTrend, margin,
          repairs: rawRepairs.filter(r => r.status !== 'Delivered' && r.status !== 'Cancelled').length,
          inventoryCount: rawProducts.length,
@@ -565,48 +582,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    };
 
    return (
-      <div className="space-y-6 animate-in fade-in duration-500 pb-10 font-sans text-slate-800">
+      <div className="space-y-6   duration-500 pb-10 font-sans text-slate-800">
 
          {/* --- DASHBOARD HEADER --- */}
          {/* --- WELCOME BANNER --- */}
-         <div className="w-full flex items-center justify-between bg-[#0f172a] border border-slate-800 rounded-3xl p-3 shadow-2xl group relative overflow-hidden transition-all duration-500 hover:shadow-rose-950/10 mb-4">
+         <div className="dashboard-summary w-full flex flex-wrap gap-4 items-center justify-between bg-white border border-slate-800 rounded-3xl p-3  group relative overflow-hidden transition-all duration-500  mb-4">
             {/* Background Decor */}
-            <div className="absolute top-0 right-0 w-64 h-64 bg-rose-600/5 rounded-full blur-3xl -mr-16 -mt-16 pointer-events-none group-hover:bg-rose-600/10 transition-colors duration-700"></div>
-            <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-600/5 rounded-full blur-2xl -ml-8 -mb-8 pointer-events-none"></div>
+
 
             {/* Left: Avatar + Welcome Text */}
             <div className="flex items-center gap-4 relative z-10">
-               <div className="relative shrink-0">
-                  {/* Avatar Glow */}
-                  <div className="absolute inset-0 bg-rose-600/20 blur-2xl rounded-full scale-150 animate-pulse"></div>
-
-                  {/* Avatar Container */}
-                  <div className="relative w-12 h-12 rounded-2xl bg-[#020617] p-1 border border-slate-700/50 shadow-2xl group-hover:border-rose-600/50 transition-all duration-500 overflow-visible">
-                     <div className="w-full h-full rounded-[1.2rem] overflow-hidden bg-slate-900 ring-1 ring-white/5">
-                        <img
-                           src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}&backgroundColor=0f172a`}
-                           alt={user.username}
-                           className="w-full h-full object-cover scale-110 translate-y-1"
-                        />
-                     </div>
-
-                     {/* Notification Badge */}
-                     <div className="absolute -top-0.5 -right-0.5 w-5 h-5 bg-[#f43f5e] rounded-full border-2 border-[#0f172a] shadow-lg flex items-center justify-center anim-bounce">
-                        <span className="text-[10px] font-bold text-white">15</span>
-                     </div>
-                  </div>
-               </div>
-
                <div className="flex flex-col">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">
-                     Logged As
-                  </p>
-                  <h2 className="text-lg lg:text-xl font-bold text-white leading-tight tracking-tight">
+                  <h2 className="text-base font-semibold text-slate-900 leading-tight tracking-tight">
                      {(user.username.toLowerCase() === 'admin') ? 'System Administrator' : user.username}
                   </h2>
                   <div className="flex items-center gap-3 mt-1.5">
-                     <div className="px-2 py-0.5 rounded-lg bg-slate-800/80 border border-slate-700/50 flex items-center gap-1.5">
-                        <div className="w-1 h-1 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                     <div className="px-2 py-0.5 rounded-lg bg-slate-50 border border-slate-200 flex items-center gap-1.5">
+                        <div className="w-1 h-1 rounded-full bg-emerald-500 "></div>
                         <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{user.role}</span>
                      </div>
                      <span className="w-1 h-1 rounded-full bg-slate-700"></span>
@@ -618,14 +610,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
             {/* Right: Date Filter Widget */}
-            <div className="hidden xl:flex flex-col items-end gap-3 pl-8 border-l border-slate-800 ml-6 min-w-[280px] relative z-10">
+            <div className="flex flex-col items-start sm:items-end gap-3 relative z-10">
                <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-700/50 backdrop-blur-md">
                   {['Today', 'This Month', 'Custom'].map((range) => (
                      <button
                         key={range}
                         onClick={() => setTimeRange(range as any)}
                         className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${timeRange === range
-                           ? 'bg-white text-slate-900 shadow-lg scale-105'
+                           ? 'bg-white text-slate-900  scale-105'
                            : 'text-slate-400 hover:text-white hover:bg-white/5'
                            }`}
                      >
@@ -635,7 +627,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                </div>
 
                {timeRange === 'Custom' && (
-                  <div className="flex items-center gap-2 animate-in slide-in-from-right-2 fade-in">
+                  <div className="flex items-center gap-2   ">
                      <input
                         type="date"
                         value={customStart}
@@ -656,17 +648,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
          {/* --- HIDDEN ALERTS INDICATORS --- */}
          {((!showLowStockBanner && lowStockItems.length > 0) || (!showPendingBanner && heldSales.length > 0)) && (
-            <div className="flex flex-wrap gap-3 mb-2 animate-in fade-in slide-in-from-top-2">
+            <div className="flex flex-wrap gap-3 mb-2   ">
                {!showLowStockBanner && lowStockItems.length > 0 && (
                   <button
                      onClick={() => setShowLowStockBanner(true)}
-                     className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 rounded-full border border-rose-100 hover:bg-rose-100 transition-all shadow-sm group"
+                     className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 rounded-full border border-rose-100 hover:bg-rose-100 transition-all  group"
                   >
-                     <AlertTriangle size={14} />
+                     <AlertTriangle size={14} strokeWidth={1.75} />
                      <span className="text-[10px] font-black uppercase tracking-widest">
                         {lowStockItems.length} Low Stock Hidden
                      </span>
-                     <RefreshCw size={12} className="ml-1 opacity-40 group-hover:rotate-180 transition-transform duration-500" />
+                     <RefreshCw size={14} className="ml-1 opacity-40 group-hover:rotate-180 transition-transform duration-500" strokeWidth={1.75} />
                   </button>
                )}
                {!showPendingBanner && heldSales.length > 0 && (
@@ -676,13 +668,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                         localStorage.removeItem('sna_dismiss_pending');
                         localStorage.removeItem('sna_snooze_pending');
                      }}
-                     className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-full border border-amber-100 hover:bg-amber-100 transition-all shadow-sm group"
+                     className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-700 rounded-full border border-amber-100 hover:bg-amber-100 transition-all  group"
                   >
-                     <Pause size={14} fill="currentColor" strokeWidth={0} />
+                     <Pause size={14} strokeWidth={1.75} />
                      <span className="text-[10px] font-black uppercase tracking-widest">
                         {heldSales.length} Pending Sales Hidden
                      </span>
-                     <RefreshCw size={12} className="ml-1 opacity-40 group-hover:rotate-180 transition-transform duration-500" />
+                     <RefreshCw size={14} className="ml-1 opacity-40 group-hover:rotate-180 transition-transform duration-500" strokeWidth={1.75} />
                   </button>
                )}
             </div>
@@ -690,13 +682,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
          {/* --- PENDING TRANSACTIONS ALERT --- */}
          {showPendingBanner && heldSales.length > 0 && (
-            <div className="w-full bg-amber-50/40 backdrop-blur-md border border-amber-200/50 border-t-[3px] border-t-amber-400 rounded-3xl overflow-hidden relative group/ticker mb-4 shadow-xl shadow-amber-900/5 transition-all duration-500">
+            <div className="w-full bg-amber-50/40 backdrop-blur-md border border-amber-200/50 border-t-[3px] border-t-amber-400 rounded-3xl overflow-hidden relative group/ticker mb-4   transition-all duration-500">
                <div className="flex items-center p-3 md:px-5 md:py-4">
                   {/* Left Side: Pause Icon Card with Glow */}
                   <div className="relative shrink-0">
-                     <div className="absolute inset-0 bg-amber-400/20 blur-xl rounded-full scale-125 group-hover/ticker:scale-150 transition-transform duration-700"></div>
-                     <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-white flex items-center justify-center text-amber-900 shadow-sm border border-amber-100/50 relative z-10">
-                        <Pause size={20} fill="currentColor" strokeWidth={0} />
+
+                     <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl bg-white flex items-center justify-center text-amber-900  border border-amber-100/50 relative z-10">
+                        <Pause size={20} strokeWidth={1.75} />
                      </div>
                   </div>
 
@@ -705,7 +697,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      <div className="flex items-center gap-3 mb-1">
                         <h3 className="text-sm md:text-base font-bold text-amber-950 uppercase">Pending Transactions</h3>
                         <div className="px-2 py-0.5 rounded-full bg-amber-100/80 border border-amber-200/50 flex items-center gap-1 shrink-0">
-                           <Clock size={10} className="text-amber-700" />
+                           <Clock size={14} className="text-amber-700" strokeWidth={1.75} />
                            <span className="text-[11px] font-bold text-amber-800 leading-none">
                               {getTimeAgo(heldSalesInfo.oldestTimestamp)}
                            </span>
@@ -729,17 +721,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                               onNavigate('sales');
                            }
                         }}
-                        className="flex items-center gap-2 bg-amber-950 px-4 py-2.5 rounded-xl shadow-lg shadow-amber-900/10 text-white group/btn hover:bg-black transition-all duration-300"
+                        className="flex items-center gap-2 bg-amber-950 px-4 py-2.5 rounded-xl   text-white group/btn hover:bg-black transition-all duration-300"
                      >
                         <span className="text-xs font-bold uppercase">Resume Now</span>
-                        <Play size={14} fill="white" className="group-hover/btn:translate-x-1 transition-transform" />
+                        <Play size={14} className="group-hover/btn:translate-x-1 transition-transform" strokeWidth={1.75} />
                      </button>
 
                      <button
                         onClick={() => setIsPendingExpanded(!isPendingExpanded)}
-                        className={`w-10 h-10 rounded-xl border border-amber-200/50 flex items-center justify-center text-amber-900 hover:bg-white hover:border-amber-300 transition-all shadow-sm ${isPendingExpanded ? 'rotate-180 bg-white' : 'bg-white/50'}`}
+                        className={`w-10 h-10 rounded-xl border border-amber-200/50 flex items-center justify-center text-amber-900 hover:bg-white hover:border-amber-300 transition-all  ${isPendingExpanded ? 'rotate-180 bg-white' : 'bg-white/50'}`}
                      >
-                        <ChevronDown size={18} strokeWidth={2.5} />
+                        <ChevronDown size={18} strokeWidth={1.75} />
                      </button>
 
                      {settings?.allowBannerDismissal !== false && (
@@ -752,7 +744,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                               className="hidden md:flex items-center gap-1.5 px-2 py-1 text-amber-700 hover:bg-amber-100/50 rounded-lg transition-all text-[10px] font-bold uppercase"
                               title="Snooze for 1 hour"
                            >
-                              <Clock size={14} />
+                              <Clock size={14} strokeWidth={1.75} />
                               Snooze
                            </button>
                            <button
@@ -763,7 +755,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                               className="p-1.5 text-amber-700 hover:text-amber-900 hover:bg-amber-100/50 rounded-lg transition-all"
                               title="Dismiss"
                            >
-                              <X size={18} />
+                              <X size={18} strokeWidth={1.75} />
                            </button>
                         </div>
                      )}
@@ -772,17 +764,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
                {/* Collapsible Detailed View */}
                {isPendingExpanded && (
-                  <div className="border-t border-amber-200/50 bg-white/40 backdrop-blur-md animate-in py-6">
+                  <div className="border-t border-amber-200/50 bg-white/40 backdrop-blur-md  py-6">
                      <div className="flex items-center gap-4 px-7 overflow-x-auto no-scrollbar pb-2">
                         {heldSales.map((sale) => (
                            <div
                               key={sale.id}
-                              className="min-w-[280px] bg-white rounded-2xl p-4 border border-amber-100 shadow-sm hover:shadow-md hover:border-amber-200 transition-all flex flex-col gap-3 group/sale"
+                              className="min-w-[280px] bg-white rounded-2xl p-4 border border-amber-100   hover:border-amber-200 transition-all flex flex-col gap-3 group/sale"
                            >
                               <div className="flex items-center justify-between">
                                  <div className="flex items-center gap-2">
                                     <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center">
-                                       <Users size={16} className="text-slate-400" />
+                                       <Users size={16} className="text-slate-400" strokeWidth={1.75} />
                                     </div>
                                     <span className="text-xs font-bold text-slate-800 truncate max-w-[120px]">
                                        {sale.customerName || "Walk-in Customer"}
@@ -812,7 +804,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                                  className="w-full py-2.5 rounded-xl bg-amber-50 text-amber-700 text-xs font-bold uppercase border border-amber-100 hover:bg-amber-950 hover:text-white hover:border-amber-950 transition-all flex items-center justify-center gap-2"
                               >
                                  Resume Sale
-                                 <ArrowRight size={14} />
+                                 <ArrowRight size={14} strokeWidth={1.75} />
                               </button>
                            </div>
                         ))}
@@ -824,15 +816,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
          {/* --- LOW STOCK ALERT TICKER --- */}
          {showLowStockBanner && lowStockItems.length > 0 && (
-            <div className="w-full bg-rose-50/20 backdrop-blur-md border border-rose-100/50 border-t-[3px] border-rose-500 rounded-3xl overflow-hidden relative group/ticker mb-4 shadow-xl shadow-rose-900/5">
+            <div className="w-full bg-rose-50/20 backdrop-blur-md border border-rose-100/50 border-t-[3px] border-rose-500 rounded-3xl overflow-hidden relative group/ticker mb-4  ">
                {/* Shimmer Effect */}
-               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent -translate-x-full animate-[shimmer_3s_infinite] pointer-events-none"></div>
 
                <div className="flex items-center">
                   {/* Left Side: Label with Count */}
                   <div className="flex items-center gap-3 px-5 py-3 border-r border-rose-100/50 bg-white/40 backdrop-blur-xl z-20 shrink-0">
-                     <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center text-rose-500 shadow-sm border border-rose-50/50 ring-4 ring-rose-50/30 text-xs text-bold">
-                        <AlertTriangle size={18} strokeWidth={2.5} />
+                     <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center text-rose-500  border border-rose-50/50 ring-4 ring-rose-50/30 text-xs text-bold">
+                        <AlertTriangle size={18} strokeWidth={1.75} />
                      </div>
                      <div className="flex flex-col">
                         <div className="flex items-center gap-1.5">
@@ -844,17 +835,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   </div>
 
                   {/* Center: Scrolling Content */}
-                  <div className="flex-1 overflow-hidden relative">
-                     <div className="flex items-center gap-4 px-6 animate-marquee whitespace-nowrap py-3">
+                  <div className="flex-1 min-w-0 overflow-x-auto relative">
+                     <div className="flex items-center gap-4 px-6  whitespace-nowrap py-3">
                         {/* Render items twice for seamless loop */}
-                        {[...lowStockItems, ...lowStockItems].map((item, idx) => (
+                        {lowStockItems.map((item, idx) => (
                            <button
                               key={`${item.id}-${idx}`}
                               onClick={() => onNavigate('inventory')}
-                              className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-rose-100/20 shadow-sm shrink-0 hover:shadow-md hover:border-rose-300 transition-all duration-300 cursor-pointer group/item outline-none"
+                              className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-rose-100/20  shrink-0  hover:border-rose-300 transition-all duration-300 cursor-pointer group/item outline-none"
                            >
                               <span className="text-xs font-bold text-slate-700 uppercase tracking-tight group-hover/item:text-rose-600 transition-colors">{item.name}</span>
-                              <div className={`flex items-center justify-center min-w-[20px] h-5 px-1 rounded-md text-white text-[11px] font-bold shadow-sm group-hover/item:scale-110 transition-transform ${item.stockQuantity === 0 ? 'bg-rose-600 animate-pulse' : 'bg-rose-500'}`}>
+                              <div className={`flex items-center justify-center min-w-[20px] h-5 px-1 rounded-md text-white text-[11px] font-bold   transition-transform ${item.stockQuantity === 0 ? 'bg-rose-600 ' : 'bg-rose-500'}`}>
                                  {item.stockQuantity}
                               </div>
                            </button>
@@ -862,8 +853,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      </div>
 
                      {/* Gradient Fades for Smoothness */}
-                     <div className="absolute inset-y-0 left-0 w-20 bg-gradient-to-r from-rose-50/40 to-transparent pointer-events-none z-[5]"></div>
-                     <div className="absolute inset-y-0 right-0 w-20 bg-gradient-to-l from-rose-50/40 to-transparent pointer-events-none z-[5]"></div>
+
+
                   </div>
 
                   {/* Right Side: Manage Link */}
@@ -873,7 +864,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                         className="hidden md:flex items-center gap-2 text-rose-500 hover:text-rose-600 font-black text-xs uppercase tracking-widest group/manage transition-colors"
                      >
                         Manage
-                        <ArrowRight size={16} className="group-hover/manage:translate-x-1 transition-transform" />
+                        <ArrowRight size={16} className="group-hover/manage:translate-x-1 transition-transform" strokeWidth={1.75} />
                      </button>
 
                      {settings?.allowBannerDismissal !== false && (
@@ -882,7 +873,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                            className="p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-100/50 rounded-lg transition-all"
                            title="Dismiss"
                         >
-                           <X size={18} />
+                           <X size={18} strokeWidth={1.75} />
                         </button>
                      )}
                   </div>
@@ -891,22 +882,22 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          )}
 
          {/* --- QUICK STATS CARDS --- */}
-         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
+         <div className="dashboard-metrics grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
             {/* Sales Card */}
-            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-blue-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
-               <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-blue-500    transition-all group relative overflow-hidden">
+
                <div className="relative z-10">
-                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-all duration-500 shadow-inner">
-                     <DollarSign size={16} strokeWidth={2.5} />
+                  <div className="w-8 h-8 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-all duration-500 ">
+                     <Banknote size={16} strokeWidth={1.75} />
                   </div>
-                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{timeRange === 'Today' ? 'Sales Today' : timeRange === 'This Month' ? 'Sales Monthly' : timeRange === 'Custom' ? 'Sales Custom' : 'Total Revenue'}</p>
+                  <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Money received</p>
                   <h3 className="text-lg font-black text-slate-900 tracking-tighter">
                      <span className="text-sm text-slate-400 mr-1 font-normal">UGX</span>
                      {(stats.revenue || 0).toLocaleString()}
                   </h3>
                   <div className="flex items-center gap-2 mt-4">
                      <div className={`flex items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-black ${stats.revenueTrend >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                        {stats.revenueTrend >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                        {stats.revenueTrend >= 0 ? <TrendingUp size={14} strokeWidth={1.75} /> : <TrendingDown size={14} strokeWidth={1.75} />}
                         {Math.abs(stats.revenueTrend || 0).toFixed(1)}%
                      </div>
                      <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">vs prev</span>
@@ -915,11 +906,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
             {/* Profit Card */}
-            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-emerald-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
-               <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-emerald-500    transition-all group relative overflow-hidden">
+
                <div className="relative z-10">
-                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-500 shadow-inner">
-                     <TrendingUp size={16} strokeWidth={2.5} />
+                  <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-500 ">
+                     <TrendingUp size={16} strokeWidth={1.75} />
                   </div>
                   <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">{timeRange === 'Today' ? 'Profit Today' : 'Profit Period'}</p>
                   <h3 className="text-lg font-black text-slate-900 tracking-tighter">
@@ -928,32 +919,32 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      {(stats.profit || 0).toLocaleString()}
                   </h3>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-4 flex items-center gap-2">
-                     <CheckCircle2 size={12} className="text-emerald-500" /> Net Earnings
+                     <CheckCircle2 size={14} className="text-emerald-500" strokeWidth={1.75} /> Net Earnings
                   </p>
                </div>
             </div>
 
             {/* Profit Margin */}
-            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-amber-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
-               <div className="absolute top-0 right-0 w-32 h-32 bg-amber-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-amber-500    transition-all group relative overflow-hidden">
+
                <div className="relative z-10">
-                  <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3 group-hover:bg-amber-600 group-hover:text-white transition-all duration-500 shadow-inner">
-                     <Percent size={16} strokeWidth={2.5} />
+                  <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3 group-hover:bg-amber-600 group-hover:text-white transition-all duration-500 ">
+                     <Percent size={16} strokeWidth={1.75} />
                   </div>
                   <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Profit Margin</p>
                   <h3 className="text-lg font-black text-slate-900 tracking-tighter">{(stats.margin || 0).toFixed(1)}%</h3>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-4 flex items-center gap-2">
-                     <CheckCircle2 size={12} className="text-emerald-500" /> Healthy Performance
+                     <CheckCircle2 size={14} className="text-emerald-500" strokeWidth={1.75} /> Selected period
                   </p>
                </div>
             </div>
 
             {/* QTY Sold */}
-            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-rose-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
-               <div className="absolute top-0 right-0 w-32 h-32 bg-rose-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-rose-500    transition-all group relative overflow-hidden">
+
                <div className="relative z-10">
-                  <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mb-3 group-hover:bg-rose-600 group-hover:text-white transition-all duration-500 shadow-inner">
-                     <ShoppingBag size={16} strokeWidth={2.5} />
+                  <div className="w-8 h-8 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center mb-3 group-hover:bg-rose-600 group-hover:text-white transition-all duration-500 ">
+                     <ShoppingBag size={16} strokeWidth={1.75} />
                   </div>
                   <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">QTY Sold</p>
                   <h3 className="text-lg font-black text-slate-900 tracking-tighter">
@@ -961,17 +952,17 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      {(stats.qtySold || 0)} <span className="text-sm text-slate-400 font-normal">Units</span>
                   </h3>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-4 flex items-center gap-2">
-                     <Activity size={12} className="text-rose-500" /> Volume
+                     <Activity size={14} className="text-rose-500" strokeWidth={1.75} /> Volume
                   </p>
                </div>
             </div>
 
             {/* Inventory Value */}
-            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-violet-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
-               <div className="absolute top-0 right-0 w-32 h-32 bg-violet-50 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110 duration-700"></div>
+            <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-violet-500    transition-all group relative overflow-hidden">
+
                <div className="relative z-10">
-                  <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center mb-3 group-hover:bg-violet-600 group-hover:text-white transition-all duration-500 shadow-inner">
-                     <Package size={16} strokeWidth={2.5} />
+                  <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center mb-3 group-hover:bg-violet-600 group-hover:text-white transition-all duration-500 ">
+                     <Package size={16} strokeWidth={1.75} />
                   </div>
                   <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2">Stock Value</p>
                   <h3 className="text-lg font-black text-slate-900 tracking-tighter">
@@ -979,7 +970,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      {(stats.inventoryValue || 0).toLocaleString()}
                   </h3>
                   <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-4 flex items-center gap-2">
-                     <Activity size={12} className="text-violet-500" /> Asset Total
+                     <Activity size={14} className="text-violet-500" strokeWidth={1.75} /> Asset Total
                   </p>
                </div>
             </div>
@@ -987,16 +978,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
          {/* --- TOP ROW (Sales Overview & Category Dist) --- */}
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex flex-col md:flex-row gap-6">
+            <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100  flex flex-col md:flex-row gap-6">
 
                {/* Chart Area */}
                <div className="flex-1 min-w-0 flex flex-col">
                   <div className="flex justify-between items-center mb-6">
                      <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
-                           <Activity size={20} />
+                           <Activity size={20} strokeWidth={1.75} />
                         </div>
-                        <h3 className="text-lg font-black text-slate-900">Sales Overview</h3>
+                        <h3 className="text-lg font-black text-slate-900">Receipts and orders</h3>
                      </div>
 
                   </div>
@@ -1018,7 +1009,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                            <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} dy={10} />
                            <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
                            <Tooltip
-                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                              contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }}
                               cursor={{ stroke: '#cbd5e1', strokeWidth: 1, strokeDasharray: '4 4' }}
                            />
                            <Area type="monotone" dataKey="revenue" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorRev)" activeDot={{ r: 6, strokeWidth: 0 }} />
@@ -1033,7 +1024,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
                   {/* Total Stat */}
                   <div>
-                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Revenue</p>
+                     <p className="text-xs text-slate-500 mb-2">Unpaid customer balances (all sales): UGX {stats.outstanding.toLocaleString()}</p>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Money received</p>
                      <h2 className="text-3xl font-black text-slate-900 tracking-tight">
                         <span className="text-sm text-slate-400 mr-1 font-normal">UGX</span>
                         {(stats.revenue / 1000).toFixed(1)}k
@@ -1046,7 +1038,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                         <div className="flex items-center gap-2 mb-1">
                            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
                            <p className="text-xs font-bold text-slate-600">Mobile Money</p>
-                           <span className="text-xs text-green-500 ml-auto font-bold flex items-center gap-0.5"><ArrowUpRight size={10} /> 12%</span>
+
                         </div>
                         <p className="text-sm font-bold text-slate-900 pl-4">UGX {(stats.mmRevenue / 1000).toFixed(1)}k</p>
                      </div>
@@ -1054,22 +1046,23 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      <div>
                         <div className="flex items-center gap-2 mb-1">
                            <div className="w-2 h-2 rounded-full bg-rose-500"></div>
-                           <p className="text-xs font-bold text-slate-600">Cash Sales</p>
-                           <span className="text-xs text-rose-500 ml-auto font-bold flex items-center gap-0.5"><TrendingDown size={10} /> 0%</span>
+                           <p className="text-xs font-bold text-slate-600">Cash received</p>
+
                         </div>
                         <p className="text-sm font-bold text-slate-900 pl-4">UGX {(stats.cashRevenue / 1000).toFixed(1)}k</p>
                      </div>
                   </div>
 
+                  <div className="text-sm text-slate-600">Bank received: <strong>UGX {stats.bankRevenue.toLocaleString()}</strong></div>
                   {/* Insight Box */}
                   <div className="mt-auto bg-blue-50 rounded-2xl p-4 flex items-start gap-3">
                      <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0">
-                        <CheckCircle2 size={16} />
+                        <CheckCircle2 size={16} strokeWidth={1.75} />
                      </div>
                      <div>
-                        <p className="text-xs font-bold text-slate-900">You're doing good!</p>
+                        <p className="text-xs font-bold text-slate-900">Collection comparison</p>
                         <p className="text-xs text-slate-500 leading-relaxed mt-1">
-                           Revenue performance is <span className="font-bold text-blue-600">{(stats.revenueTrend).toFixed(0)}% better</span> compared to previous period.
+                           Collections performance is <span className="font-bold text-blue-600">{Math.abs(stats.revenueTrend).toFixed(0)}% {stats.revenueTrend >= 0 ? 'higher' : 'lower'}</span> compared to previous period.
                         </p>
                      </div>
                   </div>
@@ -1078,10 +1071,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
             {/* CATEGORY DISTRIBUTION (Audience Demographics Style) - Spans 4 Cols */}
-            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl p-4 border border-slate-100 shadow-sm flex flex-col">
+            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl p-4 border border-slate-100  flex flex-col">
                <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
-                     <Users size={20} />
+                     <Users size={20} strokeWidth={1.75} />
                   </div>
                   <h3 className="text-lg font-black text-slate-900">Category Dist.</h3>
                </div>
@@ -1103,7 +1096,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                               <Cell key={`cell-${index}`} fill={['#3b82f6', '#f43f5e', '#10b981', '#f59e0b'][index % 4]} strokeWidth={0} />
                            ))}
                         </Pie>
-                        <Tooltip contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                        <Tooltip contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none' }} />
                      </PieChart>
                   </ResponsiveContainer>
                   {/* Center Text */}
@@ -1146,16 +1139,16 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
 
             {/* RECENT ACTIVITY (Schedule Content Style) - Spans 8 Cols */}
-            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-3">
+            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100  p-3">
                <div className="flex justify-between items-center mb-5">
                   <div className="flex items-center gap-2.5">
                      <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
-                        <Clock size={16} />
+                        <Clock size={16} strokeWidth={1.75} />
                      </div>
                      <h3 className="text-base font-bold text-slate-900">Recent Activity</h3>
                   </div>
                   <button onClick={() => onNavigate('reports')} className="text-xs font-bold text-blue-500 hover:text-blue-600 flex items-center gap-1 transition-colors">
-                     See Detail <ArrowUpRight size={12} />
+                     See Detail <ArrowUpRight size={14} strokeWidth={1.75} />
                   </button>
                </div>
 
@@ -1176,8 +1169,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
                            {/* Card */}
                            <div onClick={() => handleActivityClick(item)} className={`flex-1 p-2.5 rounded-xl border border-slate-100 flex items-center gap-3 transition-all ${isSale ? 'bg-blue-50/50 hover:bg-blue-50 border-blue-100/50 hover:border-blue-200 cursor-pointer' : 'bg-slate-50 hover:bg-slate-100'}`}>
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm shrink-0 ${isSale ? 'bg-white text-blue-500' : 'bg-white text-orange-500'}`}>
-                                 {isSale ? <ShoppingBag size={16} /> : <Wrench size={16} />}
+                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center  shrink-0 ${isSale ? 'bg-white text-blue-500' : 'bg-white text-orange-500'}`}>
+                                 {isSale ? <ShoppingBag size={16} strokeWidth={1.75} /> : <Wrench size={16} strokeWidth={1.75} />}
                               </div>
 
                               <div className="flex-1 min-w-0">
@@ -1193,7 +1186,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                               )}
 
                               <button className="p-1.5 text-slate-300 hover:text-slate-500">
-                                 <ArrowRight size={14} />
+                                 <ArrowRight size={14} strokeWidth={1.75} />
                               </button>
                            </div>
                         </div>
@@ -1206,11 +1199,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
             {/* TOP SELLING ITEMS (Leaderboard Style) - Spans 4 Cols */}
-            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-3 flex flex-col">
+            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100  p-3 flex flex-col">
                <div className="flex justify-between items-center mb-5">
                   <div className="flex items-center gap-2.5">
                      <div className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center">
-                        <TrendingUp size={16} />
+                        <TrendingUp size={16} strokeWidth={1.75} />
                      </div>
                      <h3 className="text-base font-bold text-slate-900">Top Selling</h3>
                   </div>
@@ -1219,18 +1212,18 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                         View All
                      </button>
                      <button onClick={() => onNavigate('inventory')} className="p-1.5 text-slate-400 hover:text-rose-500 transition-colors" title="View Inventory">
-                        <ArrowRight size={14} />
+                        <ArrowRight size={14} strokeWidth={1.75} />
                      </button>
                      <div className="flex bg-slate-50 p-0.5 rounded-lg">
                         <button
                            onClick={() => setTopSellingMode('Quantity')}
-                           className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${topSellingMode === 'Quantity' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
+                           className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${topSellingMode === 'Quantity' ? 'bg-white text-slate-900 ' : 'text-slate-400'}`}
                         >
                            Qty
                         </button>
                         <button
                            onClick={() => setTopSellingMode('Revenue')}
-                           className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${topSellingMode === 'Revenue' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400'}`}
+                           className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${topSellingMode === 'Revenue' ? 'bg-white text-slate-900 ' : 'text-slate-400'}`}
                         >
                            Rev
                         </button>
@@ -1252,7 +1245,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                                     <span className="text-[9px] font-black text-slate-300 uppercase">#{idx + 1}</span>
                                     {item.product.stockQuantity <= item.product.reorderLevel && (
                                        <span className="flex items-center gap-0.5 text-[9px] font-bold text-orange-500 uppercase">
-                                          <AlertTriangle size={8} /> Low Stock
+                                          <AlertTriangle size={14} strokeWidth={1.75} /> Low Stock
                                        </span>
                                     )}
                                  </div>
@@ -1263,14 +1256,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                                  {topSellingMode === 'Quantity' ? `${item.count} sold` : `UGX ${(item.revenue / 1000).toFixed(0)}k`}
                               </p>
                               <div className={`flex items-center justify-end gap-0.5 text-[9px] font-bold ${item.trend >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                 {item.trend >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                                 {item.trend >= 0 ? <TrendingUp size={14} strokeWidth={1.75} /> : <TrendingDown size={14} strokeWidth={1.75} />}
                                  {Math.abs(item.trend).toFixed(0)}%
                               </div>
                            </div>
                         </div>
                         <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
                            <div
-                              className="h-full bg-gradient-to-r from-rose-500 to-rose-400 rounded-full transition-all duration-1000 group-hover:brightness-110"
+                              className="h-full bg-slate-600 rounded-full transition-all duration-1000 group-hover:brightness-110"
                               style={{
                                  width: `${((topSellingMode === 'Quantity' ? item.count : item.revenue) / (topSellingMode === 'Quantity' ? topProducts[0].count : topProducts[0].revenue)) * 100}%`
                               }}
@@ -1280,7 +1273,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   ))}
                   {topProducts.length === 0 && (
                      <div className="flex flex-col items-center justify-center py-10 text-slate-300">
-                        <TrendingUp size={32} className="mb-2 opacity-20" />
+                        <TrendingUp size={32} className="mb-2 opacity-20" strokeWidth={1.75} />
                         <p className="text-xs font-bold uppercase tracking-widest">No sales data</p>
                      </div>
                   )}
@@ -1288,10 +1281,10 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
             {/* TOP CUSTOMERS (Most Engaged Style) - Spans 4 Cols */}
-            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100 shadow-sm p-3">
+            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100  p-3">
                <div className="flex items-center gap-2.5 mb-5">
                   <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
-                     <Crown size={16} />
+                     <BadgeCheck size={16} strokeWidth={1.75} />
                   </div>
                   <h3 className="text-base font-bold text-slate-900">Top Clients</h3>
                </div>
@@ -1317,7 +1310,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                            <h4 className="text-xs font-bold text-slate-900 truncate group-hover:text-blue-600 transition-colors">{cust.name}</h4>
                            <div className="flex items-center gap-2 mt-0.5">
                               <span className="flex items-center gap-1 text-[11px] font-bold text-slate-400">
-                                 <ShoppingBag size={8} /> {Math.floor(Math.random() * 20) + 1}
+                                 <ShoppingBag size={14} strokeWidth={1.75} /> {Math.floor(Math.random() * 20) + 1}
                               </span>
                               <span className="flex items-center gap-1 text-[11px] font-bold text-blue-500 uppercase">
                                  High Value
@@ -1328,7 +1321,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                            <span className="block text-xs font-bold text-slate-900">{(cust.amount / 1000).toFixed(0)}k</span>
                            <span className="block text-[11px] font-bold text-slate-400 uppercase leading-none">Spent</span>
                            <div className={`flex items-center justify-end gap-0.5 text-[9px] font-bold mt-1 ${cust.trend >= 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
-                              {cust.trend >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                              {cust.trend >= 0 ? <TrendingUp size={14} strokeWidth={1.75} /> : <TrendingDown size={14} strokeWidth={1.75} />}
                               {Math.abs(cust.trend).toFixed(0)}%
                            </div>
                         </div>

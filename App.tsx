@@ -1,3 +1,7 @@
+import { activeStaffProfile } from './utils/staff';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, dbInstance } from './firebaseConfig';
 
 import React, { useState, useEffect } from 'react';
 import { seedInitialData, db, safeStringify } from './db';
@@ -22,19 +26,30 @@ import ErrorBoundary from './components/ErrorBoundary';
 export type Page = 'dashboard' | 'inventory' | 'sales' | 'repairs' | 'reports' | 'expenses' | 'settings' | 'loans' | 'customers';
 
 const App: React.FC = () => {
-  // Initialize user from localStorage immediately to prevent login flash
-  const [user, setUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem('sna_user') || sessionStorage.getItem('sna_user');
-    if (saved) {
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = onAuthStateChanged(auth, async identity => {
       try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error("Invalid session", e);
-        localStorage.removeItem('sna_user');
-      }
-    }
-    return null;
-  });
+        let profile: User | null = null;
+        if (identity) {
+          const snapshot = await getDoc(doc(dbInstance, 'users', identity.uid));
+          if (snapshot.exists()) {
+            profile = activeStaffProfile(snapshot.data(), identity.uid);
+          }
+        }
+        if (active && auth.currentUser?.uid === identity?.uid) {
+          setUser(profile);
+          if (profile) setCurrentPage(profile.role === UserRole.CASHIER ? 'sales' : 'dashboard');
+        }
+      } catch (error) {
+        console.error('Unable to verify staff session', error);
+        if (active) setUser(null);
+      } finally { if (active) setAuthReady(true); }
+    });
+    return () => { active = false; unsubscribe(); };
+  }, []);
 
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
@@ -89,6 +104,8 @@ const App: React.FC = () => {
   const handleLogin = (u: User, rememberMe: boolean = true) => {
     setUser(u);
     // Use safeStringify to prevent circular reference errors if User object contains Firestore/DOM refs
+    localStorage.removeItem('sna_user');
+    sessionStorage.removeItem('sna_user');
     const storage = rememberMe ? localStorage : sessionStorage;
     storage.setItem('sna_user', safeStringify(u));
     if (u.role === UserRole.CASHIER) {
@@ -99,6 +116,7 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    void signOut(auth).catch(error => console.error("Sign out failed", error));
     setUser(null);
     localStorage.removeItem('sna_user');
     sessionStorage.removeItem('sna_user');
@@ -107,7 +125,7 @@ const App: React.FC = () => {
     setCurrentPage('dashboard');
   };
 
-  if (isSystemLoading) {
+  if (isSystemLoading || !authReady) {
     return (
       <div className="fixed inset-0 bg-[#0f111a] flex flex-col items-center justify-center z-[100] overflow-hidden font-sans select-none">
         <div className="absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.02)_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_at_center,black,transparent_80%)]"></div>
@@ -115,7 +133,7 @@ const App: React.FC = () => {
         <div className="relative z-10 flex flex-col items-center animate-in fade-in zoom-in duration-700">
           <div className="relative mb-10">
             <div className="absolute inset-0 bg-rose-500/20 blur-3xl rounded-full"></div>
-            <div className="w-32 h-32 bg-[#13151f] border border-white/10 rounded-[2.5rem] flex items-center justify-center shadow-2xl relative z-10">
+            <div className="w-32 h-32 bg-[#13151f] border border-white/10 rounded-[2.5rem] flex items-center justify-center  relative z-10">
               <img src={brandLogo} alt="SNA Logo" className="w-16 h-16 object-contain" />
             </div>
             {/* Spinner Ring */}
@@ -146,13 +164,13 @@ const App: React.FC = () => {
       case 'expenses': return <Expenses user={user} />;
       case 'customers': return <Customers user={user} />;
       case 'settings': return <Settings user={user} onNavigate={setCurrentPage} onSettingsChange={fetchSettings} />;
-      default: return <Dashboard onNavigate={setCurrentPage} />;
+      default: return <Dashboard onNavigate={setCurrentPage} user={user} />;
     }
   };
 
   return (
     <ToastProvider>
-      <div className="flex h-screen bg-[#f4f7fe] overflow-hidden">
+      <div className="flex h-screen bg-slate-50 overflow-hidden">
         {/* Mobile Backdrop */}
         {isSidebarOpen && (
           <div
@@ -178,9 +196,9 @@ const App: React.FC = () => {
             currentPage={currentPage}
             onMenuToggle={() => setIsSidebarOpen(!isSidebarOpen)}
           />
-          <main className="flex-1 overflow-y-auto p-4 lg:p-10 scrollbar-hide">
+          <main className="flex-1 overflow-y-auto p-4 lg:p-6 scrollbar-hide">
             <div className="max-w-[1600px] mx-auto w-full h-full">
-              <ErrorBoundary>
+              <ErrorBoundary key={currentPage}>
                 {renderPage()}
               </ErrorBoundary>
             </div>

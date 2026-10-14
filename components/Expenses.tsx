@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../db';
 import { Expense, UserRole, User, ExpenseCategory } from '../types';
 import {
@@ -25,6 +25,8 @@ const months = [
 ];
 
 const Expenses: React.FC<ExpensesProps> = ({ user }) => {
+   const saving = useRef(false);
+   const [isSaving, setIsSaving] = useState(false);
    // --- State ---
    const { showToast } = useToast();
    const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -69,6 +71,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
 
    const fetchData = async () => {
       setLoading(true);
+      try {
       const [exp, cats] = await Promise.all([
          db.expenses.toArray(),
          db.expenseCategories.toArray()
@@ -78,7 +81,8 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
       if (cats.length > 0 && !formData.category) {
          setFormData(prev => ({ ...prev, category: cats[0].name }));
       }
-      setLoading(false);
+      } catch (error) { showToast('Could not load expenses. Please refresh and retry.', 'error'); }
+      finally { setLoading(false); }
    };
 
    // --- Dynamic Year List (From 2025 upwards) ---
@@ -150,20 +154,20 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
          ];
       }
 
-      // Status / Debt
-      const budget = totalExpenditure > 0 ? totalExpenditure * 1.25 : 1000000;
-      const remaining = Math.max(0, budget - totalExpenditure);
-      const notifiedAmount = totalExpenditure * 0.15;
-
-      return { totalExpenditure, categoryData, trendData, budget, remaining, notifiedAmount, filteredExpenses: filtered, isYearlyView };
+      return { totalExpenditure, categoryData, trendData, filteredExpenses: filtered, isYearlyView };
    }, [expenses, selectedMonth, selectedYear]);
 
    // --- Handlers ---
    const handleSave = async (e: React.FormEvent) => {
       e.preventDefault();
+      if (saving.current) return;
       if (!formData.description.trim()) return showToast("Description required", 'error');
-      if (Number(formData.amount) <= 0) return showToast("Amount must be positive", 'error');
+      if (!Number.isFinite(formData.amount) || Number(formData.amount) <= 0) return showToast("Amount must be positive", 'error');
 
+      if (!confirm("Save this expense?")) return;
+      saving.current = true;
+      setIsSaving(true);
+      try {
       if (editingId) {
          await db.expenses.update(editingId, formData);
       } else {
@@ -178,16 +182,20 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
       setFormData({ category: categories[0]?.name || '', description: '', amount: 0, date: Date.now() });
       fetchData();
       showToast('Expense saved', 'success');
+      } catch (error) { showToast(error instanceof Error ? error.message : 'Could not save expense.', 'error'); } finally { saving.current = false; setIsSaving(false); }
    };
 
    const executeDelete = async () => {
       if (expenseToDelete?.id) {
+         if (isDeleting) return;
          setIsDeleting(true);
+         try {
          await db.expenses.delete(expenseToDelete.id);
          setExpenseToDelete(null);
          fetchData();
-         setIsDeleting(false);
+
          showToast('Expense deleted', 'success');
+         } catch (error) { showToast('Could not delete expense. Please retry.', 'error'); } finally { setIsDeleting(false); }
       }
    };
 
@@ -205,17 +213,20 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
 
    const confirmDeleteCategory = async () => {
       if (categoryToDelete?.id) {
+         if (isDeleting) return;
          setIsDeleting(true);
+         try {
          await db.expenseCategories.delete(categoryToDelete.id);
          setCategoryToDelete(null);
          fetchData();
-         setIsDeleting(false);
+
          showToast('Category deleted', 'success');
+         } catch (error) { showToast('Could not delete category. Please retry.', 'error'); } finally { setIsDeleting(false); }
       }
    };
 
    return (
-      <div className="h-[calc(100vh-80px)] flex flex-col font-sans text-slate-800 pb-2 relative animate-in">
+      <div className="h-[calc(100vh-80px)] flex flex-col font-sans text-slate-800 pb-2 relative ">
 
          {/* Header Actions */}
          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 px-1 gap-4 shrink-0 no-print">
@@ -230,22 +241,22 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                         <select
                            value={selectedMonth}
                            onChange={(e) => setSelectedMonth(Number(e.target.value))}
-                           className="bg-white border border-slate-200 text-slate-700 text-xs font-bold py-1.5 pl-3 pr-8 rounded-lg outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-200 appearance-none shadow-sm cursor-pointer transition-all"
+                           className="bg-white border border-slate-200 text-slate-700 text-xs font-bold py-1.5 pl-3 pr-8 rounded-lg outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-200 appearance-none  cursor-pointer transition-all"
                         >
                            <option value={-1}>Full Year</option>
                            {months.map((m, i) => <option key={i} value={i}>{m}</option>)}
                         </select>
-                        <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" strokeWidth={1.75} />
                      </div>
                      <div className="relative">
                         <select
                            value={selectedYear}
                            onChange={(e) => setSelectedYear(Number(e.target.value))}
-                           className="bg-white border border-slate-200 text-slate-700 text-xs font-bold py-1.5 pl-3 pr-8 rounded-lg outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-200 appearance-none shadow-sm cursor-pointer transition-all"
+                           className="bg-white border border-slate-200 text-slate-700 text-xs font-bold py-1.5 pl-3 pr-8 rounded-lg outline-none focus:border-rose-500 focus:ring-2 focus:ring-rose-200 appearance-none  cursor-pointer transition-all"
                         >
                            {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
                         </select>
-                        <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                        <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" strokeWidth={1.75} />
                      </div>
                   </div>
                </div>
@@ -254,16 +265,16 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
             <div className="flex items-center gap-2">
                <button
                   onClick={() => exportSectionToPDF('#expense-report-area', 'Expense_Report.pdf')}
-                  className="bg-white border border-slate-200 text-slate-600 p-2.5 rounded-lg hover:bg-slate-50 transition-all shadow-sm"
+                  className="bg-white border border-slate-200 text-slate-600 p-2.5 rounded-lg hover:bg-slate-50 transition-all "
                   title="Download Report"
                >
-                  <Download size={18} />
+                  <Download size={18} strokeWidth={1.75} />
                </button>
                <button
                   onClick={() => setIsCategoryModalOpen(true)}
-                  className="bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-lg flex items-center gap-2 hover:bg-slate-50 transition-all text-sm font-bold shadow-sm"
+                  className="bg-white border border-slate-200 text-slate-600 px-4 py-2.5 rounded-lg flex items-center gap-2 hover:bg-slate-50 transition-all text-sm font-bold "
                >
-                  <Settings size={16} /> Categories
+                  <Settings size={16} strokeWidth={1.75} /> Categories
                </button>
                <button
                   onClick={() => {
@@ -271,9 +282,9 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                      setFormData({ category: categories[0]?.name || '', description: '', amount: 0, date: Date.now() });
                      setIsModalOpen(true);
                   }}
-                  className="bg-rose-600 text-white pl-4 pr-5 py-2.5 rounded-lg shadow-lg shadow-rose-200 flex items-center gap-2 transition-all hover:bg-rose-700 active:scale-95"
+                  className="bg-rose-600 text-white pl-4 pr-5 py-2.5 rounded-lg   flex items-center gap-2 transition-all hover:bg-rose-700 "
                >
-                  <Plus size={18} strokeWidth={2.5} />
+                  <Plus size={18} strokeWidth={1.75} />
                   <span className="font-bold text-sm">New Expense</span>
                </button>
             </div>
@@ -285,13 +296,13 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
             <div className="lg:col-span-4 flex flex-col gap-4 h-full min-h-0">
 
                {/* Total Expenditure Card */}
-               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden shrink-0">
+               <div className="bg-white p-6 rounded-2xl  border border-slate-200 relative overflow-hidden shrink-0">
                   <div className="flex justify-between items-center mb-4">
                      <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">
                         {filteredStats.isYearlyView ? `${selectedYear} Total Spend` : `${months[selectedMonth]} ${selectedYear} Spend`}
                      </span>
                      <div className="p-2 bg-rose-50 rounded-lg text-rose-500">
-                        <Wallet size={18} />
+                        <Wallet size={18} strokeWidth={1.75} />
                      </div>
                   </div>
 
@@ -312,7 +323,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                </div>
 
                {/* Trend Chart - FIXED HEIGHT */}
-               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex-1 min-h-[180px] flex flex-col">
+               <div className="bg-white p-5 rounded-2xl  border border-slate-200 flex-1 min-h-[180px] flex flex-col">
                   <div className="flex justify-between items-center mb-4 shrink-0">
                      <span className="text-sm font-bold text-slate-700">
                         {filteredStats.isYearlyView ? 'Monthly Trend' : 'Weekly Trend'}
@@ -334,7 +345,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                               <YAxis hide domain={['dataMin', 'dataMax + 1000']} />
                               <Tooltip
                                  cursor={{ stroke: '#e2e8f0', strokeWidth: 2 }}
-                                 contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', padding: '8px' }}
+                                 contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: 'none', padding: '8px' }}
                                  itemStyle={{ fontSize: '12px', fontWeight: 'bold', color: '#1e293b' }}
                                  labelStyle={{ fontSize: '10px', color: '#94a3b8', marginBottom: '2px' }}
                                  formatter={(value: any) => [`UGX ${Number(value).toLocaleString()}`, 'Amount']}
@@ -354,7 +365,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                </div>
 
                {/* Recent Expenses List */}
-               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col h-[240px] shrink-0">
+               <div className="bg-white p-5 rounded-2xl  border border-slate-200 flex flex-col h-[240px] shrink-0">
                   <div className="flex justify-between items-center mb-4">
                      <h3 className="text-sm font-bold text-slate-700">Recent Transactions</h3>
                      <button onClick={() => setIsHistoryModalOpen(true)} className="text-xs font-bold text-rose-500 hover:bg-rose-50 px-2 py-1 rounded transition-colors">View All</button>
@@ -364,7 +375,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                         <div key={expense.id} className="flex items-center justify-between group">
                            <div className="flex items-center gap-3 overflow-hidden">
                               <div className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0 text-slate-400">
-                                 <FileText size={16} />
+                                 <FileText size={16} strokeWidth={1.75} />
                               </div>
                               <div className="min-w-0">
                                  <p className="text-xs font-bold text-slate-800 truncate">{expense.description}</p>
@@ -380,14 +391,14 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                                  <p className="text-xs font-bold text-slate-900">{Number(expense.amount).toLocaleString()}</p>
                               </div>
                               <button onClick={() => setExpenseToDelete(expense)} className="p-1.5 text-slate-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100">
-                                 <Trash2 size={12} />
+                                 <Trash2 size={14} strokeWidth={1.75} />
                               </button>
                            </div>
                         </div>
                      ))}
                      {expenses.length === 0 && (
                         <div className="text-center py-8 text-slate-300">
-                           <Check size={24} className="mx-auto mb-1 opacity-50" />
+                           <Check size={24} className="mx-auto mb-1 opacity-50" strokeWidth={1.75} />
                            <p className="text-xs font-bold">No recent expenses</p>
                         </div>
                      )}
@@ -400,7 +411,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
             <div className="lg:col-span-8 flex flex-col gap-4 h-full min-h-0">
 
                {/* Expense Category Breakdown - FIXED HEIGHT */}
-               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex-[3] min-h-[200px] flex flex-col">
+               <div className="bg-white p-6 rounded-2xl  border border-slate-200 flex-[3] min-h-[200px] flex flex-col">
                   <div className="flex justify-between items-center mb-4 shrink-0">
                      <div>
                         <span className="text-sm font-bold text-slate-700">Expense Breakdown</span>
@@ -433,7 +444,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                               </Pie>
                               <Tooltip
                                  formatter={(value: any) => [`UGX ${Number(value).toLocaleString()}`, 'Total']}
-                                 contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', fontSize: '12px', fontWeight: 'bold' }}
+                                 contentStyle={{ borderRadius: '8px', border: '1px solid #e2e8f0', boxShadow: 'none', fontSize: '12px', fontWeight: 'bold' }}
                               />
                            </PieChart>
                         </ResponsiveContainer>
@@ -446,7 +457,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                      {/* Detailed Table */}
                      <div className="flex-1 h-full w-full overflow-y-auto pr-2 custom-scrollbar">
                         <table className="w-full text-left border-collapse">
-                           <thead className="sticky top-0 bg-white z-10 shadow-sm shadow-slate-100">
+                           <thead className="sticky top-0 bg-white z-10  ">
                               <tr>
                                  <th className="pb-3 pt-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-2">Category Name</th>
                                  <th className="pb-3 pt-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right">Total Amount</th>
@@ -487,43 +498,10 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                   </div>
                </div>
 
-               {/* Financial Health - Squeezed Dashboard - FIXED HEIGHT */}
-               <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex-[1] min-h-[140px] flex flex-col justify-center shrink-0">
-                  <div className="flex flex-row justify-around items-center h-full gap-8">
-
-                     {/* Gauge 1 */}
-                     <div className="flex items-center gap-4 w-full justify-center">
-                        <div className="w-24 h-12 relative flex justify-center">
-                           <ResponsiveContainer width="100%" height={100} minWidth={0} minHeight={0}>
-                              <PieChart>
-                                 <Pie
-                                    data={[{ value: filteredStats.remaining }, { value: filteredStats.totalExpenditure }]}
-                                    dataKey="value"
-                                    startAngle={180}
-                                    endAngle={0}
-                                    innerRadius={35}
-                                    outerRadius={45}
-                                    stroke="none"
-                                 >
-                                    <Cell fill={filteredStats.remaining > 0 ? '#10b981' : '#e2e8f0'} />
-                                    <Cell fill={filteredStats.remaining > 0 ? '#e2e8f0' : '#ef4444'} />
-                                 </Pie>
-                              </PieChart>
-                           </ResponsiveContainer>
-                           <div className="absolute top-6 flex flex-col items-center">
-                              <span className="text-[10px] font-bold text-slate-400 uppercase">Remaining</span>
-                              <span className={`text-sm font-black ${filteredStats.remaining < 0 ? 'text-red-500' : 'text-emerald-600'}`}>
-                                 {(filteredStats.remaining / 1000).toFixed(0)}k
-                              </span>
-                           </div>
-                        </div>
-
-                        <div className="text-center mt-2">
-                           <p className="text-[10px] text-slate-400 font-bold uppercase">Target Limit</p>
-                           <p className="text-xs font-bold text-slate-900">{(filteredStats.budget / 1000000).toFixed(2)}M</p>
-                        </div>
-                     </div>
-                  </div>
+               <div className="bg-white p-4 rounded-lg border border-slate-200 text-sm text-slate-600">
+                  <p className="font-semibold text-slate-900">Recorded expenses</p>
+                  <p className="mt-2">{filteredStats.filteredExpenses.length} entries across {filteredStats.categoryData.length} categories in this period.</p>
+                  <p className="mt-2">Total paid: UGX {filteredStats.totalExpenditure.toLocaleString()}</p>
                </div>
 
             </div>
@@ -549,7 +527,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                      >
                         {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
                      </select>
-                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                     <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} strokeWidth={1.75} />
                   </div>
                </div>
 
@@ -582,13 +560,13 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                      type="date"
                      required
                      className="win-input h-10 font-bold"
-                     value={new Date(formData.date).toISOString().split('T')[0]}
+                     value={Number.isFinite(formData.date) ? new Date(formData.date).toISOString().split('T')[0] : ''}
                      onChange={e => setFormData({ ...formData, date: new Date(e.target.value).getTime() })}
                   />
                </div>
 
-               <button className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all mt-2">
-                  {editingId ? 'Update Expense' : 'Record Expense'}
+               <button disabled={isSaving} aria-busy={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm  hover:bg-black transition-all mt-2">
+                  {isSaving ? 'Saving…' : editingId ? 'Update Expense' : 'Record Expense'}
                </button>
             </form>
          </Modal>
@@ -614,7 +592,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                         onClick={handleAddCategory}
                         className="bg-slate-900 text-white px-3 rounded-lg hover:bg-black transition-colors"
                      >
-                        <Plus size={16} />
+                        <Plus size={16} strokeWidth={1.75} />
                      </button>
                   </div>
                </div>
@@ -627,7 +605,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                            onClick={() => setCategoryToDelete(cat)}
                            className="text-slate-300 hover:text-red-500 transition-colors"
                         >
-                           <Trash2 size={14} />
+                           <Trash2 size={14} strokeWidth={1.75} />
                         </button>
                      </div>
                   ))}
@@ -651,7 +629,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
             <div className="flex flex-col max-h-[90vh]">
                <div className="p-4 bg-slate-50 border-b border-slate-100 flex items-center gap-4">
                   <div className="relative flex-1">
-                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} strokeWidth={1.75} />
                      <input
                         className="w-full pl-9 h-10 bg-white border border-slate-200 rounded-lg text-xs font-bold focus:outline-none focus:border-slate-300"
                         placeholder="Search description or category..."
@@ -663,7 +641,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
 
                <div className="flex-1 overflow-y-auto">
                   <table className="w-full text-left border-collapse">
-                     <thead className="bg-white sticky top-0 z-10 border-b border-slate-100 shadow-sm">
+                     <thead className="bg-white sticky top-0 z-10 border-b border-slate-100 ">
                         <tr>
                            <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
                            <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Description</th>
@@ -708,14 +686,14 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                                        }}
                                        className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
                                     >
-                                       <Edit2 size={14} />
+                                       <Edit2 size={14} strokeWidth={1.75} />
                                     </button>
                                     <button
                                        onClick={() => setExpenseToDelete(expense)}
                                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
                                        title="Delete Expense"
                                     >
-                                       <Trash2 size={14} />
+                                       <Trash2 size={14} strokeWidth={1.75} />
                                     </button>
                                  </div>
                               </td>
@@ -737,7 +715,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
             {expenseToDelete && (
                <div className="p-8 text-center space-y-6">
                   <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                     <AlertTriangle size={40} strokeWidth={2} />
+                     <AlertTriangle size={32} strokeWidth={1.75} />
                   </div>
                   <div>
                      <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Confirm Deletion</h3>
@@ -747,8 +725,8 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                      <button onClick={() => setExpenseToDelete(null)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                     <button onClick={executeDelete} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2">
-                        {isDeleting ? <Loader2 className="animate-spin" size={14} /> : null} {isDeleting ? 'Deleting...' : 'Delete'}
+                     <button onClick={executeDelete} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest   hover:bg-red-700 transition-all flex items-center justify-center gap-2">
+                        {isDeleting ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : null} {isDeleting ? 'Deleting...' : 'Delete'}
                      </button>
                   </div>
                </div>
@@ -765,7 +743,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
             {categoryToDelete && (
                <div className="p-8 text-center space-y-6">
                   <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                     <AlertTriangle size={40} strokeWidth={2} />
+                     <AlertTriangle size={32} strokeWidth={1.75} />
                   </div>
                   <div>
                      <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Remove Category</h3>
@@ -775,8 +753,8 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                      <button onClick={() => setCategoryToDelete(null)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                     <button onClick={confirmDeleteCategory} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2">
-                        {isDeleting ? <Loader2 className="animate-spin" size={14} /> : null} {isDeleting ? 'Deleting...' : 'Delete'}
+                     <button onClick={confirmDeleteCategory} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest   hover:bg-red-700 transition-all flex items-center justify-center gap-2">
+                        {isDeleting ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : null} {isDeleting ? 'Deleting...' : 'Delete'}
                      </button>
                   </div>
                </div>

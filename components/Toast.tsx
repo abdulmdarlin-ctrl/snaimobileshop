@@ -37,17 +37,17 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                 {toasts.map((toast) => (
                     <div
                         key={toast.id}
-                        className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg border animate-in slide-in-from-right-5 fade-in duration-300 ${toast.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' :
+                        className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl  border    duration-300 ${toast.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' :
                             toast.type === 'error' ? 'bg-red-50 border-red-100 text-red-800' :
                                 'bg-white border-slate-100 text-slate-800'
                             }`}
                     >
-                        {toast.type === 'success' && <CheckCircle size={18} className="text-emerald-500" />}
-                        {toast.type === 'error' && <AlertCircle size={18} className="text-red-500" />}
-                        {toast.type === 'info' && <Info size={18} className="text-blue-500" />}
+                        {toast.type === 'success' && <CheckCircle size={18} className="text-emerald-500" strokeWidth={1.75} />}
+                        {toast.type === 'error' && <AlertCircle size={18} className="text-red-500" strokeWidth={1.75} />}
+                        {toast.type === 'info' && <Info size={18} className="text-blue-500" strokeWidth={1.75} />}
                         <p className="text-sm font-bold">{toast.message}</p>
                         <button onClick={() => removeToast(toast.id)} className="ml-2 opacity-50 hover:opacity-100">
-                            <X size={14} />
+                            <X size={14} strokeWidth={1.75} />
                         </button>
                     </div>
                 ))}

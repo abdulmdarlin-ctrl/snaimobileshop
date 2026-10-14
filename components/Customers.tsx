@@ -1,17 +1,19 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../db';
 import { User, UserRole, Customer, CustomerCategory, CustomerStatus, Sale, AppSettings } from '../types';
 import {
     Search, Edit2, Trash2, X, Users,
-    Plus, Play, CheckCircle2, AlertCircle,
-    Filter, Download, Mail,
-    TrendingUp, Award, Clock, ChevronLeft, ChevronRight, User as UserIcon,
+    CheckCircle2, AlertCircle,
+    Download, Mail,
+    TrendingUp, ChevronLeft, ChevronRight, User as UserIcon,
     Printer, FileText, MessageCircle, UserPlus, Phone, MapPin, Tag,
-    ChevronDown, RefreshCw, Star
+    ChevronDown, RefreshCw, BadgeCheck
 } from 'lucide-react';
 import { useToast } from './Toast';
 import Modal from './Modal';
 import { printSection } from '../utils/printExport';
+import { escapeCustomerCSVCell, getCustomerSales, normalizeCustomerPhone } from '../utils/customers';
+import { outstandingAmount, getSaleType } from '../utils/pos';
 
 interface CustomersProps { user: User; }
 
@@ -20,6 +22,13 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilter, setStatusFilter] = useState<CustomerStatus | ''>('');
+    const [loadError, setLoadError] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+    const savingRef = useRef(false);
+    const requestRef = useRef(0);
+    const statementRequestRef = useRef(0);
+    const [statementLoading, setStatementLoading] = useState(false);
 
     // Pagination State
     const [currentPage, setCurrentPage] = useState(1);
@@ -37,7 +46,6 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
     const [isStatementModalOpen, setIsStatementModalOpen] = useState(false);
     const [selectedCustomerForStatement, setSelectedCustomerForStatement] = useState<Customer | null>(null);
     const [customerSales, setCustomerSales] = useState<Sale[]>([]);
-    const [isPrinting, setIsPrinting] = useState(false);
     const [settings, setSettings] = useState<AppSettings | null>(null);
 
     useEffect(() => {
@@ -48,26 +56,38 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
     // Reset page when filters change
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm]);
+    }, [searchTerm, statusFilter]);
 
     const fetchData = async () => {
-        const [custData, salesData] = await Promise.all([
-            db.customers.toArray(),
-            db.sales.toArray()
-        ]);
+        const request = ++requestRef.current;
+        setLoading(true);
+        setLoadError(false);
+        try {
+            const [custData, salesData] = await Promise.all([
+                db.customers.toArray(),
+                db.sales.toArray()
+            ]);
 
-        const enriched = custData.map(c => {
-            const cSales = salesData.filter(s => s.customerPhone === c.phone || s.customerName === c.name);
-            return {
-                ...c,
-                totalSpending: cSales.reduce((sum, s) => sum + s.total, 0),
-                visitCount: cSales.length,
-                loyaltyPoints: Math.floor(cSales.length / 5)
-            };
-        }) as Customer[];
+            const enriched = custData.map(c => {
+                const cSales = getCustomerSales(salesData, c, custData);
+                return {
+                    ...c,
+                    totalSpending: cSales.reduce((sum, s) => sum + s.total, 0),
+                    visitCount: cSales.length,
+                    balance: cSales.reduce((sum, sale) => sum + outstandingAmount(sale), 0),
+                    loyaltyPoints: Math.floor(cSales.length / 5)
+                };
+            }) as Customer[];
 
-        setCustomers(enriched.sort((a, b) => b.joinedDate - a.joinedDate)); // Newest first
-        setLoading(false);
+            if (request === requestRef.current) setCustomers(enriched.sort((a, b) => b.joinedDate - a.joinedDate));
+        } catch {
+            if (request === requestRef.current) {
+                setLoadError(true);
+                showToast('Could not load customers. Please refresh to retry.', 'error');
+            }
+        } finally {
+            if (request === requestRef.current) setLoading(false);
+        }
     };
 
     const fetchSettings = async () => {
@@ -76,11 +96,28 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
+      if (!confirm("Save this customer profile?")) return;
+        if (savingRef.current) return;
+        const name = (formData.name || '').trim();
+        const phone = (formData.phone || '').trim();
+        if (!name || !normalizeCustomerPhone(phone)) {
+            showToast('Enter a customer name and a valid phone number.', 'error');
+            return;
+        }
+        if (customers.some(c => c.id !== editingCustomer?.id && normalizeCustomerPhone(c.phone) === normalizeCustomerPhone(phone))) {
+            showToast('A customer with this phone number already exists.', 'error');
+            return;
+        }
+        savingRef.current = true;
+        setIsSaving(true);
         try {
             const payload = {
-                ...formData,
-                name: formData.name!,
-                phone: formData.phone || '',
+                name,
+                phone,
+                email: (formData.email || '').trim(),
+                address: (formData.address || '').trim(),
+                category: formData.category || CustomerCategory.RETAIL,
+                status: formData.status || CustomerStatus.ACTIVE,
                 joinedDate: editingCustomer ? editingCustomer.joinedDate : Date.now()
             } as Customer;
 
@@ -91,19 +128,27 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
             }
             setIsModalOpen(false);
             setEditingCustomer(null);
-            fetchData();
             showToast('Client saved successfully', 'success');
+            await fetchData();
         } catch (e) { showToast('Failed to save', 'error'); }
+        finally { savingRef.current = false; setIsSaving(false); }
     };
 
     const handleViewStatement = async (customer: Customer) => {
-        setLoading(true);
-        const allSales = await db.sales.toArray();
-        const sales = allSales.filter(s => s.customerPhone === customer.phone || s.customerName === customer.name);
-        setCustomerSales(sales.sort((a, b) => b.timestamp - a.timestamp));
-        setSelectedCustomerForStatement(customer);
-        setIsStatementModalOpen(true);
-        setLoading(false);
+        const request = ++statementRequestRef.current;
+        setStatementLoading(true);
+        try {
+            const allSales = await db.sales.toArray();
+            if (request !== statementRequestRef.current) return;
+            const sales = getCustomerSales(allSales, customer, customers);
+            setCustomerSales(sales.sort((a, b) => b.timestamp - a.timestamp));
+            setSelectedCustomerForStatement(customer);
+            setIsStatementModalOpen(true);
+        } catch {
+            if (request === statementRequestRef.current) showToast('Could not load the customer statement. Please try again.', 'error');
+        } finally {
+            if (request === statementRequestRef.current) setStatementLoading(false);
+        }
     };
 
     useEffect(() => {
@@ -127,6 +172,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
         message += `*Customer:* ${selectedCustomerForStatement.name}\n`;
         message += `*Total Transactions:* ${customerSales.length}\n`;
         message += `*Total Spent:* ${totalSpent} UGX\n\n`;
+        message += `*Outstanding:* ${customerSales.reduce((sum, sale) => sum + outstandingAmount(sale), 0).toLocaleString()} UGX\n\n`;
         message += `*Recent Purchases:*\n`;
 
         customerSales.slice(0, 10).forEach(sale => {
@@ -140,20 +186,23 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
         message += `\n\nThank you for your continued business!`;
 
         const encodedMessage = encodeURIComponent(message);
-        const phone = selectedCustomerForStatement.phone.replace(/\D/g, '');
-        window.open(`https://wa.me/${phone}?text=${encodedMessage}`, '_blank');
+        const phone = normalizeCustomerPhone(selectedCustomerForStatement.phone);
+        if (!phone) return showToast('This customer has no phone number.', 'error');
+        window.open(`https://wa.me/${phone}?text=${encodedMessage}`, '_blank', 'noopener,noreferrer');
     };
 
     const handleDelete = async (id: string) => {
         if (!confirm('Are you sure?')) return;
-        await db.customers.delete(id);
-        fetchData();
-        showToast('Client removed', 'success');
+        try {
+            await db.customers.delete(id);
+            showToast('Client removed', 'success');
+            await fetchData();
+        } catch { showToast('Failed to remove client. Please try again.', 'error'); }
     };
 
     const exportCustomersToCSV = () => {
         if (customers.length === 0) return showToast("No data to export", 'info');
-        const headers = ['Name', 'Phone', 'Email', 'Category', 'Status', 'Joined Date', 'Total Spent', 'Visits', 'Loyalty Points'];
+        const headers = ['Name', 'Phone', 'Email', 'Category', 'Status', 'Joined Date', 'Total Spent', 'Visits', 'Loyalty Points', 'Outstanding'];
         const rows = customers.map(c => [
             c.name,
             c.phone,
@@ -163,28 +212,36 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
             new Date(c.joinedDate).toLocaleDateString(),
             c.totalSpending || 0,
             c.visitCount || 0,
-            c.loyaltyPoints || 0
+            c.loyaltyPoints || 0,
+            c.balance || 0
         ]);
-        const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const csvContent = [headers, ...rows].map(row => row.map(escapeCustomerCSVCell).join(',')).join('\r\n');
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
         link.download = `Customers_Report_${new Date().toISOString().split('T')[0]}.csv`;
         link.click();
-        URL.revokeObjectURL(url);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
         showToast('Exported successfully', 'success');
     };
 
     // Filter Logic
     const filteredCustomers = useMemo(() => {
         return customers.filter(c => {
-            return c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.phone.includes(searchTerm);
+            const query = searchTerm.trim().toLowerCase();
+            return (!statusFilter || c.status === statusFilter) && (
+                (c.name || '').toLowerCase().includes(query) || (c.phone || '').includes(query)
+                || (c.email || '').toLowerCase().includes(query)
+            );
         });
-    }, [customers, searchTerm]);
+    }, [customers, searchTerm, statusFilter]);
 
     // Pagination Logic
     const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+    useEffect(() => {
+        setCurrentPage(page => Math.min(page, Math.max(1, totalPages)));
+    }, [totalPages]);
     const paginatedCustomers = useMemo(() => {
         const start = (currentPage - 1) * itemsPerPage;
         return filteredCustomers.slice(start, start + itemsPerPage);
@@ -199,32 +256,31 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
     const blacklistedCount = useMemo(() => customers.filter(c => c.status === CustomerStatus.BLACKLISTED).length, [customers]);
 
     return (
-        <div className="min-h-screen bg-slate-50 p-4 lg:p-6 space-y-6 animate-in fade-in font-sans pb-24">
+        <div className="min-h-screen bg-slate-50 p-4 lg:p-6 space-y-6   font-sans pb-24">
 
             {/* --- TOP SECTION: QUICK ACTIONS & STATS --- */}
             <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
 
                 {/* 1. Quick Action Card (Col Span 5) */}
-                <div className="xl:col-span-5 bg-white p-4 rounded-3xl shadow-sm border border-slate-100 flex flex-col justify-between relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-slate-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110"></div>
+                <div className="xl:col-span-5 bg-white p-4 rounded-3xl  border border-slate-100 flex flex-col justify-between relative overflow-hidden group">
 
                     <div className="relative z-10 mb-4">
                         <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                            Quick Action <span className="text-slate-400 font-normal text-[11px] uppercase tracking-normal">Manage Clients</span>
+                            Customer actions
                         </h2>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 relative z-10">
-                        <button onClick={() => { setEditingCustomer(null); setFormData({ category: CustomerCategory.RETAIL, status: CustomerStatus.ACTIVE }); setIsModalOpen(true); }} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-blue-50 text-blue-600 hover:bg-blue-600 hover:text-white transition-all duration-300 shadow-sm hover:shadow-blue-200 active:scale-95">
-                            <UserPlus size={20} strokeWidth={2.5} />
+                    <div className="grid grid-cols-3 gap-3 relative z-10">
+                        <button onClick={() => { setEditingCustomer(null); setFormData({ category: CustomerCategory.RETAIL, status: CustomerStatus.ACTIVE }); setIsModalOpen(true); }} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-slate-900 text-white hover:bg-slate-800 transition-all duration-300   ">
+                            <UserPlus size={20} strokeWidth={1.75} />
                             <span className="text-[11px] font-bold uppercase">Add New</span>
                         </button>
-                        <button onClick={exportCustomersToCSV} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-all duration-300 shadow-sm hover:shadow-emerald-200 active:scale-95">
-                            <Download size={20} strokeWidth={2.5} />
+                        <button onClick={exportCustomersToCSV} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all duration-300   ">
+                            <Download size={20} strokeWidth={1.75} />
                             <span className="text-[11px] font-bold uppercase">Export</span>
                         </button>
-                        <button onClick={() => { setLoading(true); fetchData(); }} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-slate-50 text-slate-600 hover:bg-slate-900 hover:text-white transition-all duration-300 shadow-sm hover:shadow-slate-200 active:scale-95">
-                            <RefreshCw size={20} strokeWidth={2.5} className={loading ? 'animate-spin' : ''} />
+                        <button onClick={fetchData} disabled={loading} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-slate-50 text-slate-600 hover:bg-slate-900 hover:text-white transition-all duration-300    disabled:opacity-50">
+                            <RefreshCw size={20} className={loading ? 'animate-spin' : ''} strokeWidth={1.75} />
                             <span className="text-[11px] font-bold uppercase">Refresh</span>
                         </button>
                     </div>
@@ -233,22 +289,19 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                 {/* 2. Stats Tickers (Col Span 7) */}
                 <div className="xl:col-span-7 grid grid-cols-1 md:grid-cols-3 gap-4">
                     {[
-                        { label: 'Total Clients', value: customers.length, icon: Users, color: 'text-blue-600', bg: 'bg-blue-50', trend: '+2.5%' },
-                        { label: 'Loyalty Points', value: customers.reduce((a, c) => a + (c.loyaltyPoints || 0), 0).toLocaleString(), icon: Star, color: 'text-amber-600', bg: 'bg-amber-50', trend: 'Active' },
-                        { label: 'Total Revenue', value: `${(customers.reduce((a, c) => a + (c.totalSpending || 0), 0) / 1000000).toFixed(1)}M`, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50', trend: '+12%' },
+                        { label: 'Total Clients', value: customers.length, icon: Users, color: 'text-slate-600', bg: 'bg-slate-50' },
+                        { label: 'Loyalty Points', value: customers.reduce((a, c) => a + (c.loyaltyPoints || 0), 0).toLocaleString(), icon: BadgeCheck, color: 'text-slate-600', bg: 'bg-slate-50' },
+                        { label: 'Total Revenue', value: `${(customers.reduce((a, c) => a + (c.totalSpending || 0), 0) / 1000000).toFixed(1)}M`, icon: TrendingUp, color: 'text-slate-600', bg: 'bg-slate-50' },
                     ].map((stat, i) => (
-                        <div key={i} className="bg-white p-3.5 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between">
+                        <div key={i} className="bg-white p-3.5 rounded-3xl  border border-slate-100 flex items-center justify-between">
                             <div className="flex items-center gap-3">
                                 <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${stat.bg} ${stat.color}`}>
-                                    <stat.icon size={20} />
+                                    <stat.icon size={20} strokeWidth={1.75} />
                                 </div>
                                 <div>
                                     <p className="text-xl font-bold text-slate-900">{stat.value}</p>
                                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-tight">{stat.label}</p>
                                 </div>
-                            </div>
-                            <div className="flex flex-col items-end">
-                                <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">{stat.trend}</span>
                             </div>
                         </div>
                     ))}
@@ -262,39 +315,40 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                 {/* LEFT PANEL: TABLE (Cols 8) */}
                 <div className="xl:col-span-8 space-y-4">
                     {blacklistedCount > 0 && (
-                        <div className="bg-rose-50 border border-rose-100 p-4 rounded-[2rem] flex items-center justify-between animate-in slide-in-from-top-4 shadow-sm">
+                        <div className="bg-rose-50 border border-rose-100 p-4 rounded-[2rem] flex items-center justify-between   ">
                             <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center shadow-lg shadow-rose-200 animate-bounce">
-                                    <AlertCircle size={24} strokeWidth={3} />
+                                <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center   ">
+                                    <AlertCircle size={24} strokeWidth={1.75} />
                                 </div>
                                 <div>
-                                    <p className="text-sm font-black text-rose-900 uppercase tracking-tight">Security Alert</p>
+                                    <p className="text-sm font-black text-rose-900 uppercase tracking-tight">Blacklisted customers</p>
                                     <p className="text-xs text-rose-600 font-medium">You have <span className="font-bold">{blacklistedCount} blacklisted</span> clients that require attention.</p>
                                 </div>
                             </div>
-                            <button onClick={() => setSearchTerm('Blacklisted')} className="px-5 py-2.5 bg-rose-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all shadow-xl shadow-rose-900/20 active:scale-95">
+                            <button onClick={() => { setSearchTerm(''); setStatusFilter(CustomerStatus.BLACKLISTED); }} className="px-5 py-2.5 bg-rose-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all   ">
                                 Review List
                             </button>
                         </div>
                     )}
 
-                    <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden flex flex-col">
+                    <div className="bg-white rounded-3xl  border border-slate-100 overflow-hidden flex flex-col">
 
                         {/* Header & Tabs */}
                         <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                             <div>
                                 <h3 className="text-base font-bold text-slate-800">Client Directory</h3>
-                                <p className="text-xs text-slate-400 font-normal mt-0.5">Management Overview</p>
+                                <p className="text-xs text-slate-400 font-normal mt-0.5">Contact details and purchase history</p>
                             </div>
                         </div>
 
                         {/* Search Bar (Optional inline) */}
-                        <div className="px-4 py-3 border-b border-slate-50 bg-slate-50/30">
+                        <div className="px-4 py-3 border-b border-slate-50 bg-slate-50/30 flex flex-wrap gap-3">
                             <div className="relative max-w-xs">
-                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} strokeWidth={1.75} />
                                 <input
-                                    className="w-full pl-8 pr-8 h-10 bg-white border border-slate-100/50 rounded-xl text-xs font-normal focus:ring-2 focus:ring-blue-100 outline-none shadow-sm"
-                                    placeholder="Search client name..."
+                                    className="w-full pl-8 pr-8 h-10 bg-white border border-slate-100/50 rounded-xl text-xs font-normal focus:ring-2 focus:ring-blue-100 outline-none "
+                                    aria-label="Search customers"
+                                    placeholder="Search name, phone or email..."
                                     value={searchTerm}
                                     onChange={e => setSearchTerm(e.target.value)}
                                 />
@@ -303,11 +357,17 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                         onClick={() => setSearchTerm('')}
                                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"
                                     >
-                                        <X size={14} />
+                                        <X size={14} strokeWidth={1.75} />
                                     </button>
                                 )}
                             </div>
+                            <select aria-label="Filter customers by status" value={statusFilter} onChange={e => setStatusFilter(e.target.value as CustomerStatus | '')} className="h-10 px-3 bg-white border border-slate-100 rounded-xl text-xs">
+                                <option value="">All statuses</option>
+                                {Object.values(CustomerStatus).map(status => <option key={status} value={status}>{status}</option>)}
+                            </select>
                         </div>
+                        {loadError && <p role="alert" className="px-4 py-3 text-sm text-red-600">Unable to refresh customer data. Use Refresh to retry.</p>}
+                        {loading && <p role="status" className="px-4 py-3 text-sm text-slate-500">Loading customers...</p>}
 
                         {/* Table */}
                         <div className="flex-1 overflow-x-auto">
@@ -349,7 +409,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                             </td>
                                             <td className="py-4">
                                                 <div className="flex items-center gap-1 text-amber-600 font-bold text-sm">
-                                                    <Star size={12} fill="currentColor" />
+                                                    <BadgeCheck size={14} strokeWidth={1.75} />
                                                     {c.loyaltyPoints || 0}
                                                 </div>
                                             </td>
@@ -358,56 +418,57 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                             </td>
                                             <td className="pr-4 py-4">
                                                 <div className="flex flex-col gap-1">
-                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase w-fit flex items-center gap-1.5 shadow-sm ${c.status === CustomerStatus.ACTIVE ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
-                                                        c.status === CustomerStatus.BLACKLISTED ? 'bg-rose-600 text-white shadow-rose-200' :
+                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase w-fit flex items-center gap-1.5  ${c.status === CustomerStatus.ACTIVE ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
+                                                        c.status === CustomerStatus.BLACKLISTED ? 'bg-rose-600 text-white ' :
                                                             'bg-slate-100 text-slate-400'
                                                         }`}>
-                                                        {c.status === CustomerStatus.BLACKLISTED && <AlertCircle size={12} strokeWidth={3} />}
+                                                        {c.status === CustomerStatus.BLACKLISTED && <AlertCircle size={14} strokeWidth={1.75} />}
                                                         {c.status}
                                                     </span>
                                                     {(c.loyaltyPoints || 0) >= 1 && (
-                                                        <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-gradient-to-r from-amber-400 to-orange-500 text-white shadow-sm shadow-amber-200 w-fit flex items-center gap-1 animate-pulse">
-                                                            <Star size={10} fill="currentColor" />
+                                                        <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-amber-50 text-amber-700   w-fit flex items-center gap-1 ">
+                                                            <BadgeCheck size={14} strokeWidth={1.75} />
                                                             Loyal Client
                                                         </span>
                                                     )}
                                                 </div>
                                             </td>
                                             <td className="pr-4 py-4 text-right">
-                                                <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <div className="flex justify-end gap-2">
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); handleViewStatement(c); }}
-                                                        className="p-1.5 text-slate-400 hover:text-blue-600 bg-white border border-slate-200 rounded-lg shadow-sm transition-colors"
+                                                        className="p-1.5 text-slate-400 hover:text-blue-600 bg-white border border-slate-200 rounded-lg  transition-colors"
                                                         title="Statement"
+                                                        disabled={statementLoading}
                                                     >
-                                                        <FileText size={14} />
+                                                        <FileText size={14} strokeWidth={1.75} />
                                                     </button>
                                                     <button
                                                         onClick={(e) => { e.stopPropagation(); setEditingCustomer(c); setFormData(c); setIsModalOpen(true); }}
-                                                        className="p-1.5 text-slate-400 hover:text-indigo-600 bg-white border border-slate-200 rounded-lg shadow-sm transition-colors"
+                                                        className="p-1.5 text-slate-400 hover:text-indigo-600 bg-white border border-slate-200 rounded-lg  transition-colors"
                                                         title="Edit"
                                                     >
-                                                        <Edit2 size={14} />
+                                                        <Edit2 size={14} strokeWidth={1.75} />
                                                     </button>
                                                     {user.role === UserRole.ADMIN && (
                                                         <button
                                                             onClick={(e) => { e.stopPropagation(); handleDelete(c.id!); }}
-                                                            className="p-1.5 text-slate-400 hover:text-red-600 bg-white border border-slate-200 rounded-lg shadow-sm transition-colors"
+                                                            className="p-1.5 text-slate-400 hover:text-red-600 bg-white border border-slate-200 rounded-lg  transition-colors"
                                                             title="Delete"
                                                         >
-                                                            <Trash2 size={14} />
+                                                            <Trash2 size={14} strokeWidth={1.75} />
                                                         </button>
                                                     )}
                                                 </div>
                                             </td>
                                         </tr>
                                     ))}
-                                    {paginatedCustomers.length === 0 && (
+                                    {!loading && !loadError && paginatedCustomers.length === 0 && (
                                         <tr>
-                                            <td colSpan={6} className="py-20 text-center">
+                                            <td colSpan={7} className="py-20 text-center">
                                                 <div className="flex flex-col items-center justify-center text-slate-300">
-                                                    <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mb-6 border border-slate-100 shadow-inner">
-                                                        <Users size={40} className="text-slate-200" />
+                                                    <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mb-6 border border-slate-100 ">
+                                                        <Users size={32} className="text-slate-200" strokeWidth={1.75} />
                                                     </div>
                                                     <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-400">No clients found</p>
                                                     <p className="text-xs font-medium text-slate-400 mt-2">Try adjusting your search or filters</p>
@@ -428,7 +489,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                             onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                                             className="w-8 h-8 rounded-lg flex items-center justify-center border border-slate-100 bg-white text-slate-400 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                                         >
-                                            <ChevronLeft size={16} />
+                                            <ChevronLeft size={16} strokeWidth={1.75} />
                                         </button>
 
                                         {[...Array(totalPages)].map((_, i) => (
@@ -446,7 +507,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                             onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                                             className="w-8 h-8 rounded-lg flex items-center justify-center border border-slate-100 bg-white text-slate-400 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                                         >
-                                            <ChevronRight size={16} />
+                                            <ChevronRight size={16} strokeWidth={1.75} />
                                         </button>
                                     </div>
                                 </div>
@@ -459,17 +520,17 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                 {/* RIGHT PANEL: WIDGETS (Cols 4) */}
                 <div className="xl:col-span-4 space-y-6">
 
-                    {/* Widget 2: Recent Activity (List) */}
-                    <div className="bg-white rounded-3xl shadow-sm border border-slate-100 p-4 flex-1">
+                    {/* Widget 2: Recently added (List) */}
+                    <div className="bg-white rounded-3xl  border border-slate-100 p-4 flex-1">
                         <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-base font-bold text-slate-800">Recent Activity</h3>
+                            <h3 className="text-base font-bold text-slate-800">Recently added</h3>
                             <span className="bg-slate-50 text-slate-400 text-xs font-normal px-1.5 py-0.5 rounded-lg">Last 5</span>
                         </div>
                         <div className="space-y-4">
                             {stats.recent.map((c, i) => (
-                                <div key={c.id} className="flex items-start gap-3 p-2 hover:bg-slate-50 rounded-xl transition-colors cursor-pointer group">
+                                <button type="button" key={c.id} onClick={() => handleViewStatement(c)} disabled={statementLoading} className="w-full text-left flex items-start gap-3 p-2 hover:bg-slate-50 rounded-xl transition-colors cursor-pointer group">
                                     <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 shrink-0 group-hover:bg-white transition-colors">
-                                        <UserIcon size={14} />
+                                        <UserIcon size={14} strokeWidth={1.75} />
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <p className="text-sm font-bold text-slate-900 truncate">{c.name}</p>
@@ -478,12 +539,9 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                     <div className="text-right shrink-0">
                                         <p className="text-xs font-medium text-slate-500">{new Date(c.joinedDate).toLocaleDateString()}</p>
                                     </div>
-                                </div>
+                                </button>
                             ))}
                         </div>
-                        <button className="w-full mt-4 py-2 bg-slate-50 text-slate-500 rounded-lg text-xs font-normal uppercase hover:bg-slate-100 transition-colors">
-                            View All History
-                        </button>
                     </div>
 
                 </div>
@@ -492,15 +550,15 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
             {/* --- MODAL (Existing logic, restyled) --- */}
             <Modal
                 isOpen={isModalOpen}
-                onClose={() => setIsModalOpen(false)}
+                onClose={() => { if (!savingRef.current) setIsModalOpen(false); }}
                 title={
                     <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600">
-                            <UserPlus size={20} />
+                            <UserPlus size={20} strokeWidth={1.75} />
                         </div>
                         <div>
                             <h2 className="text-lg font-bold text-slate-900">{editingCustomer ? 'Edit Client Profile' : 'Register New Client'}</h2>
-                            <p className="text-xs text-slate-500 font-bold uppercase tracking-wide mt-0.5">Customer Relationship Management</p>
+                            <p className="text-xs text-slate-500 font-bold uppercase tracking-wide mt-0.5">Contact details and account status</p>
                         </div>
                     </div>
                 }
@@ -513,38 +571,44 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                             <div className="space-y-2">
                                 <label className="win-label">Full Name / Business Name</label>
                                 <div className="relative">
-                                    <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
                                     <input required className="win-input pl-12" value={formData.name || ''} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="e.g. John Doe or Apex Tech" />
                                 </div>
                             </div>
                             <div className="space-y-2">
                                 <label className="win-label">Phone Number</label>
                                 <div className="relative">
-                                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
                                     <input required className="win-input pl-12" value={formData.phone || ''} onChange={e => setFormData({ ...formData, phone: e.target.value })} placeholder="+256 700 000 000" />
                                 </div>
                             </div>
                             <div className="space-y-2">
                                 <label className="win-label">Email Address (Optional)</label>
                                 <div className="relative">
-                                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
                                     <input type="email" className="win-input pl-12" value={formData.email || ''} onChange={e => setFormData({ ...formData, email: e.target.value })} placeholder="client@example.com" />
                                 </div>
                             </div>
                             <div className="space-y-2">
                                 <label className="win-label">Client Category</label>
                                 <div className="relative">
-                                    <Tag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                    <Tag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
                                     <select className="win-input pl-12 appearance-none" value={formData.category} onChange={e => setFormData({ ...formData, category: e.target.value as any })}>
-                                        {Object.values(CustomerCategory).filter(c => c !== CustomerCategory.VIP).map(c => <option key={c} value={c}>{c}</option>)}
+                                        {Object.values(CustomerCategory).map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
-                                    <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                                    <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} strokeWidth={1.75} />
                                 </div>
+                            </div>
+                            <div className="space-y-2">
+                                <label htmlFor="customer-status" className="win-label">Client Status</label>
+                                <select id="customer-status" className="win-input" value={formData.status || CustomerStatus.ACTIVE} onChange={e => setFormData({ ...formData, status: e.target.value as CustomerStatus })}>
+                                    {Object.values(CustomerStatus).map(status => <option key={status} value={status}>{status}</option>)}
+                                </select>
                             </div>
                             <div className="col-span-full space-y-2">
                                 <label className="win-label">Physical Address</label>
                                 <div className="relative">
-                                    <MapPin className="absolute left-4 top-4 text-slate-400" size={18} />
+                                    <MapPin className="absolute left-4 top-4 text-slate-400" size={18} strokeWidth={1.75} />
                                     <textarea
                                         className="win-input pl-12 h-24 resize-none py-3"
                                         value={formData.address || ''}
@@ -557,12 +621,12 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                     </div>
 
                     <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-4 shrink-0">
-                        <button type="button" onClick={() => setIsModalOpen(false)} className="flex-1 py-3.5 rounded-2xl text-slate-600 font-bold hover:bg-slate-200 transition-all uppercase text-xs tracking-widest">
+                        <button type="button" disabled={isSaving} onClick={() => setIsModalOpen(false)} className="flex-1 py-3.5 rounded-2xl text-slate-600 font-bold hover:bg-slate-200 transition-all uppercase text-xs tracking-widest">
                             Cancel
                         </button>
-                        <button type="submit" className="flex-1 py-3.5 rounded-2xl bg-slate-900 text-white font-bold shadow-xl shadow-slate-900/20 hover:bg-black transition-all uppercase text-xs tracking-widest flex items-center justify-center gap-2">
-                            <CheckCircle2 size={18} />
-                            {editingCustomer ? 'Update Profile' : 'Register Client'}
+                        <button type="submit" disabled={isSaving} className="flex-1 py-3.5 rounded-2xl bg-slate-900 text-white font-bold   hover:bg-black transition-all uppercase text-xs tracking-widest flex items-center justify-center gap-2 disabled:opacity-50">
+                            <CheckCircle2 size={18} strokeWidth={1.75} />
+                            {isSaving ? 'Saving...' : editingCustomer ? 'Update Profile' : 'Register Client'}
                         </button>
                     </div>
                 </form>
@@ -582,7 +646,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                 noPadding
             >
                 <div className="flex-1 overflow-y-auto p-8 bg-slate-200 flex justify-center">
-                    <div id="customer-statement" className="receipt-a4-mode bg-white p-8 shadow-xl text-slate-900 w-full max-w-[210mm] min-h-[297mm]">
+                    <div id="customer-statement" className="receipt-a4-mode bg-white p-8  text-slate-900 w-full max-w-[210mm] min-h-[297mm]">
                         {/* Report Header */}
                         <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
                             <div>
@@ -622,6 +686,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                             </div>
                         </div>
 
+                        <p className="mb-6 text-sm font-semibold">Outstanding balance: UGX {customerSales.reduce((sum, sale) => sum + outstandingAmount(sale), 0).toLocaleString()}</p>
                         {/* Transaction Table */}
                         <div className="mb-8">
                             <h3 className="text-xs font-black uppercase tracking-widest border-b border-slate-200 pb-2 mb-4 text-slate-500">Purchase History</h3>
@@ -635,6 +700,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
+                                    {customerSales.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No purchases recorded for this customer.</td></tr>}
                                     {customerSales.map((sale, idx) => (
                                         <tr key={idx}>
                                             <td className="py-3 font-mono text-slate-600">{new Date(sale.timestamp).toLocaleDateString()}</td>
@@ -642,7 +708,7 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                                             <td className="py-3 text-slate-700">
                                                 {sale.items.map(i => `${i.name} (x${i.quantity})`).join(', ')}
                                             </td>
-                                            <td className="py-3 text-right font-bold text-slate-900">{sale.total.toLocaleString()}</td>
+                                            <td className="py-3 text-right font-bold text-slate-900">{sale.total.toLocaleString()}<p className="text-xs font-normal">{getSaleType(sale)} · Paid {sale.amountPaid.toLocaleString()} · Due {outstandingAmount(sale).toLocaleString()}</p></td>
                                         </tr>
                                     ))}
                                 </tbody>
@@ -660,10 +726,10 @@ const Customers: React.FC<CustomersProps> = ({ user }) => {
                 <div className="p-5 border-t border-slate-100 bg-white flex gap-4 justify-end no-print">
                     <button onClick={() => setIsStatementModalOpen(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs uppercase hover:bg-slate-200 transition-colors">Close</button>
                     <button onClick={handleSendWhatsApp} className="px-6 py-2.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl font-bold text-xs uppercase hover:bg-emerald-100 transition-colors flex items-center gap-2">
-                        <MessageCircle size={16} /> WhatsApp
+                        <MessageCircle size={16} strokeWidth={1.75} /> WhatsApp
                     </button>
-                    <button onClick={() => printSection('#customer-statement')} disabled={isPrinting} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase hover:bg-black transition-all flex items-center gap-2">
-                        <Printer size={16} /> Print Statement
+                    <button onClick={() => printSection('#customer-statement')} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase hover:bg-black transition-all flex items-center gap-2">
+                        <Printer size={16} strokeWidth={1.75} /> Print Statement
                     </button>
                 </div>
             </Modal>

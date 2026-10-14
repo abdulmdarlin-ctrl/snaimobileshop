@@ -87,7 +87,7 @@ const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale
    return (
       <div
          id="receipt-preview"
-         className={`${settings?.receiptFormat === 'a4' ? 'receipt-a4-mode' : 'receipt-mode'} bg-white p-4 shadow-xl text-black ${settings?.receiptFont === 'sans' ? 'font-sans' :
+         className={`${settings?.receiptFormat === 'a4' ? 'receipt-a4-mode' : 'receipt-mode'} bg-white p-4  text-black ${settings?.receiptFont === 'sans' ? 'font-sans' :
             settings?.receiptFont === 'serif' ? 'font-serif' : 'font-mono'
             } w-full`}
          style={{
@@ -234,7 +234,7 @@ const ToggleSwitch = ({ checked, onChange }: { checked: boolean; onChange: (val:
       onClick={() => onChange(!checked)}
       className={`w-12 h-6 rounded-full transition-colors relative ${checked ? 'bg-emerald-500' : 'bg-slate-200'}`}
    >
-      <div className={`w-4 h-4 rounded-full bg-white shadow-sm absolute top-1 transition-transform ${checked ? 'left-7' : 'left-1'}`} />
+      <div className={`w-4 h-4 rounded-full bg-white  absolute top-1 transition-transform ${checked ? 'left-7' : 'left-1'}`} />
    </button>
 );
 
@@ -427,7 +427,8 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
    };
 
    const handleSaveSettings = async () => {
-      if (!settings) return;
+
+      if (!confirm("Save these system settings?")) return;if (!settings) return;
       setSaving(true);
       try {
          await db.settings.put(settings);
@@ -452,6 +453,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
    };
 
    const handleImportProducts = async () => {
+      if (!confirm('Import these products into inventory?')) return;
       if (!importText.trim()) return;
       setImporting(true);
       try {
@@ -664,6 +666,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
    };
 
    const handleUserSave = async () => {
+      if (!confirm('Save this user account and access permissions?')) return;
       if (!userForm.username) return showToast("Username required", 'error');
       // Only require password for new users
       if (!editingUser && !userForm.password) return showToast("Password required for new users", 'error');
@@ -741,8 +744,8 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
    if (loading || !settings) {
       return (
-         <div className="h-full flex flex-col items-center justify-center space-y-4 animate-pulse">
-            <Loader2 className="w-10 h-10 text-slate-300 animate-spin" />
+         <div className="h-full flex flex-col items-center justify-center space-y-4 ">
+            <Loader2 className="w-10 h-10 text-slate-300 animate-spin" strokeWidth={1.75} />
             <p className="text-[10px] font-black uppercase tracking-[4px] text-slate-400">Loading Configuration...</p>
          </div>
       );
@@ -756,14 +759,14 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
    };
 
    return (
-      <div className="flex flex-col lg:flex-row h-full gap-6 pb-20 animate-in fade-in duration-500">
+      <div className="flex flex-col lg:flex-row h-full gap-6 pb-20   duration-500">
          {/* ... (Left Sidebar & Sticky Header - No Changes) ... */}
 
          {/* LEFT SIDEBAR NAVIGATION */}
          <div className="w-full lg:w-72 shrink-0 flex flex-col gap-6">
 
             {/* User Mini Profile */}
-            <div className="bg-white rounded-3xl p-6 border border-slate-100 shadow-sm flex items-center gap-4">
+            <div className="bg-white rounded-3xl p-6 border border-slate-100  flex items-center gap-4">
                <div className="w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200">
                   <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.username}`} alt="av" className="w-full h-full object-cover" />
                </div>
@@ -774,7 +777,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
             </div>
 
             {/* Navigation Menu */}
-            <div className="bg-white rounded-3xl p-4 border border-slate-100 shadow-sm flex-1 h-fit">
+            <div className="bg-white rounded-3xl p-4 border border-slate-100  flex-1 h-fit">
                <nav className="space-y-1">
                   {menuItems.map((item) => {
                      const isActive = activeTab === item.id;
@@ -786,14 +789,14 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            className={`w-full flex items-center gap-3 p-3.5 rounded-2xl transition-all duration-200 group ${isActive ? 'bg-slate-50' : 'hover:bg-slate-50'
                               }`}
                         >
-                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isActive ? `${item.bg} ${item.color} shadow-sm` : 'bg-slate-50 text-slate-400 group-hover:bg-white group-hover:shadow-sm'
+                           <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isActive ? `${item.bg} ${item.color} ` : 'bg-slate-50 text-slate-400 group-hover:bg-white '
                               }`}>
-                              <Icon size={20} strokeWidth={isActive ? 2.5 : 2} />
+                              <Icon size={20} strokeWidth={1.75} />
                            </div>
                            <span className={`text-sm font-bold ${isActive ? 'text-slate-900' : 'text-slate-500 group-hover:text-slate-700'}`}>
                               {item.label}
                            </span>
-                           {isActive && <ChevronRight size={16} className="ml-auto text-slate-300" />}
+                           {isActive && <ChevronRight size={16} className="ml-auto text-slate-300" strokeWidth={1.75} />}
                         </button>
                      );
                   })}
@@ -802,7 +805,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
          </div>
 
          {/* RIGHT CONTENT AREA */}
-         <div className="flex-1 bg-white rounded-3xl border border-slate-100 shadow-sm flex flex-col overflow-hidden relative min-h-[600px]">
+         <div className="flex-1 bg-white rounded-3xl border border-slate-100  flex flex-col overflow-hidden relative min-h-[600px]">
 
             {/* Sticky Header */}
             <div className="px-8 py-6 border-b border-slate-50 flex flex-col sm:flex-row items-start sm:items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-20 gap-4">
@@ -817,9 +820,9 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                   <button
                      onClick={handleSaveSettings}
                      disabled={saving}
-                     className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black transition-all shadow-lg shadow-slate-900/10 active:scale-95 disabled:opacity-70"
+                     className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-black transition-all    disabled:opacity-70"
                   >
-                     {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                     {saving ? <Loader2 size={14} className="animate-spin" strokeWidth={1.75} /> : <Save size={14} strokeWidth={1.75} />}
                      {saving ? 'Saving...' : 'Save Changes'}
                   </button>
                )}
@@ -830,11 +833,11 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
                {/* --- GENERAL TAB --- */}
                {activeTab === 'general' && isAdmin && (
-                  <div className="space-y-8 max-w-4xl animate-in fade-in slide-in-from-bottom-4">
+                  <div className="space-y-8 max-w-4xl   ">
                      {/* Theme Section */}
                      <section className="space-y-4">
                         <div className="flex items-center gap-2 border-b border-slate-100 pb-2 mb-4">
-                           <Activity size={18} className="text-purple-500" />
+                           <Activity size={18} className="text-purple-500" strokeWidth={1.75} />
                            <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">System Appearance</h3>
                         </div>
                         <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
@@ -844,10 +847,10 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                  <button
                                     key={c.name}
                                     onClick={() => setSettings(s => s ? { ...s, themeColor: c.hex } : null)}
-                                    className={`w-12 h-12 rounded-full ${c.class} shadow-sm transition-all hover:scale-110 flex items-center justify-center ${settings.themeColor === c.hex ? 'ring-4 ring-slate-200 scale-110' : 'opacity-80 hover:opacity-100'}`}
+                                    className={`w-12 h-12 rounded-full ${c.class}  transition-all  flex items-center justify-center ${settings.themeColor === c.hex ? 'ring-4 ring-slate-200 scale-110' : 'opacity-80 hover:opacity-100'}`}
                                     title={c.name}
                                  >
-                                    {settings.themeColor === c.hex && <Check size={20} className="text-white" strokeWidth={3} />}
+                                    {settings.themeColor === c.hex && <Check size={20} className="text-white" strokeWidth={1.75} />}
                                  </button>
                               ))}
                            </div>
@@ -857,7 +860,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                      {/* Store Identity */}
                      <section className="space-y-6">
                         <div className="flex items-center gap-2 border-b border-slate-100 pb-2 mb-4">
-                           <Store size={18} className="text-rose-500" />
+                           <Store size={18} className="text-rose-500" strokeWidth={1.75} />
                            <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Store Identity</h3>
                         </div>
 
@@ -873,14 +876,14 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            <div className="col-span-full space-y-2">
                               <label className="win-label">Address</label>
                               <div className="relative">
-                                 <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                                 <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} strokeWidth={1.75} />
                                  <input className="win-input h-12 pl-12" value={settings.address} onChange={e => setSettings(s => s ? { ...s, address: e.target.value } : null)} />
                               </div>
                            </div>
                            <div className="space-y-2">
                               <label className="win-label">Phone</label>
                               <div className="relative">
-                                 <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                                 <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} strokeWidth={1.75} />
                                  <input className="win-input h-12 pl-12" value={settings.phone} onChange={e => setSettings(s => s ? { ...s, phone: e.target.value } : null)} />
                               </div>
                            </div>
@@ -890,7 +893,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                      {/* Operational Rules */}
                      <section className="space-y-6">
                         <div className="flex items-center gap-2 border-b border-slate-100 pb-2 mb-4">
-                           <BarChart2 size={18} className="text-orange-500" />
+                           <BarChart2 size={18} className="text-orange-500" strokeWidth={1.75} />
                            <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest">Operational Rules</h3>
                         </div>
 
@@ -945,11 +948,11 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                {/* ... (Hardware, Data Management Tabs removed for brevity as they are unchanged) ... */}
                {/* --- HARDWARE TAB --- */}
                {activeTab === 'hardware' && isAdmin && (
-                  <div className="space-y-8 max-w-4xl animate-in fade-in slide-in-from-bottom-4">
-                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden">
+                  <div className="space-y-8 max-w-4xl   ">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100  relative overflow-hidden">
                         <div className="flex items-center gap-3 mb-6 relative z-10">
                            <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center">
-                              <Printer size={24} />
+                              <Printer size={24} strokeWidth={1.75} />
                            </div>
                            <div>
                               <h3 className="text-lg font-black text-slate-900">Receipt Printer</h3>
@@ -967,9 +970,9 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                           onClick={() => setSettings(s => s ? { ...s, hardware: { ...s.hardware, printerType: type as any } } : null)}
                                           className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${settings.hardware?.printerType === type ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-white text-slate-400 border-slate-100 hover:border-slate-200'}`}
                                        >
-                                          {type === 'network' && <Wifi size={14} className="mx-auto mb-1" />}
-                                          {type === 'bluetooth' && <Bluetooth size={14} className="mx-auto mb-1" />}
-                                          {type === 'usb' && <Cpu size={14} className="mx-auto mb-1" />}
+                                          {type === 'network' && <Wifi size={14} className="mx-auto mb-1" strokeWidth={1.75} />}
+                                          {type === 'bluetooth' && <Bluetooth size={14} className="mx-auto mb-1" strokeWidth={1.75} />}
+                                          {type === 'usb' && <Cpu size={14} className="mx-auto mb-1" strokeWidth={1.75} />}
                                           {type}
                                        </button>
                                     ))}
@@ -1012,10 +1015,10 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                         </div>
                      </div>
 
-                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100  relative overflow-hidden">
                         <div className="flex items-center gap-3 mb-6 relative z-10">
                            <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center">
-                              <ScanBarcode size={24} />
+                              <ScanBarcode size={24} strokeWidth={1.75} />
                            </div>
                            <div>
                               <h3 className="text-lg font-black text-slate-900">Barcode Scanner</h3>
@@ -1046,28 +1049,28 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
                {/* --- DATA MANAGEMENT TAB --- */}
                {activeTab === 'database' && isAdmin && (
-                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 max-w-4xl">
+                  <div className="space-y-8    max-w-4xl">
                      {/* Backup Card with safe backup handler */}
-                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-lg transition-all">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100  relative overflow-hidden group  transition-all">
                         <div className="relative z-10">
                            <div className="w-12 h-12 bg-violet-100 text-violet-600 rounded-2xl flex items-center justify-center mb-4">
-                              <Download size={24} />
+                              <Download size={24} strokeWidth={1.75} />
                            </div>
                            <h3 className="text-lg font-black text-slate-900 mb-2">Data Backup</h3>
                            <p className="text-sm text-slate-500 mb-8 leading-relaxed">
                               Export a full JSON snapshot of your business data including inventory, sales history, and user accounts.
                            </p>
                            <button onClick={handleBackup} className="px-6 py-3 bg-violet-100 text-violet-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-violet-200 transition-colors flex items-center gap-2">
-                              <Download size={16} /> Download Backup
+                              <Download size={16} strokeWidth={1.75} /> Download Backup
                            </button>
                         </div>
                      </div>
 
                      {/* Import Card */}
-                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-lg transition-all">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100  relative overflow-hidden group  transition-all">
                         <div className="relative z-10">
                            <div className="w-12 h-12 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-4">
-                              <Upload size={24} />
+                              <Upload size={24} strokeWidth={1.75} />
                            </div>
                            <h3 className="text-lg font-black text-slate-900 mb-2">Import Data</h3>
                            <p className="text-sm text-slate-500 mb-8 leading-relaxed">
@@ -1075,7 +1078,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            </p>
                            <div className="flex gap-4">
                               <button onClick={() => setIsImportModalOpen(true)} className="px-6 py-3 bg-blue-100 text-blue-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-200 transition-colors flex items-center gap-2">
-                                 <FileText size={16} /> CSV Import
+                                 <FileText size={16} strokeWidth={1.75} /> CSV Import
                               </button>
                               <div className="relative">
                                  <input
@@ -1094,11 +1097,11 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                     }}
                                  />
                                  <button className="px-6 py-3 bg-slate-100 text-slate-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-colors flex items-center gap-2">
-                                    <RefreshCw size={16} /> Restore Backup
+                                    <RefreshCw size={16} strokeWidth={1.75} /> Restore Backup
                                  </button>
                               </div>
                               {restoreFile && (
-                                 <button onClick={handleRestore} className="px-6 py-3 bg-red-100 text-red-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-200 transition-colors animate-pulse">
+                                 <button onClick={handleRestore} className="px-6 py-3 bg-red-100 text-red-700 rounded-xl text-xs font-black uppercase tracking-widest hover:bg-red-200 transition-colors ">
                                     Confirm Restore
                                  </button>
                               )}
@@ -1109,8 +1112,8 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                      {/* DB Stats */}
                      <div className="md:col-span-2 bg-slate-50 p-6 rounded-3xl border border-slate-100 flex items-center justify-between">
                         <div className="flex items-center gap-4">
-                           <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center border border-slate-100 shadow-sm">
-                              <HardDrive size={20} className="text-slate-400" />
+                           <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center border border-slate-100 ">
+                              <HardDrive size={20} className="text-slate-400" strokeWidth={1.75} />
                            </div>
                            <div>
                               <p className="text-xs font-black text-slate-900 uppercase">Storage Usage</p>
@@ -1128,15 +1131,15 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                      {/* Factory Reset */}
                      <div className="mt-8 pt-8 border-t border-slate-100">
                         <button onClick={handleFactoryReset} className="text-red-500 text-xs font-bold uppercase hover:text-red-700 flex items-center gap-2">
-                           <Trash2 size={14} /> Factory Reset System
+                           <Trash2 size={14} strokeWidth={1.75} /> Factory Reset System
                         </button>
                      </div>
                   </div>
                )}
 
                {activeTab === 'profile' && (
-                  <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 max-w-2xl mx-auto">
-                     <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-lg relative">
+                  <div className="space-y-8    max-w-2xl mx-auto">
+                     <div className="bg-white p-8 rounded-3xl border border-slate-100  relative">
                         <div className="flex items-center gap-4 mb-8">
                            <div className="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center overflow-hidden border-2 border-slate-200">
                               <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUser.username}`} alt="av" className="w-full h-full object-cover" />
@@ -1164,9 +1167,9 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
                            <button
                               onClick={openSelfEdit}
-                              className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[3px] shadow-xl hover:bg-black transition-all flex items-center justify-center gap-2"
+                              className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[3px]  hover:bg-black transition-all flex items-center justify-center gap-2"
                            >
-                              <Edit2 size={16} /> Edit Profile & Password
+                              <Edit2 size={16} strokeWidth={1.75} /> Edit Profile & Password
                            </button>
                         </div>
                      </div>
@@ -1175,10 +1178,10 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
                {/* --- USERS TAB --- */}
                {activeTab === 'users' && isAdmin && (
-                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="space-y-6   ">
                      <div className="flex justify-between items-center">
                         <div className="relative w-64">
-                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} strokeWidth={1.75} />
                            <input
                               className="win-input pl-10 h-10 bg-slate-50"
                               placeholder="Search users..."
@@ -1194,25 +1197,25 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            }}
                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold uppercase tracking-wide hover:bg-blue-700"
                         >
-                           <UserPlus size={16} /> Add User
+                           <UserPlus size={16} strokeWidth={1.75} /> Add User
                         </button>
                      </div>
 
                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         {filteredUsers.map(u => (
-                           <div key={u.id} className="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group">
+                           <div key={u.id} className="bg-white p-6 rounded-2xl border border-slate-100  relative overflow-hidden group">
                               <div className="flex justify-between items-start mb-4">
                                  <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 overflow-hidden">
                                     <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${u.username}`} alt="av" className="w-full h-full object-cover" />
                                  </div>
                                  <div className="flex gap-1">
-                                    <button onClick={() => { setEditingUser(u); setUserForm(u); setIsUserModalOpen(true); }} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400 hover:text-blue-600 transition-colors"><Edit2 size={16} /></button>
+                                    <button onClick={() => { setEditingUser(u); setUserForm(u); setIsUserModalOpen(true); }} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400 hover:text-blue-600 transition-colors"><Edit2 size={16} strokeWidth={1.75} /></button>
                                     {u.id !== currentUser.id && (
                                        <>
                                           <button onClick={() => handleToggleStatus(u)} className={`p-2 hover:bg-slate-50 rounded-lg transition-colors ${u.isActive ? 'text-emerald-500 hover:text-red-500' : 'text-red-500 hover:text-emerald-500'}`}>
-                                             <Power size={16} />
+                                             <Power size={16} strokeWidth={1.75} />
                                           </button>
-                                          <button onClick={() => u.id && handleDeleteUser(u)} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400 hover:text-red-600 transition-colors"><Trash2 size={16} /></button>
+                                          <button onClick={() => u.id && handleDeleteUser(u)} className="p-2 hover:bg-slate-50 rounded-lg text-slate-400 hover:text-red-600 transition-colors"><Trash2 size={16} strokeWidth={1.75} /></button>
                                        </>
                                     )}
                                  </div>
@@ -1229,7 +1232,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                               </div>
 
                               <div className="pt-4 border-t border-slate-50 flex items-center gap-2 text-[10px] text-slate-400">
-                                 <Clock size={12} /> Last login: {u.lastLogin ? new Date(u.lastLogin).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Never'}
+                                 <Clock size={14} strokeWidth={1.75} /> Last login: {u.lastLogin ? new Date(u.lastLogin).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : 'Never'}
                               </div>
                            </div>
                         ))}
@@ -1238,11 +1241,11 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                )}
 
                {activeTab === 'receipts' && isAdmin && (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8   ">
                      <div className="space-y-8">
-                        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+                        <div className="bg-white p-8 rounded-3xl border border-slate-100 ">
                            <div className="flex items-center gap-2 mb-6">
-                              <ScrollText className="text-orange-500" size={20} />
+                              <ScrollText className="text-orange-500" size={20} strokeWidth={1.75} />
                               <h3 className="text-lg font-black text-slate-900 uppercase">Receipt Configuration</h3>
                            </div>
                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1277,9 +1280,9 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                     <div className="flex items-center gap-2">
                                        <label className="text-xs font-bold text-slate-500">Align:</label>
                                        <div className="flex p-1 bg-slate-100 rounded-lg">
-                                          <button type="button" onClick={() => setSettings(s => s ? { ...s, receiptFooterAlign: 'left' } : null)} className={`p-1.5 rounded ${settings.receiptFooterAlign === 'left' ? 'bg-white shadow-sm' : ''}`}><AlignLeft size={16} /></button>
-                                          <button type="button" onClick={() => setSettings(s => s ? { ...s, receiptFooterAlign: 'center' } : null)} className={`p-1.5 rounded ${settings.receiptFooterAlign === 'center' ? 'bg-white shadow-sm' : ''}`}><AlignCenter size={16} /></button>
-                                          <button type="button" onClick={() => setSettings(s => s ? { ...s, receiptFooterAlign: 'right' } : null)} className={`p-1.5 rounded ${settings.receiptFooterAlign === 'right' ? 'bg-white shadow-sm' : ''}`}><AlignRight size={16} /></button>
+                                          <button type="button" onClick={() => setSettings(s => s ? { ...s, receiptFooterAlign: 'left' } : null)} className={`p-1.5 rounded ${settings.receiptFooterAlign === 'left' ? 'bg-white ' : ''}`}><AlignLeft size={16} strokeWidth={1.75} /></button>
+                                          <button type="button" onClick={() => setSettings(s => s ? { ...s, receiptFooterAlign: 'center' } : null)} className={`p-1.5 rounded ${settings.receiptFooterAlign === 'center' ? 'bg-white ' : ''}`}><AlignCenter size={16} strokeWidth={1.75} /></button>
+                                          <button type="button" onClick={() => setSettings(s => s ? { ...s, receiptFooterAlign: 'right' } : null)} className={`p-1.5 rounded ${settings.receiptFooterAlign === 'right' ? 'bg-white ' : ''}`}><AlignRight size={16} strokeWidth={1.75} /></button>
                                        </div>
                                     </div>
                                     <div className="flex items-center gap-2">
@@ -1309,9 +1312,9 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            </div>
                         </div>
 
-                        <div className="bg-white p-8 rounded-3xl border border-slate-100 shadow-sm">
+                        <div className="bg-white p-8 rounded-3xl border border-slate-100 ">
                            <div className="flex items-center gap-2 mb-6">
-                              <Type className="text-blue-500" size={20} />
+                              <Type className="text-blue-500" size={20} strokeWidth={1.75} />
                               <h3 className="text-lg font-black text-slate-900 uppercase">Receipt Typography</h3>
                            </div>
                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -1352,11 +1355,11 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                )}
 
                {activeTab === 'audit' && isAdmin && (
-                  <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+                  <div className="space-y-6   ">
                      {/* ... Audit Logs Content (Unchanged) ... */}
-                     <div className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm flex flex-col md:flex-row items-center gap-4">
+                     <div className="bg-white p-4 rounded-2xl border border-slate-100  flex flex-col md:flex-row items-center gap-4">
                         <div className="flex items-center gap-2 mr-2">
-                           <Filter size={16} className="text-slate-400" />
+                           <Filter size={16} className="text-slate-400" strokeWidth={1.75} />
                            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Filters</span>
                         </div>
 
@@ -1370,7 +1373,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                  <option value="All">All Users</option>
                                  {uniqueAuditUsers.map(u => <option key={u} value={u}>{u}</option>)}
                               </select>
-                              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" strokeWidth={1.75} />
                            </div>
 
                            <div className="relative">
@@ -1382,11 +1385,11 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                  <option value="All">All Actions</option>
                                  {uniqueAuditActions.map(a => <option key={a} value={a}>{a}</option>)}
                               </select>
-                              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                              <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" strokeWidth={1.75} />
                            </div>
 
                            <div className="relative">
-                              <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                              <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" strokeWidth={1.75} />
                               <input
                                  type="date"
                                  className="win-input h-10 pl-9 text-xs font-bold bg-slate-50 focus:bg-white"
@@ -1397,7 +1400,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            </div>
 
                            <div className="relative">
-                              <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                              <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" strokeWidth={1.75} />
                               <input
                                  type="date"
                                  className="win-input h-10 pl-9 text-xs font-bold bg-slate-50 focus:bg-white"
@@ -1409,11 +1412,11 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                         </div>
 
                         <button onClick={clearAuditFilters} className="p-2 text-slate-400 hover:text-orange-500 transition-colors">
-                           <RefreshCw size={16} />
+                           <RefreshCw size={16} strokeWidth={1.75} />
                         </button>
                      </div>
 
-                     <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                     <div className="bg-white p-6 rounded-3xl border border-slate-100  overflow-hidden">
                         {/* Header with Clear Button */}
                         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 border-b border-slate-50 pb-4">
                            <div>
@@ -1441,7 +1444,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                     onClick={initiateClearLogs}
                                     className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-red-100 transition-all border border-red-100"
                                  >
-                                    <Trash2 size={14} /> Clear Logs
+                                    <Trash2 size={14} strokeWidth={1.75} /> Clear Logs
                                  </button>
                               )}
                            </div>
@@ -1475,7 +1478,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                     <td className="px-6 py-4">
                                        {log.entityType ? (
                                           <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-50 text-[10px] font-bold text-blue-700 font-mono border border-blue-100">
-                                             <Hash size={10} className="text-blue-400" />
+                                             <Hash size={14} className="text-blue-400" strokeWidth={1.75} />
                                              {log.entityType}: {log.entityId ? log.entityId.substring(0, 8) + '...' : 'N/A'}
                                           </span>
                                        ) : (
@@ -1487,7 +1490,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                               )) : (
                                  <tr>
                                     <td colSpan={5} className="py-12 text-center text-slate-400 text-xs font-bold uppercase tracking-wider">
-                                       <Search size={32} className="mx-auto mb-2 opacity-20" />
+                                       <Search size={32} className="mx-auto mb-2 opacity-20" strokeWidth={1.75} />
                                        No audit logs matching filters
                                     </td>
                                  </tr>
@@ -1536,7 +1539,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            className="win-input h-12 bg-slate-50 text-slate-500 pl-10 font-mono text-xs"
                            value={editingUser.lastLogin ? new Date(editingUser.lastLogin).toLocaleString() : 'Never Logged In'}
                         />
-                        <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                        <Clock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} strokeWidth={1.75} />
                      </div>
                   </div>
                )}
@@ -1546,14 +1549,14 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                   <div className="relative">
                      <input type={showPassword ? "text" : "password"} className="win-input h-12 pr-10" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} placeholder={editingUser ? "Leave blank to keep current" : ""} />
                      <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                        {showPassword ? <EyeOff size={16} strokeWidth={1.75} /> : <Eye size={16} strokeWidth={1.75} />}
                      </button>
                   </div>
                </div>
                <div className="pt-4 flex gap-4">
                   <button onClick={() => setIsUserModalOpen(false)} className="flex-1 py-4 bg-slate-100 text-slate-600 rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-slate-200">Cancel</button>
                   <button onClick={handleUserSave} disabled={userSaving} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-[10px] uppercase tracking-[2px] hover:bg-black flex items-center justify-center gap-2">
-                     {userSaving && <Loader2 size={14} className="animate-spin" />}
+                     {userSaving && <Loader2 size={14} className="animate-spin" strokeWidth={1.75} />}
                      {userSaving ? 'Saving...' : 'Save User'}
                   </button>
                </div>
@@ -1595,7 +1598,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                >
                   <div className="p-8 text-center space-y-6">
                      <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                        <AlertTriangle size={40} strokeWidth={2} />
+                        <AlertTriangle size={32} strokeWidth={1.75} />
                      </div>
                      <div>
                         <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Confirm Deletion</h3>
@@ -1605,8 +1608,8 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                      </div>
                      <div className="grid grid-cols-2 gap-3">
                         <button onClick={() => setUserToDelete(null)} disabled={isDeletingUser} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                        <button onClick={confirmDeleteUser} disabled={isDeletingUser} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2">
-                           {isDeletingUser ? <Loader2 className="animate-spin" size={14} /> : null} {isDeletingUser ? 'Deleting...' : 'Yes, Delete'}
+                        <button onClick={confirmDeleteUser} disabled={isDeletingUser} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest   hover:bg-red-700 transition-all flex items-center justify-center gap-2">
+                           {isDeletingUser ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : null} {isDeletingUser ? 'Deleting...' : 'Yes, Delete'}
                         </button>
                      </div>
                   </div>
@@ -1623,7 +1626,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
          >
             <div className="p-8 text-center space-y-6">
                <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                  <AlertTriangle size={40} strokeWidth={2} />
+                  <AlertTriangle size={32} strokeWidth={1.75} />
                </div>
                <div>
                   <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">System Warning</h3>
@@ -1633,8 +1636,8 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                </div>
                <div className="grid grid-cols-2 gap-3">
                   <button onClick={() => setIsClearLogsConfirmOpen(false)} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                  <button onClick={performClearLogs} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all">
-                     {clearingLogs ? <Loader2 className="animate-spin inline mr-2" size={12} /> : null} Yes, Clear All
+                  <button onClick={performClearLogs} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest   hover:bg-red-700 transition-all">
+                     {clearingLogs ? <Loader2 className="animate-spin inline mr-2" size={14} strokeWidth={1.75} /> : null} Yes, Clear All
                   </button>
                </div>
             </div>

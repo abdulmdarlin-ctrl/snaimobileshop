@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   LayoutDashboard, ShoppingCart, Wrench, BarChart3, Settings as SettingsIcon,
-  ChevronLeft, ChevronRight, Truck, Box, Layers, Wallet, Users, User as UserIcon
+  ChevronLeft, ChevronRight, Truck, Package, Layers, ReceiptText, Users, HandCoins, ContactRound
 } from 'lucide-react';
 import { Page } from '../App';
 import { User, UserRole, AppSettings } from '../types';
@@ -30,11 +30,11 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
       label: 'Operations',
       items: [
         { id: 'sales', label: 'Sales (POS)', icon: ShoppingCart, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER] },
-        { id: 'inventory', label: 'Inventory', icon: Box, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.AUDITOR, UserRole.CASHIER] }, // Cashiers need to see stock, but not edit
-        { id: 'customers', label: 'Customers', icon: UserIcon, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER] },
-        { id: 'loans', label: 'Consignment', icon: Users, roles: [UserRole.ADMIN, UserRole.MANAGER] },
+        { id: 'inventory', label: 'Inventory', icon: Package, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.AUDITOR, UserRole.CASHIER] }, // Cashiers need to see stock, but not edit
+        { id: 'customers', label: 'Customers', icon: ContactRound, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER] },
+        { id: 'loans', label: 'Consignment', icon: HandCoins, roles: [UserRole.ADMIN, UserRole.MANAGER] },
         { id: 'repairs', label: 'Repairs', icon: Wrench, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.TECHNICIAN] },
-        { id: 'expenses', label: 'Expenses', icon: Wallet, roles: [UserRole.ADMIN, UserRole.MANAGER] },
+        { id: 'expenses', label: 'Expenses', icon: ReceiptText, roles: [UserRole.ADMIN, UserRole.MANAGER] },
       ]
     },
     {
@@ -49,10 +49,10 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
 
   return (
     <aside
-      className={`fixed lg:static inset-y-0 left-0 z-50 flex flex-col bg-[#0f172a] text-slate-300 transition-all duration-300 shadow-2xl lg:shadow-none border-r border-slate-800 ${isOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-20 lg:translate-x-0'
+      className={`app-sidebar fixed lg:static inset-y-0 left-0 z-50 flex flex-col bg-[#0f172a] text-slate-300 transition-all duration-300   border-r border-slate-800 ${isOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-20 lg:translate-x-0'
         }`}
     >
-      <div className={`flex items-center h-20 border-b border-slate-800 transition-all duration-300 ${isOpen ? 'px-6 gap-3' : 'justify-center'}`}>
+      <div className={`flex items-center h-16 border-b border-slate-800 transition-all duration-300 ${isOpen ? 'px-6 gap-3' : 'justify-center'}`}>
         {settings?.logo ? (
           <div className="w-8 h-8 rounded-lg bg-white flex items-center justify-center overflow-hidden shrink-0">
             <img src={settings.logo} alt="Logo" className="w-full h-full object-contain" />
@@ -84,18 +84,18 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
                   return (
                     <button
                       key={item.id}
+                      aria-current={active ? 'page' : undefined}
                       onClick={() => setCurrentPage(item.id as Page)}
                       className={`w-full flex items-center ${isOpen ? 'px-4 py-3' : 'justify-center py-3'} rounded-lg transition-all ${active
-                        ? 'bg-rose-600 text-white shadow-lg shadow-rose-900/20 font-bold'
+                        ? 'bg-slate-700 text-white font-semibold'
                         : 'hover:text-white hover:bg-slate-800 text-slate-400'
                         }`}
                       title={!isOpen ? item.label : ''}
                     >
-                      <Icon size={18} strokeWidth={active ? 2.5 : 2} className="shrink-0" />
+                      <Icon size={20} className="shrink-0" strokeWidth={1.75} />
                       <span className={`ml-3 text-sm whitespace-nowrap transition-all duration-300 ${isOpen ? 'opacity-100 w-auto' : 'opacity-0 w-0 overflow-hidden lg:hidden'}`}>
                         {item.label}
                       </span>
-                      {active && isOpen && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-white"></div>}
                     </button>
                   );
                 })}
@@ -106,12 +106,12 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
       </div>
 
       <div className="p-4 border-t border-slate-800">
-        <button onClick={toggleSidebar} className="w-full flex items-center justify-center py-2 text-slate-500 hover:text-white transition-colors">
-          {isOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+        <button aria-label={isOpen ? "Collapse navigation" : "Expand navigation"} onClick={toggleSidebar} className="w-full flex items-center justify-center py-2 text-slate-500 hover:text-white transition-colors">
+          {isOpen ? <ChevronLeft size={20} strokeWidth={1.75} /> : <ChevronRight size={20} strokeWidth={1.75} />}
         </button>
         {isOpen && (
           <div className="mt-4 text-center">
-            <p className="text-[9px] font-bold text-slate-600 uppercase">Crafted by ABI-TECH</p>
+            <p className="text-[9px] font-bold text-slate-600 uppercase">ABI-TECH</p>
           </div>
         )}
       </div>

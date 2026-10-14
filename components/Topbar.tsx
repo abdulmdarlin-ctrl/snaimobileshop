@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Bell, LogOut, Settings, ChevronDown, Menu, Database, WifiOff, RefreshCw, AlertTriangle, PackageX, Globe, User as UserIcon, Sun, Moon, Sunrise, Sunset, CalendarDays, Sparkles, Clock, Search } from 'lucide-react';
+import { Bell, LogOut, Settings, ChevronDown, Menu, Database, AlertTriangle, PackageX } from 'lucide-react';
 import { User, Product } from '../types';
 import { Page } from '../App';
 import { db } from '../db';
@@ -21,13 +21,11 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
   const [currentTime, setCurrentTime] = useState(new Date());
 
   const [dbStatus, setDbStatus] = useState<'live' | 'mock'>('live');
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
 
   const fetchMeta = async () => {
-    setIsRefreshing(true);
     try {
       const products = await db.products.toArray();
       const lowStock = products.filter(p => p.stockQuantity <= p.reorderLevel);
@@ -36,8 +34,6 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
       setDbStatus(db.getStatus() as any);
     } catch (e) {
       setDbStatus('mock');
-    } finally {
-      setTimeout(() => setIsRefreshing(false), 500);
     }
   };
 
@@ -48,22 +44,8 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
   }, []);
 
   useEffect(() => {
-    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    const timer = setInterval(() => setCurrentTime(new Date()), 60000);
     return () => clearInterval(timer);
-  }, []);
-
-  const [greeting, setGreeting] = useState('');
-
-
-  useEffect(() => {
-    const updateGreeting = () => {
-      const h = new Date().getHours();
-      setGreeting(h < 12 ? 'Good Morning' : h < 18 ? 'Good Afternoon' : 'Good Evening');
-    };
-    updateGreeting();
-
-    const interval = setInterval(updateGreeting, 60000);
-    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -92,48 +74,23 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
   }, []);
 
   return (
-    <header className="h-20 bg-white/80 backdrop-blur-xl flex items-center justify-between px-4 lg:px-8 z-40 shrink-0 border-b border-slate-200/60 sticky top-0 w-full transition-all duration-300 shadow-sm">
+    <header className="app-topbar h-16 bg-white flex items-center justify-between px-4 lg:px-8 z-40 shrink-0 border-b border-slate-200/60 sticky top-0 w-full transition-all duration-300 ">
 
       {/* Left Section: Menu Toggle (Mobile Only) */}
       <div className="flex items-center gap-3 lg:gap-5">
         <button
-          onClick={onMenuToggle}
+          aria-label="Open navigation" onClick={onMenuToggle}
           className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors lg:hidden"
         >
-          <Menu size={22} strokeWidth={2} />
+          <Menu size={22} strokeWidth={1.75} />
         </button>
       </div>
 
-      {/* Center Section: Page Title & Search (Migrated from Dashboard) */}
-      <div className="flex-1 px-4 lg:px-8 flex items-center justify-between gap-8">
-        <div className="hidden md:flex flex-col justify-center py-1">
-          <h1 className="text-2xl md:text-3xl font-black tracking-tighter leading-none flex items-center gap-2 mb-1">
-            <span className="text-slate-300 text-lg font-extrabold tracking-tight uppercase">Welcome To</span>
-            <span className="bg-gradient-to-r from-slate-900 via-indigo-800 to-slate-900 bg-clip-text text-transparent filter drop-shadow-sm">Snai Mobile Shop Management System</span>
-            <span className="text-2xl animate-bounce pointer-events-none">👋</span>
-          </h1>
-          <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200/60 text-emerald-700 text-[10px] font-black uppercase tracking-wider shadow-sm ring-1 ring-emerald-100/50">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-600"></span>
-              </span>
-              System Live
-            </span>
-            <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase border-l border-slate-200 pl-3">Manage your business operations efficiently</span>
-          </div>
-        </div>
-
-        <div className="flex-1 max-w-lg relative group">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search size={18} className="text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-          </div>
-          <input
-            type="text"
-            placeholder="Search projects, sales, repairs..."
-            className="w-full bg-slate-50 border-none rounded-full py-2.5 pl-10 pr-4 text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all shadow-sm group-hover:bg-white"
-          />
-        </div>
+      <div className="flex-1 min-w-0 px-3 lg:px-4">
+        <h1 className="text-lg font-semibold text-slate-900 truncate">
+          {{ dashboard: 'Dashboard', sales: 'Sales', inventory: 'Inventory', customers: 'Customers', loans: 'Consignment', repairs: 'Repairs', expenses: 'Expenses', reports: 'Reports', settings: 'Settings' }[currentPage] || 'Shop management'}
+        </h1>
+        {dbStatus !== 'live' && <p className="text-xs text-amber-700">Connection unavailable</p>}
       </div>
 
       {/* Right Section: Actions & Profile */}
@@ -149,17 +106,17 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
         {/* Notifications */}
         <div className="relative" ref={notifRef}>
           <button
-            onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+            aria-label="Notifications" aria-expanded={isNotificationsOpen} onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
             className={`p-2.5 rounded-xl transition-all relative group ${isNotificationsOpen ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
           >
-            <Bell size={20} strokeWidth={2} />
+            <Bell size={20} strokeWidth={1.75} />
             {lowStockCount > 0 && (
               <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>
             )}
           </button>
 
           {isNotificationsOpen && (
-            <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200 shadow-xl overflow-hidden animate-in z-50">
+            <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200  overflow-hidden  z-50">
               <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
                 <span className="text-[10px] text-slate-500 uppercase">Notifications</span>
                 {lowStockCount > 0 && <span className="text-[9px] font-bold text-white bg-orange-600 px-2 py-0.5 rounded-full">{lowStockCount} Alerts</span>}
@@ -171,7 +128,7 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
                       <div key={item.id} onClick={() => { onNavigate('inventory'); setIsNotificationsOpen(false); }} className="p-4 hover:bg-slate-50 cursor-pointer transition-colors group">
                         <div className="flex items-start gap-3">
                           <div className={`p-2 rounded-lg shrink-0 ${item.stockQuantity === 0 ? 'bg-red-50 text-red-600' : 'bg-orange-50 text-orange-600'}`}>
-                            {item.stockQuantity === 0 ? <PackageX size={16} /> : <AlertTriangle size={16} />}
+                            {item.stockQuantity === 0 ? <PackageX size={16} strokeWidth={1.75} /> : <AlertTriangle size={16} strokeWidth={1.75} />}
                           </div>
                           <div>
                             <p className="text-xs font-bold text-slate-800 group-hover:text-orange-600 transition-colors">{item.name}</p>
@@ -188,10 +145,10 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
                 ) : (
                   <div className="p-8 text-center flex flex-col items-center">
                     <div className="w-10 h-10 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center mb-3">
-                      <Database size={18} />
+                      <Database size={18} strokeWidth={1.75} />
                     </div>
-                    <p className="text-xs font-bold text-slate-900">All Systems Nominal</p>
-                    <p className="text-[10px] text-slate-400 mt-1">Inventory levels are healthy.</p>
+                    <p className="text-xs font-bold text-slate-900">No low-stock alerts</p>
+                    <p className="text-[10px] text-slate-400 mt-1">No products currently need reordering.</p>
                   </div>
                 )}
               </div>
@@ -207,27 +164,27 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
             onClick={() => setIsProfileOpen(!isProfileOpen)}
             className="flex items-center gap-3 p-1.5 pr-3 rounded-xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-100"
           >
-            <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200 shadow-sm">
-              <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`} alt="av" className="w-full h-full object-cover" />
+            <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200 ">
+              <span className="text-sm font-semibold text-slate-600">{(user.fullName || user.username).slice(0, 2).toUpperCase()}</span>
             </div>
             <div className="hidden sm:flex flex-col items-start">
               <p className="text-xs font-bold text-slate-700 leading-none">{user.username}</p>
               <p className="text-[10px] font-medium text-slate-400 uppercase mt-0.5">{user.role}</p>
             </div>
-            <ChevronDown size={14} className={`text-slate-400 transition-transform duration-300 ${isProfileOpen ? 'rotate-180' : ''}`} />
+            <ChevronDown size={14} className={`text-slate-400 transition-transform duration-300 ${isProfileOpen ? 'rotate-180' : ''}`} strokeWidth={1.75} />
           </button>
 
           {isProfileOpen && (
-            <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl border border-slate-200 shadow-xl overflow-hidden py-1 animate-in z-50">
+            <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl border border-slate-200  overflow-hidden py-1  z-50">
               <div className="px-4 py-2 border-b border-slate-50 mb-1">
                 <p className="text-[10px] font-bold text-slate-400 uppercase">Logged as</p>
                 <p className="text-xs font-bold text-slate-900 truncate">{user.fullName || user.username}</p>
               </div>
               <button onClick={() => { onNavigate('settings'); setIsProfileOpen(false); }} className="w-full flex items-center px-4 py-2 text-xs text-slate-600 hover:bg-slate-50">
-                <Settings size={14} className="mr-2" /> Settings
+                <Settings size={14} className="mr-2" strokeWidth={1.75} /> Settings
               </button>
               <button onClick={onLogout} className="w-full flex items-center px-4 py-2 text-xs text-red-600 hover:bg-red-50">
-                <LogOut size={14} className="mr-2" /> Logout
+                <LogOut size={14} className="mr-2" strokeWidth={1.75} /> Logout
               </button>
             </div>
           )}

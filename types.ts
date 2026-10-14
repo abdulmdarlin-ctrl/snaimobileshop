@@ -50,6 +50,7 @@ export interface User {
 }
 
 export interface Product {
+  imeis?: string[]; // Available units: one primary IMEI per physical phone.
   id?: string;
   sku: string;
   name: string;
@@ -157,6 +158,8 @@ export interface Expense {
 }
 
 export interface SaleItem {
+  imeis?: string[];
+  costPrice?: number;
   productId: string;
   name: string;
   quantity: number;
@@ -167,8 +170,18 @@ export interface SaleItem {
   sn?: string;
 }
 
+export type SaleType = 'Cash sale' | 'Debt' | 'Partial sale';
+
 export interface Sale {
+  saleType?: SaleType;
+  amountDue?: number;
+  changeDue?: number;
+  payments?: { id: string; amount: number; method: string; reference: string; timestamp: number; user: string }[];
   id?: string;
+  customerId?: string;
+  taxPercentage?: number;
+  paymentReference?: string;
+  revision?: number;
   receiptNo: string;
   items: SaleItem[];
   subtotal: number;

@@ -1,0 +1,101 @@
+/* Shared screen theme. Printed receipts retain their own formatting. */
+@media screen {
+  body {
+    background: #f5f6f8;
+    color: #334155;
+    font-family: 'PT Root UI', 'Segoe UI', Arial, sans-serif;
+    line-height: 1.5;
+  }
+
+  /* Page space-y utilities must not offset viewport-fixed modal backdrops. */
+  .fixed.inset-0 {
+    margin: 0 !important;
+  }
+
+  .win-card {
+    border: 1px solid #dfe3e8;
+    border-radius: 8px;
+    box-shadow: none;
+  }
+
+  .win-input {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    font-weight: 400;
+    box-shadow: none;
+    padding-block: 10px;
+  }
+
+  /* Keep space for icons on forms using the shared input class. */
+  .win-input.pl-12 { padding-left: 3rem; }
+  .win-input.pl-10 { padding-left: 2.5rem; }
+  .win-input.pr-12 { padding-right: 3rem; }
+
+  .win-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #475569;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+
+  .win-button-primary {
+    border-radius: 6px;
+    font-weight: 600;
+    box-shadow: none;
+  }
+  .win-button-primary:hover { transform: none; filter: brightness(.95); }
+
+  /* Normalize legacy utility styles across operational screens and dialogs. */
+  :is(.rounded-xl, .rounded-2xl, .rounded-3xl, [class*="rounded-["]) {
+    border-radius: 8px !important;
+  }
+  :is(.font-black, .font-extrabold) { font-weight: 600 !important; }
+  .uppercase { text-transform: none !important; }
+  :is(.text-\[9px\], .text-\[10px\], .text-\[11px\]) { font-size: 12px !important; }
+  body :is(.shadow-sm, .shadow, .shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl, .shadow-inner, [class*="hover:shadow-"], [class*="shadow-["]) {
+    box-shadow: none !important;
+  }
+  :is(.border-slate-50, .border-slate-100) { border-color: #e2e8f0 !important; }
+  .sna-table th {
+    background: #f8fafc;
+    color: #475569;
+    text-transform: none;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .sna-table td { font-weight: 400; border-color: #e2e8f0; }
+  th { color: #475569 !important; font-weight: 600 !important; }
+  table { font-variant-numeric: tabular-nums; }
+
+  :is(button, a, input, select, textarea):focus-visible {
+    outline: 2px solid #475569;
+    outline-offset: 3px;
+  }
+  button:disabled { cursor: not-allowed; }
+  .app-topbar { min-height: 64px; }
+  .app-sidebar { background: #17202c; }
+  .dashboard-summary { background: white; color: #334155; border-color: #e2e8f0; }
+  .dashboard-summary .text-white { color: #0f172a; }
+  .dashboard-summary .text-slate-400 { color: #475569; }
+  .dashboard-summary [class*="border-slate-7"],
+  .dashboard-summary .border-slate-800 { border-color: #e2e8f0; }
+  .dashboard-summary [class*="bg-slate-900/"] { background: #f1f5f9; }
+  .dashboard-summary button:hover { background: #e2e8f0; color: #0f172a; }
+  .dashboard-metrics > div { border-left: 1px solid #e2e8f0; }
+  .dashboard-metrics > div > div > div:first-child {
+    background: #f1f5f9 !important;
+    color: #475569 !important;
+  }
+
+  .auth-screen { background: #f5f6f8; }
+  .auth-form { background: white; color: #334155; }
+  .auth-form h2 { color: #0f172a; font-size: 26px; }
+  .auth-form :is(label, p) { color: #64748b; }
+  .auth-form input:not([type="checkbox"]) { border: 1px solid #cbd5e1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

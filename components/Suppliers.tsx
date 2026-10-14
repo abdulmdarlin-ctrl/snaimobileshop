@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../db';
 import { Supplier, User, Product, Purchase, UserRole, PurchaseItem } from '../types';
 import {
@@ -17,6 +17,9 @@ interface SuppliersProps { user: User; }
 type ViewMode = 'vendors' | 'orders';
 
 const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
+   const orderId = useRef(crypto.randomUUID());
+   const orderSaving = useRef(false);
+   const [isOrderSaving, setIsOrderSaving] = useState(false);
    // --- Core Data ---
    const { showToast } = useToast();
    const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -70,6 +73,8 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
          setSuppliers(s);
          setProducts(p);
          setPurchases(allPurchases.sort((a, b) => b.timestamp - a.timestamp));
+      } catch (error) {
+         showToast('Could not load suppliers and purchases. Please retry.', 'error');
       } finally {
          setLoading(false);
       }
@@ -97,6 +102,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
    // --- Handlers: Vendor ---
    const handleSaveVendor = async (e: React.FormEvent) => {
       e.preventDefault();
+      if (!confirm("Save this supplier profile?")) return;
       if (!vendorForm.name) return;
 
       try {
@@ -120,7 +126,8 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
 
    // --- Handlers: Order Cart ---
    const handleAddItem = () => {
-      if (!selectedProduct || itemQty <= 0) return;
+      if (!selectedProduct) return;
+      if (!Number.isSafeInteger(itemQty) || itemQty < 1 || !Number.isFinite(itemCost) || itemCost < 0) return showToast('Enter a whole quantity and a valid non-negative cost.', 'error');
 
       const newItem: PurchaseItem = {
          productId: selectedProduct.id!,
@@ -144,50 +151,33 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
    };
 
    const handleSubmitOrder = async () => {
+
+      if (orderSaving.current) return;
       if (!orderSupplierId) return showToast("Please select a supplier", 'error');
       if (orderCart.length === 0) return showToast("Order is empty", 'error');
+      if (orderCart.some(item => products.find(product => product.id === item.productId)?.type === 'Phone')) return showToast('Register phone deliveries in Inventory with one IMEI per unit. This purchase form does not capture IMEIs.', 'error');
 
+      if (!confirm("Receive this purchase and update inventory?")) return;
       const supplier = suppliers.find(s => s.id === orderSupplierId);
       const total = orderCart.reduce((sum, i) => sum + i.totalCost, 0);
 
       const newPurchase: Purchase = {
+         id: orderId.current,
          supplierId: orderSupplierId,
          supplierName: supplier?.name || 'Unknown',
          invoiceNo: orderInvoiceRef,
          items: orderCart,
          totalAmount: total,
          status: 'Received',
-         timestamp: new Date(orderDate).getTime() + new Date().getTime() % 86400000, // Combine date picker + current time
+         timestamp: new Date(`${orderDate}T12:00:00`).getTime(),
          receivedBy: user.username,
          notes: orderNote
       };
 
+      orderSaving.current = true;
+      setIsOrderSaving(true);
       try {
-         await db.purchases.add(newPurchase);
-
-         // Update Inventory
-         for (const item of orderCart) {
-            const product = products.find(p => p.id === item.productId);
-            if (product) {
-               const newStock = product.stockQuantity + item.quantity;
-               await db.products.update(product.id!, {
-                  stockQuantity: newStock,
-                  costPrice: item.unitCost // Update cost price to latest
-               });
-
-               await db.stockLogs.add({
-                  productId: product.id!,
-                  productName: product.name,
-                  previousStock: product.stockQuantity,
-                  newStock,
-                  changeAmount: item.quantity,
-                  reason: 'Restock',
-                  note: `PO #${orderInvoiceRef} from ${supplier?.name}`,
-                  user: user.username,
-                  timestamp: Date.now()
-               });
-            }
-         }
+         await db.receivePurchase(newPurchase);
 
          setIsOrderModalOpen(false);
          resetOrderForm();
@@ -195,11 +185,12 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
          showToast('Order processed and stock updated', 'success');
       } catch (e) {
          console.error(e);
-         showToast("Failed to process order", 'error');
-      }
+         showToast(e instanceof Error ? e.message : 'Failed to process order', 'error');
+      } finally { orderSaving.current = false; setIsOrderSaving(false); }
    };
 
    const resetOrderForm = () => {
+      orderId.current = crypto.randomUUID();
       setOrderCart([]);
       setOrderSupplierId('');
       setOrderInvoiceRef('');
@@ -224,7 +215,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
    ).slice(0, 5); // Limit suggestions
 
    return (
-      <div className="space-y-6 animate-in pb-20 font-sans">
+      <div className="space-y-6  pb-20 font-sans">
 
          {/* HEADER & KPI */}
          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 no-print">
@@ -235,15 +226,15 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
 
             <div className="flex gap-3">
                <div className="hidden md:flex gap-4 mr-6">
-                  <div className="flex items-center gap-3 px-4 py-2 bg-white rounded-3xl border border-slate-100 shadow-sm">
-                     <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><TrendingUp size={16} /></div>
+                  <div className="flex items-center gap-3 px-4 py-2 bg-white rounded-3xl border border-slate-100 ">
+                     <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><TrendingUp size={16} strokeWidth={1.75} /></div>
                      <div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase">Month Spend</p>
                         <p className="text-sm font-black text-slate-900">{(stats.thisMonthSpend / 1000000).toFixed(2)}M</p>
                      </div>
                   </div>
-                  <div className="flex items-center gap-3 px-4 py-2 bg-white rounded-3xl border border-slate-100 shadow-sm">
-                     <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Building2 size={16} /></div>
+                  <div className="flex items-center gap-3 px-4 py-2 bg-white rounded-3xl border border-slate-100 ">
+                     <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Building2 size={16} strokeWidth={1.75} /></div>
                      <div>
                         <p className="text-[10px] font-bold text-slate-400 uppercase">Vendors</p>
                         <p className="text-sm font-bold text-slate-900">{stats.vendorCount}</p>
@@ -253,32 +244,32 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
 
                <button
                   onClick={() => setIsOrderModalOpen(true)}
-                  className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-bold uppercase shadow-xl shadow-slate-900/20 hover:bg-black transition-all active:scale-95"
+                  className="flex items-center gap-2 px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-bold uppercase   hover:bg-black transition-all "
                >
-                  <PackageCheck size={16} /> Receive Stock
+                  <PackageCheck size={16} strokeWidth={1.75} /> Receive Stock
                </button>
             </div>
          </div>
 
          {/* NAVIGATION & FILTERS */}
-         <div className="bg-white p-2 rounded-3xl border border-slate-100 shadow-sm flex flex-col md:flex-row items-center justify-between gap-4 no-print">
+         <div className="bg-white p-2 rounded-3xl border border-slate-100  flex flex-col md:flex-row items-center justify-between gap-4 no-print">
             <div className="flex p-1 bg-slate-100 rounded-xl w-full md:w-auto">
                <button
                   onClick={() => setViewMode('orders')}
-                  className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-2 ${viewMode === 'orders' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                  className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-2 ${viewMode === 'orders' ? 'bg-white text-slate-900 ' : 'text-slate-400 hover:text-slate-600'}`}
                >
-                  <ClipboardList size={14} /> Purchase Orders
+                  <ClipboardList size={14} strokeWidth={1.75} /> Purchase Orders
                </button>
                <button
                   onClick={() => setViewMode('vendors')}
-                  className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-2 ${viewMode === 'vendors' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                  className={`flex-1 md:flex-none px-6 py-2.5 rounded-lg text-[10px] font-bold uppercase transition-all flex items-center justify-center gap-2 ${viewMode === 'vendors' ? 'bg-white text-slate-900 ' : 'text-slate-400 hover:text-slate-600'}`}
                >
-                  <Truck size={14} /> Supplier Database
+                  <Truck size={14} strokeWidth={1.75} /> Supplier Database
                </button>
             </div>
 
             <div className="relative w-full md:w-72">
-               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} strokeWidth={1.75} />
                <input
                   className="win-input pl-9 h-11 bg-slate-50 border-transparent focus:bg-white"
                   placeholder={viewMode === 'orders' ? "Search invoice # or supplier..." : "Search vendors..."}
@@ -290,9 +281,9 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
 
          {/* --- ORDERS VIEW --- */}
          {viewMode === 'orders' && (
-            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+            <div className="space-y-4   ">
                {filteredOrders.length > 0 ? (
-                  <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
+                  <div className="bg-white rounded-3xl border border-slate-100  overflow-hidden">
                      <div className="overflow-x-auto">
                         <table className="w-full text-left">
                            <thead className="bg-slate-50 border-b border-slate-100">
@@ -329,12 +320,12 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                                     </td>
                                     <td className="text-center py-4">
                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold uppercase bg-emerald-50 text-emerald-600 border border-emerald-100">
-                                          <Check size={10} strokeWidth={4} /> Received
+                                          <Check size={14} strokeWidth={1.75} /> Received
                                        </span>
                                     </td>
                                     <td className="pr-6 text-right py-4">
                                        <button onClick={() => setSelectedOrder(order)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
-                                          <ArrowRight size={16} />
+                                          <ArrowRight size={16} strokeWidth={1.75} />
                                        </button>
                                     </td>
                                  </tr>
@@ -345,7 +336,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                   </div>
                ) : (
                   <div className="flex flex-col items-center justify-center py-20 text-slate-300">
-                     <PackageCheck size={64} className="mb-4 opacity-20" />
+                     <PackageCheck size={32} className="mb-4 opacity-20" strokeWidth={1.75} />
                      <p className="text-xs font-bold uppercase">No Orders Found</p>
                   </div>
                )}
@@ -354,34 +345,34 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
 
          {/* --- VENDORS VIEW --- */}
          {viewMode === 'vendors' && (
-            <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+            <div className="space-y-4   ">
                {canEdit && (
                   <div className="flex justify-end">
                      <button
                         onClick={() => { setVendorForm({}); setIsEditingVendor(false); setIsVendorModalOpen(true); }}
                         className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-all"
                      >
-                        <Plus size={14} strokeWidth={3} /> Add Vendor
+                        <Plus size={14} strokeWidth={1.75} /> Add Vendor
                      </button>
                   </div>
                )}
 
                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                   {filteredVendors.map(vendor => (
-                     <div key={vendor.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm hover:shadow-md transition-all group relative">
+                     <div key={vendor.id} className="bg-white p-6 rounded-3xl border border-slate-100   transition-all group relative">
                         <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                           {canEdit && <button onClick={() => { setVendorForm(vendor); setIsEditingVendor(true); setIsVendorModalOpen(true); }} className="p-2 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-lg"><Edit2 size={14} /></button>}
-                           {canDelete && <button onClick={() => vendor.id && handleDeleteVendor(vendor.id)} className="p-2 bg-slate-50 text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={14} /></button>}
+                           {canEdit && <button onClick={() => { setVendorForm(vendor); setIsEditingVendor(true); setIsVendorModalOpen(true); }} className="p-2 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-lg"><Edit2 size={14} strokeWidth={1.75} /></button>}
+                           {canDelete && <button onClick={() => vendor.id && handleDeleteVendor(vendor.id)} className="p-2 bg-slate-50 text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={14} strokeWidth={1.75} /></button>}
                         </div>
                         <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 mb-4 group-hover:bg-slate-900 group-hover:text-white transition-colors">
-                           <Building2 size={24} />
+                           <Building2 size={24} strokeWidth={1.75} />
                         </div>
                         <h3 className="text-sm font-bold text-slate-900 uppercase truncate">{vendor.name}</h3>
                         <p className="text-[10px] font-bold text-slate-400 uppercase mb-4">{vendor.contactPerson}</p>
 
                         <div className="space-y-2">
                            <div className="flex items-center gap-2 text-xs font-medium text-slate-600 bg-slate-50 p-2 rounded-lg">
-                              <Truck size={14} className="text-slate-400" /> {vendor.phone}
+                              <Truck size={14} className="text-slate-400" strokeWidth={1.75} /> {vendor.phone}
                            </div>
                         </div>
                      </div>
@@ -437,7 +428,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
 
                      <div className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
                         <div className="relative">
-                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} strokeWidth={1.75} />
                            <input
                               className="win-input pl-10 h-10 text-xs font-bold"
                               placeholder="Search product to add..."
@@ -448,7 +439,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                               }}
                            />
                            {itemSearch && !selectedProduct && (
-                              <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 mt-1 rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto">
+                              <div className="absolute top-full left-0 right-0 bg-white border border-slate-200 mt-1 rounded-xl  z-20 max-h-48 overflow-y-auto">
                                  {filteredProducts.map(p => (
                                     <button
                                        key={p.id}
@@ -500,12 +491,12 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                   <div className="flex-1 overflow-y-auto p-4 space-y-2">
                      {orderCart.length === 0 ? (
                         <div className="h-full flex flex-col items-center justify-center text-slate-300">
-                           <ShoppingCart size={40} className="mb-2 opacity-50" />
+                           <ShoppingCart size={32} className="mb-2 opacity-50" strokeWidth={1.75} />
                            <p className="text-[10px] font-bold uppercase tracking-widest">List Empty</p>
                         </div>
                      ) : (
                         orderCart.map((item, idx) => (
-                           <div key={idx} className="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center group shadow-sm">
+                           <div key={idx} className="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center group ">
                               <div>
                                  <p className="text-xs font-bold text-slate-900 truncate max-w-[180px]">{item.productName}</p>
                                  <p className="text-[10px] text-slate-500 font-medium">
@@ -514,7 +505,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                               </div>
                               <div className="flex items-center gap-3">
                                  <span className="text-xs font-black text-slate-900">{item.totalCost.toLocaleString()}</span>
-                                 <button onClick={() => handleRemoveItem(idx)} className="text-slate-300 hover:text-red-500"><X size={14} /></button>
+                                 <button onClick={() => handleRemoveItem(idx)} className="text-slate-300 hover:text-red-500"><X size={14} strokeWidth={1.75} /></button>
                               </div>
                            </div>
                         ))
@@ -536,10 +527,10 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                         </div>
                      </div>
                      <button
-                        onClick={handleSubmitOrder}
-                        className="w-full py-4 bg-emerald-600 text-white rounded-xl text-xs font-black uppercase tracking-[2px] shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
+                        onClick={handleSubmitOrder} disabled={isOrderSaving} aria-busy={isOrderSaving}
+                        className="w-full py-4 bg-emerald-600 text-white rounded-xl text-xs font-black uppercase tracking-[2px]   hover:bg-emerald-700 transition-all flex items-center justify-center gap-2"
                      >
-                        <Check size={16} strokeWidth={4} /> Confirm & Receive
+                        <Check size={16} strokeWidth={1.75} /> Confirm & Receive
                      </button>
                   </div>
                </div>

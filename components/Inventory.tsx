@@ -1,3 +1,4 @@
+import PhoneImeiInput from './PhoneImeiInput';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../db';
@@ -13,6 +14,7 @@ import { useToast } from './Toast';
 import Modal from './Modal';
 import { printSection } from '../utils/printExport';
 import JsBarcode from 'jsbarcode';
+import { validateImeis } from '../utils/imei';
 
 interface InventoryProps { user: User; }
 
@@ -80,9 +82,11 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
    const fetchProducts = async () => {
       setLoading(true);
-      const data = await db.products.toArray();
-      setProducts(data.sort((a, b) => a.name.localeCompare(b.name)));
-      setLoading(false);
+      try {
+         const data = await db.products.toArray();
+         setProducts(data.sort((a, b) => a.name.localeCompare(b.name)));
+      } catch (error) { showToast('Could not load inventory. Please refresh and retry.', 'error'); }
+      finally { setLoading(false); }
    };
 
    const fetchSettings = async () => {
@@ -92,6 +96,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
    const handleSave = async (e: React.FormEvent) => {
       e.preventDefault();
+      if (isSaving) return;
       setIsSaving(true);
       try {
          if (!formData.name) throw new Error("Product Name Required");
@@ -107,6 +112,9 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
             ...formData,
             category: formData.category || 'General',
          };
+         if (dataToSave.type === ProductType.PHONE) validateImeis(dataToSave.imeis || [], dataToSave.stockQuantity || 0);
+
+         if (!confirm("Save this product?")) return;
 
          if (editingProduct?.id) {
             await db.products.update(editingProduct.id, dataToSave);
@@ -128,7 +136,9 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
    const handleStockAdjustSave = async (e: React.FormEvent) => {
       e.preventDefault();
+      if (isSaving) return;
       if (!stockAdjustProduct) return;
+      if (stockAdjustProduct.type === ProductType.PHONE) return showToast('Use Edit Product to update phone stock and its matching IMEI list together.', 'info');
 
       const diff = stockAdjustForm.newQuantity - stockAdjustProduct.stockQuantity;
       if (diff === 0) return showToast("No change in quantity", 'info');
@@ -138,10 +148,10 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          return;
       }
 
+      if (!confirm("Apply this stock adjustment?")) return;
       setIsSaving(true);
       try {
-         await db.products.update(stockAdjustProduct.id!, { stockQuantity: stockAdjustForm.newQuantity });
-         await db.stockLogs.add({
+         await db.adjustStock({
             productId: stockAdjustProduct.id!,
             productName: stockAdjustProduct.name,
             previousStock: stockAdjustProduct.stockQuantity,
@@ -159,7 +169,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          showToast('Stock adjusted successfully', 'success');
       } catch (e) {
          console.error(e);
-         showToast("Failed to update stock", 'error');
+         showToast(e instanceof Error ? e.message : 'Failed to update stock', 'error');
       } finally {
          setIsSaving(false);
          setIsStockConfirming(false);
@@ -273,7 +283,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
       return products.filter(p => {
          const matchesSearch =
             p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            p.sku.toLowerCase().includes(searchTerm.toLowerCase());
+            p.sku.toLowerCase().includes(searchTerm.toLowerCase()) || (p.imeis || []).some(imei => imei.includes(searchTerm.trim()));
 
          let matchesType = true;
          if (filterType === 'Low Stock') {
@@ -298,26 +308,26 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
    const getProductIcon = (type: ProductType) => {
       switch (type) {
-         case ProductType.PHONE: return <Smartphone size={20} />;
-         case ProductType.ACCESSORY: return <Headphones size={20} />;
-         case ProductType.SPARE_PART: return <Battery size={20} />;
-         default: return <Box size={20} />;
+         case ProductType.PHONE: return <Smartphone size={20} strokeWidth={1.75} />;
+         case ProductType.ACCESSORY: return <Headphones size={20} strokeWidth={1.75} />;
+         case ProductType.SPARE_PART: return <Battery size={20} strokeWidth={1.75} />;
+         default: return <Box size={20} strokeWidth={1.75} />;
       }
    };
 
    return (
-      <div className="h-full flex flex-col font-sans space-y-6 pb-6 animate-in fade-in duration-500">
+      <div className="h-full flex flex-col font-sans space-y-6 pb-6   duration-500">
 
          {/* Control Panel (Header & Actions) */}
-         <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+         <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 ">
             <div className="relative w-full md:w-96 group">
                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Search size={18} className="text-slate-400 group-focus-within:text-rose-500 transition-colors" />
+                  <Search size={18} className="text-slate-400 group-focus-within:text-rose-500 transition-colors" strokeWidth={1.75} />
                </div>
                <input
                   type="text"
                   placeholder="Search products by name or SKU..."
-                  className="w-full bg-slate-50 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm font-normal text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-rose-500/20 focus:bg-white transition-all shadow-inner"
+                  className="w-full bg-slate-50 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm font-normal text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-rose-500/20 focus:bg-white transition-all "
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
                />
@@ -330,7 +340,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                         key={t}
                         onClick={() => setFilterType(t as any)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wide transition-all flex items-center gap-2 ${filterType === t
-                           ? 'bg-white text-slate-900 shadow-sm'
+                           ? 'bg-white text-slate-900 '
                            : 'text-slate-400 hover:text-slate-600'
                            }`}
                      >
@@ -352,9 +362,9 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                {canEdit && (
                   <button
                      onClick={() => openModal()}
-                     className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider shadow-lg shadow-rose-600/20 flex items-center gap-2 transition-all active:scale-95 shrink-0"
+                     className="px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider   flex items-center gap-2 transition-all  shrink-0"
                   >
-                     <Plus size={16} strokeWidth={3} /> Add Product
+                     <Plus size={16} strokeWidth={1.75} /> Add Product
                   </button>
                )}
             </div>
@@ -363,7 +373,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          {/* Stats Grid */}
          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {/* Total Items */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
+            <div className="bg-white p-5 rounded-2xl  border border-slate-100 flex items-center justify-between  transition-shadow">
                <div>
                   <p className="text-sm text-slate-500 font-normal mb-1">Total Products</p>
                   <h3 className="text-2xl font-bold text-slate-800">{inventoryStats.totalSKUs}</h3>
@@ -372,12 +382,12 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                   </p>
                </div>
                <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-500">
-                  <Package size={24} />
+                  <Package size={24} strokeWidth={1.75} />
                </div>
             </div>
 
             {/* Inventory Value */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
+            <div className="bg-white p-5 rounded-2xl  border border-slate-100 flex items-center justify-between  transition-shadow">
                <div>
                   <p className="text-sm text-slate-500 font-normal mb-1">Total Value</p>
                   <h3 className="text-2xl font-bold text-slate-800">
@@ -385,30 +395,30 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                      {(inventoryStats.totalValue / (inventoryStats.totalValue > 1000000 ? 1000000 : 1000)).toFixed(1)}{inventoryStats.totalValue > 1000000 ? 'M' : 'k'}
                   </h3>
                   <p className="text-xs text-emerald-500 mt-1 font-normal flex items-center gap-1">
-                     <TrendingDown size={14} className="rotate-180" /> Asset Value
+                     <TrendingDown size={14} className="rotate-180" strokeWidth={1.75} /> Asset Value
                   </p>
                </div>
                <div className="w-12 h-12 bg-emerald-50 rounded-full flex items-center justify-center text-emerald-600">
-                  <DollarSign size={24} />
+                  <DollarSign size={24} strokeWidth={1.75} />
                </div>
             </div>
 
             {/* Low Stock */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
+            <div className="bg-white p-5 rounded-2xl  border border-slate-100 flex items-center justify-between  transition-shadow">
                <div>
                   <p className="text-sm text-slate-500 font-normal mb-1">Low Stock Alerts</p>
                   <h3 className="text-2xl font-bold text-slate-800">{inventoryStats.lowStockItems}</h3>
                   <p className="text-xs text-orange-500 mt-1 font-normal flex items-center gap-1">
-                     <AlertTriangle size={14} /> Reorder Suggested
+                     <AlertTriangle size={14} strokeWidth={1.75} /> Reorder Suggested
                   </p>
                </div>
                <div className="w-12 h-12 bg-orange-50 rounded-full flex items-center justify-center text-orange-500">
-                  <AlertCircle size={24} />
+                  <AlertCircle size={24} strokeWidth={1.75} />
                </div>
             </div>
 
             {/* Categories */}
-            <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between hover:shadow-md transition-shadow">
+            <div className="bg-white p-5 rounded-2xl  border border-slate-100 flex items-center justify-between  transition-shadow">
                <div>
                   <p className="text-sm text-slate-500 font-normal mb-1">Categories</p>
                   <h3 className="text-2xl font-bold text-slate-800">
@@ -417,24 +427,24 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                   <p className="text-xs text-slate-400 mt-1 font-normal">Distinct Types</p>
                </div>
                <div className="w-12 h-12 bg-violet-50 rounded-full flex items-center justify-center text-violet-500">
-                  <Layers size={24} />
+                  <Layers size={24} strokeWidth={1.75} />
                </div>
             </div>
          </div>
 
          {/* Product Table */}
-         <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+         <div className="flex-1 bg-white rounded-2xl border border-slate-200  overflow-hidden flex flex-col">
             {loading ? (
-               <div className="h-40 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" /></div>
+               <div className="h-40 flex items-center justify-center"><Loader2 className="animate-spin text-slate-300" strokeWidth={1.75} /></div>
             ) : filteredProducts.length === 0 ? (
                <div className="h-60 flex flex-col items-center justify-center text-slate-300">
-                  <Package size={48} className="mb-4 opacity-50" />
+                  <Package size={32} className="mb-4 opacity-50" strokeWidth={1.75} />
                   <p className="text-sm font-bold">No products found</p>
                </div>
             ) : (
                <div className="flex-1 overflow-auto">
                   <table className="w-full text-left border-collapse">
-                     <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm shadow-slate-100">
+                     <thead className="bg-slate-50 sticky top-0 z-10  ">
                         <tr>
                            <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Product</th>
                            <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider text-center">Stock</th>
@@ -482,8 +492,8 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                           isLowStock ? 'bg-orange-100 text-orange-600' :
                                              'bg-emerald-100 text-emerald-600'
                                           }`}>
-                                          {isCritical && <AlertOctagon size={12} />}
-                                          {isLowStock && !isCritical && <AlertTriangle size={12} />}
+                                          {isCritical && <AlertOctagon size={14} strokeWidth={1.75} />}
+                                          {isLowStock && !isCritical && <AlertTriangle size={14} strokeWidth={1.75} />}
                                           {product.stockQuantity}
                                        </span>
                                     </div>
@@ -499,7 +509,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                  <td className="px-6 py-4">
                                     {product.location ? (
                                        <span className="flex items-center gap-1 text-xs text-slate-500">
-                                          <MapPin size={12} className="text-slate-400" /> {product.location}
+                                          <MapPin size={14} className="text-slate-400" strokeWidth={1.75} /> {product.location}
                                        </span>
                                     ) : (
                                        <span className="text-xs text-slate-300 italic">--</span>
@@ -516,21 +526,21 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                                 className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                                                 title="Adjust Stock"
                                              >
-                                                <RefreshCw size={16} />
+                                                <RefreshCw size={16} strokeWidth={1.75} />
                                              </button>
                                              <button
                                                 onClick={() => openModal(product)}
                                                 className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                                                 title="Edit"
                                              >
-                                                <Edit2 size={16} />
+                                                <Edit2 size={16} strokeWidth={1.75} />
                                              </button>
                                              <button
                                                 onClick={() => openBarcodeModal(product)}
                                                 className="p-1.5 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
                                                 title="Print Barcodes"
                                              >
-                                                <Barcode size={16} />
+                                                <Barcode size={16} strokeWidth={1.75} />
                                              </button>
                                           </>
                                        )}
@@ -540,7 +550,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                              className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                                              title="Delete"
                                           >
-                                             <Trash2 size={16} />
+                                             <Trash2 size={16} strokeWidth={1.75} />
                                           </button>
                                        )}
                                     </div>
@@ -556,19 +566,19 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
          {/* Product Edit/Add Modal */}
          {isModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-               <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
+            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
+               <div className="bg-white w-full max-w-2xl rounded-2xl  overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
                   <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
                      <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
-                           <Package size={20} />
+                           <Package size={20} strokeWidth={1.75} />
                         </div>
                         <div>
                            <h2 className="text-lg font-bold text-slate-900">{editingProduct ? 'Edit Product' : 'New Product'}</h2>
                            <p className="text-xs text-slate-500 font-bold uppercase tracking-wide mt-0.5">Inventory Control</p>
                         </div>
                      </div>
-                     <button onClick={() => setIsModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-all"><X size={20} /></button>
+                     <button onClick={() => setIsModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-all"><X size={20} strokeWidth={1.75} /></button>
                   </div>
 
                   <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-8 space-y-6">
@@ -589,13 +599,14 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                               <input className="win-input h-10" placeholder="e.g. Apple, Samsung" value={formData.brand || ''} onChange={e => setFormData({ ...formData, brand: e.target.value })} />
                            </div>
                            <div className="space-y-1.5">
-                              <label className="win-label">Type</label>
+                              <label className="win-label">Product Type</label>
                               <div className="relative">
                                  <select className="win-input h-10 appearance-none font-bold" value={formData.type} onChange={e => setFormData({ ...formData, type: e.target.value as ProductType })}>
                                     {Object.values(ProductType).map(t => <option key={t} value={t}>{t}</option>)}
                                  </select>
-                                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} strokeWidth={1.75} />
                               </div>
+                              <p className="text-xs text-slate-500">Select Phone to record individual or bulk IMEIs.</p>
                            </div>
                            <div className="space-y-1.5 md:col-span-2">
                               <label className="win-label">Warranty Period (Optional)</label>
@@ -638,7 +649,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                         <div className="grid grid-cols-3 gap-4">
                            <div className="space-y-1.5">
                               <label className="win-label">Current Stock</label>
-                              <input type="number" className="win-input h-10 font-bold" value={formData.stockQuantity} onChange={e => setFormData({ ...formData, stockQuantity: Number(e.target.value) })} />
+                              <input type="number" min="0" step="1" className="win-input h-10 font-bold" value={formData.stockQuantity} onChange={e => setFormData({ ...formData, stockQuantity: Number(e.target.value) })} />
                            </div>
                            <div className="space-y-1.5">
                               <label className="win-label">Reorder Level</label>
@@ -651,12 +662,18 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                         </div>
                      </div>
 
+                     {formData.type === ProductType.PHONE && <PhoneImeiInput
+                        imeis={formData.imeis || []} quantity={formData.stockQuantity || 0}
+                        onChange={imeis => setFormData(previous => ({ ...previous, imeis }))}
+                        onQuantityChange={stockQuantity => setFormData(previous => ({ ...previous, stockQuantity }))}
+                     />}
+
                   </form>
 
                   <div className="p-5 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end shrink-0">
                      <button onClick={() => setIsModalOpen(false)} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-slate-100 transition-all">Cancel</button>
-                     <button onClick={handleSave} disabled={isSaving} className="px-6 py-2.5 bg-rose-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide shadow-lg hover:bg-rose-700 transition-all flex items-center gap-2">
-                        {isSaving ? <Loader2 className="animate-spin" size={14} /> : (editingProduct ? 'Update Product' : 'Add Product')}
+                     <button onClick={handleSave} disabled={isSaving} className="px-6 py-2.5 bg-rose-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide  hover:bg-rose-700 transition-all flex items-center gap-2">
+                        {isSaving ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : (editingProduct ? 'Update Product' : 'Add Product')}
                      </button>
                   </div>
                </div>
@@ -729,7 +746,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                     <option value="Return">Customer Return</option>
                                     <option value="Other">Other</option>
                                  </select>
-                                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                                 <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} strokeWidth={1.75} />
                               </div>
                            </div>
 
@@ -745,15 +762,15 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
                            <button
                               disabled={isSaving || diff === 0}
-                              className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:shadow-none"
+                              className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm  hover:bg-black transition-all flex items-center justify-center gap-2 disabled:opacity-50 "
                            >
-                              <RefreshCw size={16} /> Review Adjustment
+                              <RefreshCw size={16} strokeWidth={1.75} /> Review Adjustment
                            </button>
                         </>
                      ) : (
-                        <div className="space-y-6 animate-in fade-in">
+                        <div className="space-y-6  ">
                            <div className="bg-orange-50 border border-orange-100 rounded-xl p-4 flex gap-3">
-                              <AlertCircle className="text-orange-600 shrink-0" size={20} />
+                              <AlertCircle className="text-orange-600 shrink-0" size={20} strokeWidth={1.75} />
                               <div>
                                  <p className="text-sm font-bold text-orange-800">Confirm Stock Change</p>
                                  <p className="text-xs text-orange-600 mt-1">This action will modify inventory records and log an audit trail.</p>
@@ -765,7 +782,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                  <p className="text-xs font-bold text-slate-400 uppercase">Old Qty</p>
                                  <p className="text-2xl font-black text-slate-900">{stockAdjustProduct.stockQuantity}</p>
                               </div>
-                              <ArrowRight className="text-slate-300" size={24} />
+                              <ArrowRight className="text-slate-300" size={24} strokeWidth={1.75} />
                               <div className="text-center">
                                  <p className="text-xs font-bold text-slate-400 uppercase">New Qty</p>
                                  <p className="text-2xl font-black text-slate-900">{stockAdjustForm.newQuantity}</p>
@@ -796,9 +813,9 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                               <button
                                  type="submit"
                                  disabled={isSaving}
-                                 className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2"
+                                 className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm  hover:bg-black transition-all flex items-center justify-center gap-2"
                               >
-                                 {isSaving ? <Loader2 className="animate-spin" size={16} /> : <Check size={16} />}
+                                 {isSaving ? <Loader2 className="animate-spin" size={16} strokeWidth={1.75} /> : <Check size={16} strokeWidth={1.75} />}
                                  Confirm Save
                               </button>
                            </div>
@@ -819,7 +836,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
             {productToDelete && (
                <div className="p-8 text-center space-y-6">
                   <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                     <AlertTriangle size={40} strokeWidth={2} />
+                     <AlertTriangle size={32} strokeWidth={1.75} />
                   </div>
                   <div>
                      <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Confirm Deletion</h3>
@@ -829,8 +846,8 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                      <button onClick={() => setProductToDelete(null)} disabled={isDeleting} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                     <button onClick={confirmDeleteProduct} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2">
-                        {isDeleting ? <Loader2 className="animate-spin" size={14} /> : null} {isDeleting ? 'Deleting...' : 'Yes, Delete'}
+                     <button onClick={confirmDeleteProduct} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest   hover:bg-red-700 transition-all flex items-center justify-center gap-2">
+                        {isDeleting ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : null} {isDeleting ? 'Deleting...' : 'Yes, Delete'}
                      </button>
                   </div>
                </div>
@@ -865,7 +882,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                      {/* PRINT AREA */}
                      <div id="barcode-print-area" className="grid grid-cols-2 gap-4 p-4 border border-dashed border-slate-200 rounded-xl bg-slate-50 print:block print:p-0 print:bg-white print:border-none">
                         {Array.from({ length: barcodeLabelCount || 1 }).map((_, index) => (
-                           <div key={index} className="bg-white p-2 rounded-lg shadow-sm border border-slate-100 flex flex-col items-center justify-center text-center print:shadow-none print:border-none print:p-1 print:page-break-after-avoid print:break-inside-avoid print:inline-block print:m-1" style={{ width: '50mm', height: '30mm', overflow: 'hidden' }}>
+                           <div key={index} className="bg-white p-2 rounded-lg  border border-slate-100 flex flex-col items-center justify-center text-center  print:border-none print:p-1 print:page-break-after-avoid print:break-inside-avoid print:inline-block print:m-1" style={{ width: '50mm', height: '30mm', overflow: 'hidden' }}>
 
                               {/* Header: Business Name */}
                               {(settings?.businessName || 'SNA Mobile') && (
@@ -899,8 +916,8 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
                   <div className="pt-6 border-t border-slate-100 mt-6 flex gap-3 justify-end no-print">
                      <button onClick={() => setIsBarcodeModalOpen(false)} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-slate-100 transition-all">Cancel</button>
-                     <button onClick={handlePrintBarcodes} className="px-6 py-2.5 bg-purple-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide shadow-lg hover:bg-purple-700 transition-all flex items-center gap-2">
-                        <Printer size={14} /> Print Labels
+                     <button onClick={handlePrintBarcodes} className="px-6 py-2.5 bg-purple-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide  hover:bg-purple-700 transition-all flex items-center gap-2">
+                        <Printer size={14} strokeWidth={1.75} /> Print Labels
                      </button>
                   </div>
                </>

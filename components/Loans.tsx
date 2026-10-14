@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../db';
 import { Loan, User, UserRole, Product, Agent, AppSettings } from '../types';
 import {
@@ -83,6 +83,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
     }, []);
 
     const fetchData = async () => {
+        try {
         const [a, l, p, s] = await Promise.all([
             db.agents.toArray(),
             db.loans.toArray(),
@@ -93,11 +94,13 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
         setLoans(l.sort((x, y) => y.timestamp - x.timestamp));
         setProducts(p.filter(prod => prod.stockQuantity > 0));
         setSettings(s || null);
+        } catch (error) { showToast('Could not load consignments. Please refresh and retry.', 'error'); }
     };
 
     // --- ACTIONS ---
     const handleSaveAgent = async (e: React.FormEvent) => {
         e.preventDefault();
+      if (!confirm("Save this agent profile?")) return;
         setIsSaving(true);
         try {
             if (!agentForm.name) throw new Error("Agent Name Required");
@@ -132,9 +135,14 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
         } catch (err: any) { showToast(err.message, 'error'); } finally { setIsSaving(false); }
     };
 
+    const issueId = useRef(crypto.randomUUID());
+    const issueSaving = useRef(false);
     const handleIssueStock = async (e: React.FormEvent) => {
         e.preventDefault();
+      if (issueSaving.current) return;
+      if (!confirm("Issue this stock to the selected agent?")) return;
         if (!selectedAgent) return;
+        issueSaving.current = true;
         setIsSaving(true);
         try {
             // Manual Entry Validation
@@ -143,6 +151,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
             const payload: Loan = {
                 ...stockForm as Loan,
+                id: issueId.current,
                 agentId: selectedAgent.id,
                 customerName: selectedAgent.name,
                 customerPhone: selectedAgent.phone,
@@ -153,36 +162,20 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                 remittedAmount: stockForm.deposit || 0
             };
 
-            await db.loans.add(payload);
-
-            // Stock Deduction (Only if product was selected from inventory)
-            if (stockForm.productId) {
-                const prod = products.find(p => p.id === stockForm.productId);
-                if (prod && prod.id) {
-                    await db.products.update(prod.id, { stockQuantity: prod.stockQuantity - 1 });
-                    await db.stockLogs.add({
-                        productId: prod.id,
-                        productName: prod.name,
-                        previousStock: prod.stockQuantity,
-                        newStock: prod.stockQuantity - 1,
-                        changeAmount: -1,
-                        reason: 'Agent Issue',
-                        note: `Issued to ${selectedAgent.name} (Ref: ${stockForm.imei})`,
-                        user: user.username,
-                        timestamp: Date.now()
-                    });
-                }
-            }
+            if (products.find(product => product.id === stockForm.productId)?.type === 'Phone') throw new Error('Serialized phone consignment is not supported by this form. Use the IMEI-tracked sales workflow; no stock has been issued.');
+            await db.issueConsignment(payload);
+            issueId.current = crypto.randomUUID();
 
             setIsStockModalOpen(false);
             setStockForm(stockFormInitial);
             fetchData(); // Refresh loan list
             showToast('Stock issued successfully', 'success');
-        } catch (err: any) { showToast(err.message, 'error'); } finally { setIsSaving(false); }
+        } catch (err: any) { showToast(err.message, 'error'); } finally { issueSaving.current = false; setIsSaving(false); }
     };
 
     const handleUpdateStatus = async (e: React.FormEvent) => {
         e.preventDefault();
+      if (!confirm("Update this consignment and payment status?")) return;
         if (!statusUpdateId) return;
         setIsSaving(true);
         try {
@@ -394,14 +387,14 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                     </div>
                     <button
                         onClick={() => { setEditingId(null); setAgentForm(agentFormInitial); setIsAgentModalOpen(true); }}
-                        className="flex items-center gap-2 px-5 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold shadow-lg hover:bg-black transition-all"
+                        className="flex items-center gap-2 px-5 py-2 bg-slate-900 text-white rounded-lg text-sm font-bold  hover:bg-black transition-all"
                     >
-                        <Plus size={18} /> Register Agent
+                        <Plus size={18} strokeWidth={1.75} /> Register Agent
                     </button>
                 </div>
 
-                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-4">
-                    <Search className="text-slate-400" size={18} />
+                <div className="bg-white p-4 rounded-3xl border border-slate-200  flex items-center gap-4">
+                    <Search className="text-slate-400" size={18} strokeWidth={1.75} />
                     <input
                         className="flex-1 bg-transparent outline-none text-sm font-bold placeholder:font-normal"
                         placeholder="Search agents..."
@@ -417,7 +410,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                         const activeLoans = myLoans.filter(l => l.status === 'Active');
 
                         return (
-                            <div key={agent.id} onClick={() => { setSelectedAgentId(agent.id!); setView('profile'); setLoanSearchTerm(''); setProfileTab('active'); }} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer group relative">
+                            <div key={agent.id} onClick={() => { setSelectedAgentId(agent.id!); setView('profile'); setLoanSearchTerm(''); setProfileTab('active'); }} className="bg-white p-6 rounded-3xl border border-slate-200   transition-all cursor-pointer group relative">
                                 <div className="flex justify-between items-start mb-4">
                                     <div className="flex items-center gap-3">
                                         <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center text-slate-400 font-bold text-lg uppercase border border-slate-100">
@@ -448,7 +441,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                     })}
                     {filteredAgents.length === 0 && (
                         <div className="col-span-full py-20 text-center text-slate-400">
-                            <Users size={48} className="mx-auto mb-4 opacity-20" />
+                            <Users size={32} className="mx-auto mb-4 opacity-20" strokeWidth={1.75} />
                             <p className="text-sm font-medium">No agents found. Register one to get started.</p>
                         </div>
                     )}
@@ -490,8 +483,8 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                             </select>
                         </div>
                         <div className="pt-4">
-                            <button disabled={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2">
-                                {isSaving && <Loader2 className="animate-spin" size={14} />} {isSaving ? 'Saving...' : 'Save Agent Profile'}
+                            <button disabled={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm  hover:bg-black transition-all flex items-center justify-center gap-2">
+                                {isSaving && <Loader2 className="animate-spin" size={14} strokeWidth={1.75} />} {isSaving ? 'Saving...' : 'Save Agent Profile'}
                             </button>
                         </div>
                     </form>
@@ -506,7 +499,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
             {/* Header / Nav */}
             <div className="flex items-center gap-4 border-b border-slate-200 pb-4 shrink-0">
                 <button onClick={() => setView('directory')} className="p-2 hover:bg-white rounded-full transition-colors border border-transparent hover:border-slate-200 text-slate-500">
-                    <ArrowLeft size={20} />
+                    <ArrowLeft size={20} strokeWidth={1.75} />
                 </button>
                 <div>
                     <div className="flex items-center gap-2">
@@ -520,10 +513,10 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                 <div className="ml-auto flex gap-2">
                     <button
                         onClick={() => setIsReportOpen(true)}
-                        className="p-2 text-slate-400 hover:text-slate-900 bg-white border border-slate-200 rounded-lg shadow-sm transition-colors"
+                        className="p-2 text-slate-400 hover:text-slate-900 bg-white border border-slate-200 rounded-lg  transition-colors"
                         title="Generate Statement"
                     >
-                        <FileText size={16} />
+                        <FileText size={16} strokeWidth={1.75} />
                     </button>
                     <button
                         onClick={() => {
@@ -541,18 +534,18 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                                 setIsAgentModalOpen(true);
                             }
                         }}
-                        className="p-2 text-slate-400 hover:text-blue-600 bg-white border border-slate-200 rounded-lg shadow-sm"
+                        className="p-2 text-slate-400 hover:text-blue-600 bg-white border border-slate-200 rounded-lg "
                         title="Edit Agent"
                     >
-                        <Edit2 size={16} />
+                        <Edit2 size={16} strokeWidth={1.75} />
                     </button>
                     {canModify && (
                         <button
                             onClick={() => selectedAgent && setAgentToDelete(selectedAgent)}
-                            className="p-2 text-slate-400 hover:text-red-600 bg-white border border-slate-200 rounded-lg shadow-sm"
+                            className="p-2 text-slate-400 hover:text-red-600 bg-white border border-slate-200 rounded-lg "
                             title="Delete Agent"
                         >
-                            <Trash2 size={16} />
+                            <Trash2 size={16} strokeWidth={1.75} />
                         </button>
                     )}
                 </div>
@@ -560,42 +553,42 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
             {/* Stats Grid */}
             <div className="grid grid-cols-3 gap-4 shrink-0">
-                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 ">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Active Stock</p>
                     <p className="text-2xl font-bold text-slate-900">{agentStats.items}</p>
                 </div>
-                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 ">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Stock Value</p>
                     <p className="text-2xl font-bold text-slate-900">{agentStats.totalValue.toLocaleString()}</p>
                 </div>
-                <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-4 rounded-3xl border border-slate-200 ">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total Remitted</p>
                     <p className="text-2xl font-bold text-emerald-600">{agentStats.paid.toLocaleString()}</p>
                 </div>
             </div>
 
             {/* Main Content: Stock List */}
-            <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col overflow-hidden min-h-[400px]">
+            <div className="flex-1 bg-white rounded-3xl border border-slate-200  flex flex-col overflow-hidden min-h-[400px]">
                 <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-center bg-slate-50 gap-4">
                     <div className="flex items-center gap-4 w-full sm:w-auto">
                         {/* Tabs */}
                         <div className="flex p-1 bg-slate-200 rounded-lg shrink-0">
                             <button
                                 onClick={() => setProfileTab('active')}
-                                className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide flex items-center gap-2 transition-all ${profileTab === 'active' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide flex items-center gap-2 transition-all ${profileTab === 'active' ? 'bg-white text-slate-900 ' : 'text-slate-500 hover:text-slate-700'}`}
                             >
-                                <Box size={14} /> Active Stock
+                                <Box size={14} strokeWidth={1.75} /> Active Stock
                             </button>
                             <button
                                 onClick={() => setProfileTab('history')}
-                                className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide flex items-center gap-2 transition-all ${profileTab === 'history' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                                className={`px-3 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-wide flex items-center gap-2 transition-all ${profileTab === 'history' ? 'bg-white text-slate-900 ' : 'text-slate-500 hover:text-slate-700'}`}
                             >
-                                <History size={14} /> Transaction History
+                                <History size={14} strokeWidth={1.75} /> Transaction History
                             </button>
                         </div>
 
                         <div className="relative flex-1 sm:w-64">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} strokeWidth={1.75} />
                             <input
                                 className="w-full pl-9 h-9 text-xs font-bold bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-slate-300"
                                 placeholder="Search items..."
@@ -606,9 +599,9 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                     </div>
                     <button
                         onClick={() => { setEditingId(null); setStockForm(stockFormInitial); setIsStockModalOpen(true); }}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20"
+                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-emerald-700 transition-all  "
                     >
-                        <Plus size={14} strokeWidth={3} /> Issue Stock
+                        <Plus size={14} strokeWidth={1.75} /> Issue Stock
                     </button>
                 </div>
 
@@ -653,7 +646,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                                     <td className="px-6 py-3 text-right">
                                         <button
                                             onClick={() => openStatusModal(l)}
-                                            className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold uppercase text-slate-600 hover:border-slate-300 transition-all shadow-sm"
+                                            className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold uppercase text-slate-600 hover:border-slate-300 transition-all "
                                         >
                                             {l.status === 'Sold' ? 'View Sale' : 'Update / Sell'}
                                         </button>
@@ -682,7 +675,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                 noPadding
             >
                 <div className="flex-1 overflow-y-auto p-8 bg-slate-200 flex justify-center">
-                    <div id="agent-report" className="receipt-a4-mode bg-white p-8 shadow-xl text-slate-900 w-full max-w-[210mm] min-h-[297mm]">
+                    <div id="agent-report" className="receipt-a4-mode bg-white p-8  text-slate-900 w-full max-w-[210mm] min-h-[297mm]">
                         {/* Report Header */}
                         <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
                             <div>
@@ -783,16 +776,16 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                 <div className="p-5 border-t border-slate-100 bg-white flex gap-4 justify-end no-print">
                     <button onClick={() => setIsReportOpen(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs uppercase hover:bg-slate-200 transition-colors">Close</button>
                     <button onClick={handleSendWhatsApp} className="px-6 py-2.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl font-bold text-xs uppercase hover:bg-emerald-100 transition-colors flex items-center gap-2">
-                        <MessageCircle size={16} /> WhatsApp
+                        <MessageCircle size={16} strokeWidth={1.75} /> WhatsApp
                     </button>
                     <button onClick={handlePrintReport} disabled={isPrinting} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-bold text-xs uppercase hover:bg-slate-50 transition-colors flex items-center gap-2">
-                        {isPrinting ? <Loader2 size={16} className="animate-spin" /> : <Printer size={16} />} Print
+                        {isPrinting ? <Loader2 size={16} className="animate-spin" strokeWidth={1.75} /> : <Printer size={16} strokeWidth={1.75} />} Print
                     </button>
                     <button onClick={handleEmailReport} className="px-6 py-2.5 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl font-bold text-xs uppercase hover:bg-blue-100 transition-colors flex items-center gap-2">
-                        <Mail size={16} /> Email
+                        <Mail size={16} strokeWidth={1.75} /> Email
                     </button>
                     <button onClick={handleDownloadReport} disabled={isDownloading} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase hover:bg-black transition-colors flex items-center gap-2">
-                        {isDownloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />} Download PDF
+                        {isDownloading ? <Loader2 size={16} className="animate-spin" strokeWidth={1.75} /> : <Download size={16} strokeWidth={1.75} />} Download PDF
                     </button>
                 </div>
             </Modal>
@@ -815,7 +808,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                         {/* Inventory Picker */}
                         <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100">
                             <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                                <Box size={14} className="text-slate-400" /> SELECT FROM INVENTORY (CONSIGNMENT)
+                                <Box size={14} className="text-slate-400" strokeWidth={1.75} /> SELECT FROM INVENTORY (CONSIGNMENT)
                             </label>
                             <select
                                 className="w-full h-12 bg-white border border-slate-200 rounded-xl px-4 text-xs font-bold text-slate-700 outline-none focus:border-slate-400 focus:ring-4 focus:ring-slate-100 transition-all"
@@ -911,9 +904,9 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                         <button
                             type="submit"
                             disabled={isSaving}
-                            className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-600/20 hover:bg-emerald-700 transition-all flex items-center gap-2"
+                            className="px-6 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest   hover:bg-emerald-700 transition-all flex items-center gap-2"
                         >
-                            {isSaving ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} strokeWidth={4} />} CONFIRM ISSUE
+                            {isSaving ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : <Check size={14} strokeWidth={1.75} />} CONFIRM ISSUE
                         </button>
                     </div>
                 </form>
@@ -940,7 +933,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                                 <option value="Defaulted">Defaulted</option>
                                 <option value="Repossessed">Repossessed</option>
                             </select>
-                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} />
+                            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={14} strokeWidth={1.75} />
                         </div>
                     </div>
 
@@ -968,9 +961,9 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                         <button
                             type="submit"
                             disabled={isSaving}
-                            className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-xs uppercase tracking-widest shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2"
+                            className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-xs uppercase tracking-widest  hover:bg-black transition-all flex items-center justify-center gap-2"
                         >
-                            {isSaving ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} strokeWidth={3} />} UPDATE RECORD
+                            {isSaving ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : <Check size={14} strokeWidth={1.75} />} UPDATE RECORD
                         </button>
                     </div>
                 </form>
@@ -978,11 +971,11 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
             {/* --- REGISTER AGENT MODAL --- */}
             {isAgentModalOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-white/20">
+                <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
+                    <div className="bg-white w-full max-w-md rounded-2xl  overflow-hidden border border-white/20">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center">
                             <h2 className="text-lg font-bold text-slate-900">{editingId ? 'Edit Profile' : 'New Agent Profile'}</h2>
-                            <button onClick={() => setIsAgentModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-900" /></button>
+                            <button onClick={() => setIsAgentModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-900" strokeWidth={1.75} /></button>
                         </div>
                         <form onSubmit={handleSaveAgent} className="p-6 space-y-4">
                             <div className="space-y-1.5">
@@ -1018,8 +1011,8 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                                 </select>
                             </div>
                             <div className="pt-4">
-                                <button disabled={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm shadow-lg hover:bg-black transition-all flex items-center justify-center gap-2">
-                                    {isSaving && <Loader2 className="animate-spin" size={14} />} {isSaving ? 'Saving...' : 'Save Agent Profile'}
+                                <button disabled={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm  hover:bg-black transition-all flex items-center justify-center gap-2">
+                                    {isSaving && <Loader2 className="animate-spin" size={14} strokeWidth={1.75} />} {isSaving ? 'Saving...' : 'Save Agent Profile'}
                                 </button>
                             </div>
                         </form>
@@ -1029,10 +1022,10 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
             {/* DELETE AGENT CONFIRMATION */}
             {agentToDelete && (
-                <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm animate-in">
-                    <div className="bg-white w-full max-w-sm rounded-[2.5rem] shadow-2xl p-8 text-center space-y-6 border border-white/20">
+                <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
+                    <div className="bg-white w-full max-w-sm rounded-[2.5rem]  p-8 text-center space-y-6 border border-white/20">
                         <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                            <AlertTriangle size={40} strokeWidth={2} />
+                            <AlertTriangle size={32} strokeWidth={1.75} />
                         </div>
                         <div>
                             <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Confirm Deletion</h3>
@@ -1042,8 +1035,8 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                             <button onClick={() => setAgentToDelete(null)} disabled={isDeleting} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                            <button onClick={confirmDeleteAgent} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-red-600/20 hover:bg-red-700 transition-all flex items-center justify-center gap-2">
-                                {isDeleting ? <Loader2 className="animate-spin" size={14} /> : null} {isDeleting ? 'Deleting...' : 'Yes, Delete'}
+                            <button onClick={confirmDeleteAgent} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest   hover:bg-red-700 transition-all flex items-center justify-center gap-2">
+                                {isDeleting ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : null} {isDeleting ? 'Deleting...' : 'Yes, Delete'}
                             </button>
                         </div>
                     </div>
