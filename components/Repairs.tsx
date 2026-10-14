@@ -1,7 +1,9 @@
+import { normalizeCustomerPhone } from '../utils/customers';
+import { getSaleType } from '../utils/pos';
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../db';
-import { Repair, RepairStatus, User, UserRole, AppSettings } from '../types';
+import { Repair, RepairStatus, User, UserRole, AppSettings, Sale, SaleItem, Product } from '../types';
 import {
    Plus, Search, X, Trash2, Printer,
    Wrench, User as UserIcon, Clock, AlertCircle,
@@ -143,6 +145,12 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
 
          // Refresh & Open Receipt
          await fetchRepairs();
+
+         // Create sale from parts if any were sold
+         if (formData.partsUsed && formData.partsUsed.length > 0) {
+            await createSaleFromRepair(finalData, timestamp);
+         }
+
          closeModal();
 
          // Open Receipt automatically for new repairs or major updates
@@ -155,6 +163,106 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
          showToast(`Validation Error: ${err.message}`, 'error');
       } finally {
          setLoading(false);
+      }
+   };
+
+   // Create sale from repair parts and update inventory
+   const createSaleFromRepair = async (repair: Repair, timestamp: number) => {
+      try {
+         if (!repair.partsUsed || repair.partsUsed.length === 0) return;
+
+         // Get all products for lookup
+         const allProducts = await db.products.toArray();
+
+         // Build sale items and update inventory
+         const saleItems: SaleItem[] = [];
+         let subtotal = 0;
+
+         for (const part of repair.partsUsed) {
+            const product = allProducts.find(p => p.id === part.productId);
+            if (product) {
+               const itemTotal = part.cost || product.selling_price || 0;
+               subtotal += itemTotal;
+
+               saleItems.push({
+                  productId: part.productId,
+                  name: part.name || product.name,
+                  quantity: 1,
+                  price: itemTotal,
+                  total: itemTotal,
+                  originalPrice: product.selling_price || 0
+               });
+
+            }
+         }
+
+         if (!saleItems.length || !repair.id) return;
+         const customers = await db.customers.toArray();
+         const matches = customers.filter(customer => normalizeCustomerPhone(customer.phone) === normalizeCustomerPhone(repair.customerPhone));
+         if (!normalizeCustomerPhone(repair.customerPhone) || matches.length !== 1) throw new Error('Select a unique registered customer with the repair phone number before recording parts.');
+         const saleId = `repair-${repair.id}-parts`;
+         const existing = (await db.sales.toArray()).find(sale => sale.id === saleId);
+         const amountPaid = existing?.amountPaid ?? Math.min(subtotal, repair.depositPaid || 0);
+         const sale: Sale = {
+            ...existing,
+            id: saleId,
+            customerId: matches[0].id,
+            saleType: getSaleType({ total: subtotal, amountPaid }),
+            receiptNo: existing?.receiptNo || `REP-${repair.id}`,
+            items: saleItems,
+            subtotal: subtotal,
+            discount: 0,
+            tax: 0,
+            total: subtotal,
+            amountPaid,
+            balance: Math.max(0, subtotal - amountPaid),
+            paymentMethod: 'Cash',
+            cashierName: user.fullName || user.username || 'Technician',
+            customerName: repair.customerName,
+            customerPhone: repair.customerPhone,
+            customerType: 'Retail',
+            timestamp: existing?.timestamp || timestamp,
+            isSynced: false,
+            wasHeld: false
+         };
+
+         await db.commitSale(sale, false, existing ? 'edit' : 'create');
+
+         // Update repair with sale info
+         if (repair.id) {
+            await db.repairs.update(repair.id, {
+               saleInfo: {
+                  receiptNo: sale.receiptNo,
+                  items: saleItems.map(item => ({ name: item.name, price: item.price })),
+                  total: subtotal,
+                  paymentMethod: sale.paymentMethod
+               }
+            });
+         }
+
+         showToast(`Sale created from repair parts: ${sale.receiptNo}`, 'success');
+
+      } catch (error) {
+         console.error('Error creating sale from repair:', error);
+         throw error;
+      }
+   };
+
+   // Collect payment for repair service and record as sale
+   const collectRepairPayment = async (repair: Repair, amount: number, paymentMethod: string = 'Cash') => {
+      try {
+         if (!repair.id || amount <= 0) return;
+
+         if (!confirm(`Collect UGX ${amount.toLocaleString()} for repair ${repair.jobCardNo}?`)) return;
+         await db.collectRepairPayment(repair.id, amount, repair.depositPaid || 0, user.fullName || user.username, paymentMethod);
+         showToast(`Payment recorded for job card ${repair.jobCardNo}`, 'success');
+
+         // Refresh repairs data
+         await fetchRepairs();
+
+      } catch (error) {
+         console.error('Error collecting repair payment:', error);
+         showToast('Failed to record payment', 'error');
       }
    };
 
@@ -374,9 +482,21 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
                            UGX {(repair.estimatedCost - repair.depositPaid).toLocaleString()}
                         </p>
                      </div>
-                     <div className="text-right">
-                        <p className="text-[10px] font-bold text-slate-400 uppercase">Job ID</p>
-                        <p className="text-xs font-mono font-bold text-slate-900">{repair.jobCardNo}</p>
+                     <div className="flex items-center gap-2">
+                        {(repair.estimatedCost - repair.depositPaid) > 0 && (
+                           <button
+                              onClick={() => collectRepairPayment(repair, repair.estimatedCost - repair.depositPaid)}
+                              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-bold transition-colors flex items-center gap-1"
+                              title="Collect full payment"
+                           >
+                              <DollarSign size={12} />
+                              Pay
+                           </button>
+                        )}
+                        <div className="text-right">
+                           <p className="text-[10px] font-bold text-slate-400 uppercase">Job ID</p>
+                           <p className="text-xs font-mono font-bold text-slate-900">{repair.jobCardNo}</p>
+                        </div>
                      </div>
                   </div>
                </div>
@@ -578,6 +698,31 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
                               <span className="font-bold text-sm">{(activeRepairForReceipt.estimatedCost - activeRepairForReceipt.depositPaid).toLocaleString()}</span>
                            </div>
                         </div>
+
+                        {/* PARTS SOLD - Show if sale info exists */}
+                        {activeRepairForReceipt.saleInfo && (
+                           <>
+                              <div className="text-center font-bold mb-2 text-[10px]">--------------------------------</div>
+                              <div className="mb-3">
+                                 <div className="font-bold uppercase text-[9px] mb-1">Parts Sold:</div>
+                                 <div className="space-y-0.5">
+                                    {activeRepairForReceipt.saleInfo.items.map((item, i) => (
+                                       <div key={i} className="flex justify-between text-[10px]">
+                                          <span className="flex-1">{item.name}</span>
+                                          <span className="font-bold">{item.price.toLocaleString()}</span>
+                                       </div>
+                                    ))}
+                                 </div>
+                                 <div className="flex justify-between border-t border-dashed border-black pt-1 mt-1">
+                                    <span className="font-bold text-[10px]">Parts Total:</span>
+                                    <span className="font-bold">{activeRepairForReceipt.saleInfo.total.toLocaleString()}</span>
+                                 </div>
+                                 <div className="text-center text-[9px] mt-1">
+                                    Sale Receipt: {activeRepairForReceipt.saleInfo.receiptNo}
+                                 </div>
+                              </div>
+                           </>
+                        )}
 
                         {/* BARCODE */}
                         <div className="flex flex-col items-center justify-center my-4 overflow-hidden">

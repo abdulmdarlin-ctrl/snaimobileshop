@@ -73,6 +73,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
     const [statusForm, setStatusForm] = useState(statusFormInitial);
 
     const canModify = [UserRole.ADMIN, UserRole.MANAGER].includes(user.role);
+    const isAdmin = user.role === UserRole.ADMIN;
 
     // Derived State
     const selectedAgent = useMemo(() => agents.find(a => a.id === selectedAgentId) || null, [agents, selectedAgentId]);
@@ -557,10 +558,12 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Active Stock</p>
                     <p className="text-2xl font-bold text-slate-900">{agentStats.items}</p>
                 </div>
+                {isAdmin && (
                 <div className="bg-white p-4 rounded-3xl border border-slate-200 ">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Stock Value</p>
                     <p className="text-2xl font-bold text-slate-900">{agentStats.totalValue.toLocaleString()}</p>
                 </div>
+                )}
                 <div className="bg-white p-4 rounded-3xl border border-slate-200 ">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Total Remitted</p>
                     <p className="text-2xl font-bold text-emerald-600">{agentStats.paid.toLocaleString()}</p>

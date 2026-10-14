@@ -333,3 +333,23 @@ test('staff access requires an explicit active profile and valid stored role', (
     assert.equal(activeStaffProfile({ username: 'admin-name', role: 'Cashier', isActive: true }, 'uid').role, 'Cashier');
     assert.equal(activeStaffProfile({ username: 'staff', role: 'Admin', isActive: true }, 'uid').id, 'uid');
 });
+
+
+test('repair collection rejects stale balances and logs one payment without duplicate sales', async () => {
+    const { db, records } = database();
+    records.set('repairs/r1', { jobCardNo: 'JOB-1', estimatedCost: 100, depositPaid: 20 });
+    await db.collectRepairPayment('r1', 80, 20, 'cashier', 'Cash');
+    assert.equal(records.get('repairs/r1').depositPaid, 100);
+    assert.equal(records.get('repairs/r1').isPaid, true);
+    await assert.rejects(db.collectRepairPayment('r1', 80, 20, 'cashier', 'Cash'), /balance changed/);
+    assert.equal([...records.keys()].filter(key => key.startsWith('sales/')).length, 0);
+    assert.equal([...records.keys()].filter(key => key.startsWith('auditLogs/')).length, 1);
+});
+test('repair collection rolls back on commit failure and rejects overpayment', async () => {
+    const { db, records, fail } = database();
+    records.set('repairs/r1', { jobCardNo: 'JOB-1', estimatedCost: 100, depositPaid: 20 });
+    await assert.rejects(db.collectRepairPayment('r1', 90, 20, 'cashier', 'Cash'), /exceeds/);
+    fail();
+    await assert.rejects(db.collectRepairPayment('r1', 80, 20, 'cashier', 'Cash'), /Simulated/);
+    assert.equal(records.get('repairs/r1').depositPaid, 20);
+});

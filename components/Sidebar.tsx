@@ -23,25 +23,24 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
     {
       label: 'Main',
       items: [
-        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.TECHNICIAN, UserRole.AUDITOR] },
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.TECHNICIAN, UserRole.AUDITOR, UserRole.CASHIER] },
       ]
     },
     {
       label: 'Operations',
       items: [
         { id: 'sales', label: 'Sales (POS)', icon: ShoppingCart, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER] },
-        { id: 'inventory', label: 'Inventory', icon: Package, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.AUDITOR, UserRole.CASHIER] }, // Cashiers need to see stock, but not edit
-        { id: 'customers', label: 'Customers', icon: ContactRound, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER] },
+        { id: 'inventory', label: 'Inventory', icon: Package, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.AUDITOR, UserRole.CASHIER, UserRole.TECHNICIAN] },
+        { id: 'customers', label: 'Customers', icon: ContactRound, roles: [UserRole.ADMIN] },
         { id: 'loans', label: 'Consignment', icon: HandCoins, roles: [UserRole.ADMIN, UserRole.MANAGER] },
-        { id: 'repairs', label: 'Repairs', icon: Wrench, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.TECHNICIAN] },
-        { id: 'expenses', label: 'Expenses', icon: ReceiptText, roles: [UserRole.ADMIN, UserRole.MANAGER] },
+        { id: 'repairs', label: 'Repairs', icon: Wrench, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.TECHNICIAN, UserRole.CASHIER] },
+        { id: 'expenses', label: 'Expenses', icon: ReceiptText, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER] },
       ]
     },
     {
       label: 'Management',
       items: [
         { id: 'reports', label: 'Reports', icon: BarChart3, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.AUDITOR] },
-        // Settings restricted to Admin for system config. Others go to settings to view profile only.
         { id: 'settings', label: 'Settings', icon: SettingsIcon, roles: [UserRole.ADMIN, UserRole.MANAGER, UserRole.CASHIER, UserRole.TECHNICIAN, UserRole.AUDITOR] },
       ]
     }

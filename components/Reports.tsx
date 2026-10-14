@@ -3,7 +3,7 @@ import { saleReceipts, outstandingAmount, itemNetValue } from '../utils/pos';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../db';
-import { Sale, Repair, Product, Expense } from '../types';
+import { Sale, Repair, Product, Expense, User, UserRole } from '../types';
 import {
    LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
    PieChart, Pie, Cell
@@ -16,7 +16,7 @@ import { exportSectionToPDF } from '../utils/printExport';
 
 type TimeRange = '7d' | '30d' | 'month' | 'year' | 'all';
 
-const Reports: React.FC = () => {
+const Reports: React.FC<{ user: User }> = ({ user }) => {
    const { showToast } = useToast();
    const [loading, setLoading] = useState(true);
    const [timeRange, setTimeRange] = useState<TimeRange>('30d');
@@ -32,6 +32,22 @@ const Reports: React.FC = () => {
       expenses: Expense[];
    }>({ sales: [], repairs: [], products: [], expenses: [] });
 
+   const isAdmin = user?.role === UserRole.ADMIN;
+
+   // Date filtering helper - non-admin users only see today and yesterday data
+   const filterDataByRole = <T extends { timestamp?: number; date?: number }>(data: T[]): T[] => {
+      if (isAdmin) return data;
+
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const yesterday = today - 24 * 60 * 60 * 1000;
+
+      return data.filter(item => {
+         const timestamp = item.timestamp ?? item.date;
+         return timestamp != null && timestamp >= yesterday && timestamp <= Date.now();
+      });
+   };
+
    useEffect(() => {
       const fetchData = async () => {
          setLoading(true);
@@ -42,7 +58,12 @@ const Reports: React.FC = () => {
                db.products.toArray(),
                db.expenses.toArray()
             ]);
-            setData({ sales, repairs, products, expenses });
+            setData({
+               sales: filterDataByRole(sales),
+               repairs: filterDataByRole(repairs),
+               products,
+               expenses: filterDataByRole(expenses)
+            });
          } catch (error) { showToast('Could not load reports. Please refresh and retry.', 'error'); } finally {
             setLoading(false);
          }
@@ -148,7 +169,7 @@ const Reports: React.FC = () => {
          });
 
          // Process Repairs (Only if All or specific 'Repair' logic, skipping for product categories)
-         // If selectedCategory is 'All', we include repairs. 
+         // If selectedCategory is 'All', we include repairs.
          // If selectedCategory matches a product category, we exclude repairs (unless we map repairs to categories later)
          if (selectedCategory === 'All') {
             rList.forEach(r => {

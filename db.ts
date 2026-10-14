@@ -151,6 +151,21 @@ async function saveInventoryProduct(data: Partial<Product>, id?: string) {
 }
 
 export const db = {
+  collectRepairPayment: async (id: string, amount: number, expectedDeposit: number, actor: string, method: string) => {
+    if (!Number.isFinite(amount) || amount <= 0 || !['Cash', 'Mobile Money', 'Bank'].includes(method)) throw new Error('Enter a valid payment.');
+    return runTransaction(dbInstance, async transaction => {
+      const ref = doc(dbInstance, 'repairs', id);
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists()) throw new Error('Repair no longer exists.');
+      const repair = snapshot.data() as Repair;
+      const paid = repair.depositPaid || 0;
+      if (paid !== expectedDeposit) throw new Error('Repair balance changed. Refresh before collecting payment.');
+      if (money(amount) > money(repair.estimatedCost - paid)) throw new Error('Payment exceeds the repair balance.');
+      const depositPaid = money(paid + amount);
+      transaction.update(ref, { depositPaid, isPaid: depositPaid >= repair.estimatedCost });
+      transaction.set(doc(collection(dbInstance, 'auditLogs')), { action: 'Repair payment received', entityType: 'Repair', entityId: id, user: actor, timestamp: Date.now(), details: `${repair.jobCardNo}: ${amount} via ${method}` });
+    });
+  },
   adjustStock: async (log: StockLog) => {
     if (!log.productId || !Number.isSafeInteger(log.newStock) || log.newStock < 0) throw new Error('Enter a non-negative whole stock quantity.');
     validateRecord('stockLogs', log);

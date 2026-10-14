@@ -2,12 +2,12 @@ import { useToast } from './Toast';
 import { saleReceipts, outstandingAmount, itemNetValue, getSaleType } from '../utils/pos';
 import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { db } from '../db';
-import { Sale, Repair, Product, User, ProductType, AppSettings } from '../types';
+import { Sale, Repair, Product, User, ProductType, AppSettings, UserRole } from '../types';
 import { Page } from '../App';
 import {
    AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from 'recharts';
-import { Search, Package, ShoppingBag, Users, TrendingUp, TrendingDown, Banknote, Activity, Wrench, AlertTriangle, ArrowUpRight, ChevronDown, Calendar, Receipt, Pause, AlertCircle, Play, X, Clock, ArrowRight, Percent, BadgeCheck, CheckCircle2, Smartphone, Headphones, Battery, Box, Settings, RefreshCw } from 'lucide-react';
+import { DollarSign, Search, Package, ShoppingBag, Users, TrendingUp, TrendingDown, Banknote, Activity, Wrench, AlertTriangle, ArrowUpRight, ChevronDown, Calendar, Receipt, Pause, AlertCircle, Play, X, Clock, ArrowRight, Percent, BadgeCheck, CheckCircle2, Smartphone, Headphones, Battery, Box, Settings, RefreshCw } from 'lucide-react';
 
 interface DashboardProps {
    onNavigate: (page: Page) => void;
@@ -71,6 +71,27 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    const [isPendingExpanded, setIsPendingExpanded] = useState(false);
    const [heldTotalValue, setHeldTotalValue] = useState(0);
    const [timeTick, setTimeTick] = useState(0);
+
+   // Role-based flags
+   const isAdmin = user.role === UserRole.ADMIN;
+   const isManager = user.role === UserRole.MANAGER;
+   const isCashier = user.role === UserRole.CASHIER;
+   const isTechnician = user.role === UserRole.TECHNICIAN;
+   const isAuditor = user.role === UserRole.AUDITOR;
+
+   // Date filtering helper - non-admin users only see today and yesterday data
+   const filterDataByRole = <T extends { timestamp?: number }>(data: T[]): T[] => {
+      if (isAdmin) return data; // Admin sees all data
+
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      const yesterday = today - 24 * 60 * 60 * 1000;
+
+      return data.filter(item => {
+         if (!item.timestamp) return false;
+         return item.timestamp >= yesterday;
+      });
+   };
 
    const getProductIcon = (type: ProductType) => {
       switch (type) {
@@ -196,8 +217,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             db.settings.toCollection().first()
          ]);
 
-         setAllSales(sales.sort((a, b) => b.timestamp - a.timestamp));
-         setRawRepairs(repairs);
+         setAllSales(filterDataByRole(sales).sort((a, b) => b.timestamp - a.timestamp));
+         setRawRepairs(filterDataByRole(repairs));
          setRawProducts(products);
          setSettings(sets || null);
 
@@ -882,6 +903,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          )}
 
          {/* --- QUICK STATS CARDS --- */}
+
+         {/* ADMIN DASHBOARD - Full Access */}
+         {isAdmin && (
          <div className="dashboard-metrics grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
             {/* Sales Card */}
             <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-blue-500    transition-all group relative overflow-hidden">
@@ -957,9 +981,9 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                </div>
             </div>
 
-            {/* Inventory Value */}
+            {/* Inventory Value - ADMIN ONLY */}
+            {isAdmin && (
             <div className="bg-white p-3.5 rounded-3xl border border-slate-100 border-l-4 border-l-violet-500    transition-all group relative overflow-hidden">
-
                <div className="relative z-10">
                   <div className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 flex items-center justify-center mb-3 group-hover:bg-violet-600 group-hover:text-white transition-all duration-500 ">
                      <Package size={16} strokeWidth={1.75} />
@@ -974,9 +998,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   </p>
                </div>
             </div>
+            )}
          </div>
+         )}
 
-         {/* --- TOP ROW (Sales Overview & Category Dist) --- */}
+         {(isAdmin || isManager) && (
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100  flex flex-col md:flex-row gap-6">
 
@@ -1134,6 +1160,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
          </div>
+         )}
 
          {/* --- BOTTOM ROW (Activity & Customers) --- */}
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -1334,6 +1361,274 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
          </div>
+
+         {/* --- MANAGER DASHBOARD - Modern Card Style --- */}
+         {isManager && (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
+               {/* Revenue Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-blue-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-all duration-500">
+                        <DollarSign size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Total Revenue</p>
+                     <h3 className="text-xl font-black text-slate-900">
+                        <span className="text-sm text-slate-400 font-normal">UGX</span> {(stats.revenue || 0).toLocaleString()}
+                     </h3>
+                     <p className="text-xs text-emerald-500 font-bold mt-2 flex items-center gap-1">
+                        <TrendingUp size={12} /> Business Income
+                     </p>
+                  </div>
+               </div>
+
+               {/* Orders Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-emerald-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-500">
+                        <ShoppingBag size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Total Orders</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.orders || 0}</h3>
+                     <p className="text-xs text-slate-500 font-bold mt-2 flex items-center gap-1">
+                        <CheckCircle2 size={12} className="text-emerald-500" /> Transactions
+                     </p>
+                  </div>
+               </div>
+
+               {/* Repairs Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-purple-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-purple-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center mb-3 group-hover:bg-purple-600 group-hover:text-white transition-all duration-500">
+                        <Wrench size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Active Repairs</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.repairs || 0}</h3>
+                     <p className="text-xs text-purple-500 font-bold mt-2 flex items-center gap-1">
+                        <Activity size={12} /> In Progress
+                     </p>
+                  </div>
+               </div>
+
+               {/* Low Stock Alert Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-orange-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-orange-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center mb-3 group-hover:bg-orange-600 group-hover:text-white transition-all duration-500">
+                        <AlertTriangle size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Low Stock</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.lowStockCount || 0}</h3>
+                     <p className="text-xs text-orange-500 font-bold mt-2 flex items-center gap-1">
+                        <AlertCircle size={12} /> Needs Reorder
+                     </p>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* --- CASHIER DASHBOARD - Modern Card Style --- */}
+         {isCashier && (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
+               {/* Sales Today Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-blue-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-all duration-500">
+                        <DollarSign size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Sales Today</p>
+                     <h3 className="text-xl font-black text-slate-900">
+                        <span className="text-sm text-slate-400 font-normal">UGX</span> {(stats.revenueToday || 0).toLocaleString()}
+                     </h3>
+                     <p className="text-xs text-emerald-500 font-bold mt-2 flex items-center gap-1">
+                        <TrendingUp size={12} /> Today's Revenue
+                     </p>
+                  </div>
+               </div>
+
+               {/* Invoices Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-emerald-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-500">
+                        <Receipt size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Invoices</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.invoicesToday || 0}</h3>
+                     <p className="text-xs text-slate-500 font-bold mt-2 flex items-center gap-1">
+                        <CheckCircle2 size={12} className="text-emerald-500" /> Transactions
+                     </p>
+                  </div>
+               </div>
+
+               {/* Items Sold Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-amber-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-amber-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3 group-hover:bg-amber-600 group-hover:text-white transition-all duration-500">
+                        <ShoppingBag size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Items Sold</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.qtySoldToday || 0}</h3>
+                     <p className="text-xs text-amber-500 font-bold mt-2 flex items-center gap-1">
+                        <Activity size={12} /> Units Today
+                     </p>
+                  </div>
+               </div>
+
+               {/* Active Repairs Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-purple-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-purple-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center mb-3 group-hover:bg-purple-600 group-hover:text-white transition-all duration-500">
+                        <Wrench size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Active Repairs</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.repairs || 0}</h3>
+                     <p className="text-xs text-purple-500 font-bold mt-2 flex items-center gap-1">
+                        <Clock size={12} /> In Progress
+                     </p>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* --- TECHNICIAN DASHBOARD - Modern Card Style --- */}
+         {isTechnician && (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
+               {/* Active Repairs Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-blue-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-all duration-500">
+                        <Clock size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Active Repairs</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.repairs || 0}</h3>
+                     <p className="text-xs text-blue-500 font-bold mt-2 flex items-center gap-1">
+                        <Activity size={12} /> In Progress
+                     </p>
+                  </div>
+               </div>
+
+               {/* Completed Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-emerald-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-500">
+                        <CheckCircle2 size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Completed Today</p>
+                     <h3 className="text-xl font-black text-slate-900">--</h3>
+                     <p className="text-xs text-emerald-500 font-bold mt-2 flex items-center gap-1">
+                        <CheckCircle2 size={12} /> Done
+                     </p>
+                  </div>
+               </div>
+
+               {/* Pending Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-amber-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-amber-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3 group-hover:bg-amber-600 group-hover:text-white transition-all duration-500">
+                        <AlertCircle size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Pending</p>
+                     <h3 className="text-xl font-black text-slate-900">--</h3>
+                     <p className="text-xs text-amber-500 font-bold mt-2 flex items-center gap-1">
+                        <Clock size={12} /> Waiting
+                     </p>
+                  </div>
+               </div>
+
+               {/* Parts Available Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-purple-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-purple-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center mb-3 group-hover:bg-purple-600 group-hover:text-white transition-all duration-500">
+                        <Package size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Parts Available</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.inventoryCount || 0}</h3>
+                     <p className="text-xs text-purple-500 font-bold mt-2 flex items-center gap-1">
+                        <Package size={12} /> In Stock
+                     </p>
+                  </div>
+               </div>
+            </div>
+         )}
+
+         {/* --- AUDITOR DASHBOARD - Modern Card Style --- */}
+         {isAuditor && (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-4">
+               {/* Total Revenue Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-blue-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center mb-3 group-hover:bg-blue-600 group-hover:text-white transition-all duration-500">
+                        <DollarSign size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Total Revenue</p>
+                     <h3 className="text-xl font-black text-slate-900">
+                        <span className="text-sm text-slate-400 font-normal">UGX</span> {(stats.revenue || 0).toLocaleString()}
+                     </h3>
+                     <p className="text-xs text-slate-500 font-bold mt-2 flex items-center gap-1">
+                        <Activity size={12} /> All Time
+                     </p>
+                  </div>
+               </div>
+
+               {/* Today's Sales Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-emerald-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center mb-3 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-500">
+                        <TrendingUp size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Today's Sales</p>
+                     <h3 className="text-xl font-black text-slate-900">
+                        <span className="text-sm text-slate-400 font-normal">UGX</span> {(stats.revenueToday || 0).toLocaleString()}
+                     </h3>
+                     <p className="text-xs text-emerald-500 font-bold mt-2 flex items-center gap-1">
+                        <CheckCircle2 size={12} /> Current Day
+                     </p>
+                  </div>
+               </div>
+
+               {/* Total Orders Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-amber-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-amber-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mb-3 group-hover:bg-amber-600 group-hover:text-white transition-all duration-500">
+                        <ShoppingBag size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Total Orders</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.orders || 0}</h3>
+                     <p className="text-xs text-amber-500 font-bold mt-2 flex items-center gap-1">
+                        <Receipt size={12} /> Transactions
+                     </p>
+                  </div>
+               </div>
+
+               {/* Inventory Status Card */}
+               <div className="bg-white p-4 rounded-2xl border border-slate-100 border-l-4 border-l-slate-500 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all group relative overflow-hidden">
+                  <div className="absolute top-0 right-0 w-24 h-24 bg-slate-50 rounded-bl-full -mr-6 -mt-6 transition-transform group-hover:scale-110 duration-700"></div>
+                  <div className="relative z-10">
+                     <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-600 flex items-center justify-center mb-3 group-hover:bg-slate-600 group-hover:text-white transition-all duration-500">
+                        <Package size={20} strokeWidth={2} />
+                     </div>
+                     <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Inventory Status</p>
+                     <h3 className="text-xl font-black text-slate-900">{stats.inventoryCount || 0}</h3>
+                     <p className="text-xs text-orange-500 font-bold mt-2 flex items-center gap-1">
+                        <AlertTriangle size={12} /> {stats.lowStockCount || 0} Low Stock
+                     </p>
+                  </div>
+               </div>
+            </div>
+         )}
 
       </div >
    );
