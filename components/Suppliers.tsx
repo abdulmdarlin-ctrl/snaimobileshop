@@ -1,3 +1,4 @@
+import { confirmAction } from '../utils/dialog';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../db';
@@ -102,7 +103,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
    // --- Handlers: Vendor ---
    const handleSaveVendor = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!confirm("Save this supplier profile?")) return;
+      if (!await confirmAction({"title": "Save supplier profile?", "message": "Save the supplier details shown in this form.", "confirmLabel": "Save supplier"})) return;
       if (!vendorForm.name) return;
 
       try {
@@ -119,7 +120,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
    };
 
    const handleDeleteVendor = async (id: string) => {
-      if (!confirm("Delete this vendor? This cannot be undone.")) return;
+      if (!await confirmAction({ title: 'Delete supplier?', message: 'This supplier profile will be permanently removed.', confirmLabel: 'Delete supplier', tone: 'danger' })) return;
       await db.suppliers.delete(id);
       fetchData();
    };
@@ -157,7 +158,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
       if (orderCart.length === 0) return showToast("Order is empty", 'error');
       if (orderCart.some(item => products.find(product => product.id === item.productId)?.type === 'Phone')) return showToast('Register phone deliveries in Inventory with one IMEI per unit. This purchase form does not capture IMEIs.', 'error');
 
-      if (!confirm("Receive this purchase and update inventory?")) return;
+      if (!await confirmAction({ title: 'Receive purchase?', message: 'Record this delivery and add its items to available inventory.', confirmLabel: 'Receive purchase' })) return;
       const supplier = suppliers.find(s => s.id === orderSupplierId);
       const total = orderCart.reduce((sum, i) => sum + i.totalCost, 0);
 

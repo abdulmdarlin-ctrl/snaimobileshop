@@ -1,741 +1,148 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ArrowUpRight, Search, Users, UserPlus, Edit2, Download, Printer, RefreshCw, ChevronLeft, ChevronRight, ReceiptText, Wallet, ShieldCheck, FileText, AlertCircle } from 'lucide-react';
 import { db } from '../db';
-import { User, UserRole, Customer, CustomerCategory, CustomerStatus, Sale, AppSettings } from '../types';
-import {
-    Search, Edit2, Trash2, X, Users,
-    CheckCircle2, AlertCircle,
-    Download, Mail,
-    TrendingUp, ChevronLeft, ChevronRight, User as UserIcon,
-    Printer, FileText, MessageCircle, UserPlus, Phone, MapPin, Tag,
-    ChevronDown, RefreshCw, BadgeCheck
-} from 'lucide-react';
-import { useToast } from './Toast';
+import { AppSettings, Customer, CustomerCategory, CustomerStatus, Sale, User } from '../types';
+import { PermissionManager } from '../utils/permissions';
+import { confirmAction } from '../utils/dialog';
+import { findCustomerMatches, customerStatus, customerAccountSummary, escapeCustomerCSVCell, getCustomerSales, normalizeCustomerPhone, validateCustomerContact } from '../utils/customers';
+import { getSaleType, money, outstandingAmount, receivedAmount, saleReceipts } from '../utils/pos';
+import { printSection, exportSectionToPDF } from '../utils/printExport';
 import Modal from './Modal';
-import { printSection } from '../utils/printExport';
-import { escapeCustomerCSVCell, getCustomerSales, normalizeCustomerPhone } from '../utils/customers';
-import { outstandingAmount, getSaleType } from '../utils/pos';
-
-interface CustomersProps { user: User; }
-
-const Customers: React.FC<CustomersProps> = ({ user }) => {
+import AccessDenied from './AccessDenied';
+import { useToast } from './Toast';
+const currency = (n: number) => `UGX ${n.toLocaleString('en-UG', { maximumFractionDigits: 2 })}`;
+const date = (n?: number | null) => n && Number.isFinite(n) ? new Date(n).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const emptyForm = (): Partial<Customer> => ({ name: '', phone: '', email: '', address: '', category: CustomerCategory.RETAIL, status: CustomerStatus.ACTIVE, notes: '', tin: '' });
+const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map(s => s[0]).join('').toUpperCase();
+const Status = ({ value }: { value: string }) => <span className={`customer-badge ${value === 'Active' || value === 'Cash sale' ? 'positive' : value === 'Blacklisted' || value === 'Debt' ? 'negative' : 'neutral'}`}>{value}</span>;
+function csv(filename: string, rows: unknown[][]) {
+    const url = URL.createObjectURL(new Blob(['\ufeff' + rows.map(row => row.map(escapeCustomerCSVCell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8;' }));
+    const link = document.createElement('a'); link.href = url; link.download = filename; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+export default function Customers({ user }: { user: User }) {
     const { showToast } = useToast();
-    const [customers, setCustomers] = useState<Customer[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState<CustomerStatus | ''>('');
-    const [loadError, setLoadError] = useState(false);
-    const [isSaving, setIsSaving] = useState(false);
-    const savingRef = useRef(false);
-    const requestRef = useRef(0);
-    const statementRequestRef = useRef(0);
-    const [statementLoading, setStatementLoading] = useState(false);
-
-    // Pagination State
-    const [currentPage, setCurrentPage] = useState(1);
-    const itemsPerPage = 8;
-
-    // Modal State
-    const [isModalOpen, setIsModalOpen] = useState(false);
-    const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-    const [formData, setFormData] = useState<Partial<Customer>>({
-        category: CustomerCategory.RETAIL,
-        status: CustomerStatus.ACTIVE
-    });
-
-    // Statement State
-    const [isStatementModalOpen, setIsStatementModalOpen] = useState(false);
-    const [selectedCustomerForStatement, setSelectedCustomerForStatement] = useState<Customer | null>(null);
-    const [customerSales, setCustomerSales] = useState<Sale[]>([]);
+    const canView = PermissionManager.hasPermission(user.role, 'view_customers');
+    const canCreate = PermissionManager.hasPermission(user.role, 'add_customers');
+    const canEdit = PermissionManager.hasPermission(user.role, 'edit_customers');
+    const canCollect = PermissionManager.hasPermission(user.role, 'create_sales');
+    const canExport = PermissionManager.canExportData(user.role);
+    const [customers, setCustomers] = useState<Customer[]>([]), [sales, setSales] = useState<Sale[]>([]);
     const [settings, setSettings] = useState<AppSettings | null>(null);
-
-    useEffect(() => {
-        fetchData();
-        fetchSettings();
-    }, []);
-
-    // Reset page when filters change
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [searchTerm, statusFilter]);
-
-    const fetchData = async () => {
-        const request = ++requestRef.current;
-        setLoading(true);
-        setLoadError(false);
+    const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState('');
+    const request = useRef(0), lock = useRef(false), paymentId = useRef('');
+    const [busy, setBusy] = useState(false), [query, setQuery] = useState('');
+    const [status, setStatus] = useState(''), [category, setCategory] = useState(''), [balanceFilter, setBalanceFilter] = useState(''), [sort, setSort] = useState('recent');
+    const [page, setPage] = useState(1), [pageSize, setPageSize] = useState(10);
+    const [selectedId, setSelectedId] = useState<string | null>(null), [tab, setTab] = useState('overview');
+    const [receiptPage, setReceiptPage] = useState(1);
+    const [purchaseQuery, setPurchaseQuery] = useState(''), [purchaseStatus, setPurchaseStatus] = useState(''), [purchasePage, setPurchasePage] = useState(1);
+    const [editorOpen, setEditorOpen] = useState(false), [editingId, setEditingId] = useState<string | null>(null);
+    const [form, setForm] = useState<Partial<Customer>>(emptyForm), [formError, setFormError] = useState('');
+    const originalForm = useRef('');
+    const [note, setNote] = useState(''), [statusOpen, setStatusOpen] = useState(false);
+    const [nextStatus, setNextStatus] = useState(CustomerStatus.ACTIVE), [reason, setReason] = useState('');
+    const [statementOpen, setStatementOpen] = useState(false), [invoice, setInvoice] = useState<Sale | null>(null);
+    const [paymentSale, setPaymentSale] = useState<Sale | null>(null), [paymentError, setPaymentError] = useState('');
+    const [payment, setPayment] = useState({ amount: '', method: 'Cash', reference: '' });
+    async function refresh() {
+        if (!canView) { setLoading(false); return; }
+        const id = ++request.current; setLoading(true); setLoadError('');
+        try { const [records, transactions] = await Promise.all([db.customers.toArray(), db.sales.toArray()]); if (id === request.current) { setCustomers(records.map(c => ({ ...c, status: customerStatus(c.status) }))); setSales(transactions); } }
+        catch { if (id === request.current) setLoadError('Could not load customer records. Check your connection and retry.'); }
+        finally { if (id === request.current) setLoading(false); }
+    }
+    useEffect(() => { void refresh(); if (canView) void db.settings.toCollection().first().then(s => setSettings(s || null)).catch(() => {}); return () => { request.current++; }; }, [user.id, canView]);
+    const accounts = useMemo(() => customers.map(customer => { const purchases = getCustomerSales(sales, customer, customers).sort((a, b) => b.timestamp - a.timestamp); return { customer, purchases, ...customerAccountSummary(purchases) }; }), [customers, sales]);
+    const filtered = useMemo(() => {
+        const term = query.trim().toLowerCase(), phone = normalizeCustomerPhone(query);
+        return accounts.filter(a => (!status || a.customer.status === status) && (!category || a.customer.category === category) && (!balanceFilter || (balanceFilter === 'due' ? a.outstanding > 0 : a.outstanding === 0)) && (!term || [a.customer.name, a.customer.phone, a.customer.email, a.customer.address, a.customer.tin].some(v => v?.toLowerCase().includes(term)) || (phone.length > 2 && normalizeCustomerPhone(a.customer.phone).includes(phone))))
+            .sort((a, b) => sort === 'name' ? a.customer.name.localeCompare(b.customer.name) : sort === 'balance' ? b.outstanding - a.outstanding : sort === 'value' ? b.salesValue - a.salesValue : (b.customer.joinedDate || 0) - (a.customer.joinedDate || 0));
+    }, [accounts, query, status, category, balanceFilter, sort]);
+    const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
+    useEffect(() => { setPage(1); }, [query, status, category, balanceFilter, sort, pageSize]);
+    useEffect(() => { setPage(p => Math.min(p, pages)); }, [pages]);
+    const selected = accounts.find(a => a.customer.id === selectedId), customer = selected?.customer;
+    useEffect(() => { setNote(customer?.notes || ''); }, [customer?.id, customer?.notes]);
+    useEffect(() => { const ref = sessionStorage.getItem('sna_view_customer_statement'); if (!ref || loading) return; const matches = customers.filter(c => c.id === ref || c.name === ref); sessionStorage.removeItem('sna_view_customer_statement'); if (matches.length === 1) { setSelectedId(matches[0].id!); setTab('overview'); } }, [customers, loading]);
+    const purchases = (selected?.purchases || []).filter(s => (!purchaseStatus || (purchaseStatus === 'unpaid' ? outstandingAmount(s) > 0 : getSaleType(s) === purchaseStatus)) && (!purchaseQuery.trim() || [s.receiptNo, ...s.items.flatMap(i => [i.name, i.sn || '', ...(i.imeis || [])])].some(v => v.toLowerCase().includes(purchaseQuery.trim().toLowerCase()))));
+    const purchasePages = Math.max(1, Math.ceil(purchases.length / 10));
+    useEffect(() => { setPurchasePage(1); }, [selectedId, purchaseQuery, purchaseStatus]);
+    useEffect(() => { setPurchasePage(p => Math.min(p, purchasePages)); }, [purchasePages]);
+    const receipts = (selected?.purchases || []).flatMap(s => saleReceipts(s).map((r, i) => ({ ...r, receiptNo: s.receiptNo, id: `${s.id}-${i}` }))).sort((a, b) => b.timestamp - a.timestamp);
+    const receiptPages = Math.max(1, Math.ceil(receipts.length / 20));
+    useEffect(() => { setReceiptPage(1); }, [selectedId]);
+    useEffect(() => { setReceiptPage(p => Math.min(p, receiptPages)); }, [receiptPages]);
+    function openEditor(record?: Customer) { if (record ? !canEdit : !canCreate) return; const draft = record ? { ...record } : emptyForm(); setForm(draft); originalForm.current = JSON.stringify(draft); setEditingId(record?.id || null); setFormError(''); setEditorOpen(true); }
+    const customerMatches = findCustomerMatches(customers, form, editingId);
+    async function closeEditor() { if (lock.current) return; if (JSON.stringify(form) !== originalForm.current && !await confirmAction({ title: 'Discard customer changes?', message: 'Your unsaved changes will be lost.', confirmLabel: 'Discard changes', tone: 'danger' })) return; setEditorOpen(false); }
+    async function saveCustomer(e: React.FormEvent) {
+        e.preventDefault(); if (lock.current || (editingId ? !canEdit : !canCreate)) return; setFormError('');
         try {
-            const [custData, salesData] = await Promise.all([
-                db.customers.toArray(),
-                db.sales.toArray()
-            ]);
-
-            const enriched = custData.map(c => {
-                const cSales = getCustomerSales(salesData, c, custData);
-                return {
-                    ...c,
-                    totalSpending: cSales.reduce((sum, s) => sum + s.total, 0),
-                    visitCount: cSales.length,
-                    balance: cSales.reduce((sum, sale) => sum + outstandingAmount(sale), 0),
-                    loyaltyPoints: Math.floor(cSales.length / 5)
-                };
-            }) as Customer[];
-
-            if (request === requestRef.current) setCustomers(enriched.sort((a, b) => b.joinedDate - a.joinedDate));
-        } catch {
-            if (request === requestRef.current) {
-                setLoadError(true);
-                showToast('Could not load customers. Please refresh to retry.', 'error');
-            }
-        } finally {
-            if (request === requestRef.current) setLoading(false);
-        }
-    };
-
-    const fetchSettings = async () => {
-        setSettings(await db.settings.toCollection().first() || null);
-    };
-
-    const handleSave = async (e: React.FormEvent) => {
-        e.preventDefault();
-      if (!confirm("Save this customer profile?")) return;
-        if (savingRef.current) return;
-        const name = (formData.name || '').trim();
-        const phone = (formData.phone || '').trim();
-        if (!name || !normalizeCustomerPhone(phone)) {
-            showToast('Enter a customer name and a valid phone number.', 'error');
-            return;
-        }
-        if (customers.some(c => c.id !== editingCustomer?.id && normalizeCustomerPhone(c.phone) === normalizeCustomerPhone(phone))) {
-            showToast('A customer with this phone number already exists.', 'error');
-            return;
-        }
-        savingRef.current = true;
-        setIsSaving(true);
+            validateCustomerContact(form.name || '', form.phone || '', form.email || '');
+            if (customers.some(c => c.id !== editingId && normalizeCustomerPhone(c.phone) === normalizeCustomerPhone(form.phone))) throw new Error('This phone number already belongs to another customer.');
+            lock.current = true; setBusy(true);
+            if (!editingId && customerMatches.length && !await confirmAction({ title: 'Possible existing customer', message: 'A customer with this name or email already exists. Review the matches before creating a separate person.', confirmLabel: 'Create separate customer', details: customerMatches.map(m => ({ label: m.customer.name, value: m.customer.phone })) })) return;
+            if (!await confirmAction({ title: editingId ? 'Save customer changes?' : 'Create customer?', message: 'Confirm these contact details.', confirmLabel: 'Save customer', details: [{ label: 'Name', value: form.name!.trim() }, { label: 'Phone', value: form.phone!.trim() }] })) return;
+            const payload = { name: form.name!.trim(), phone: form.phone!.trim(), email: form.email?.trim() || '', address: form.address?.trim() || '', tin: form.tin?.trim() || '', notes: form.notes?.trim() || '', category: form.category || CustomerCategory.RETAIL, ...(editingId ? {} : { status: CustomerStatus.ACTIVE, joinedDate: Date.now() }) };
+            const saved = await db.saveCustomerProfile(payload, editingId || undefined, user.username, editingId ? form.updatedAt || 0 : undefined);
+            setCustomers(c => [...c.filter(record => record.id !== saved.id), saved]); setSelectedId(saved.id!); setEditorOpen(false); setTab('overview'); showToast('Customer profile saved.', 'success'); await refresh();
+        } catch (error) { setFormError(error instanceof Error ? error.message : 'Could not save customer.'); }
+        finally { lock.current = false; setBusy(false); }
+    }
+    async function updateProfile(change: Partial<Customer>, message: string) {
+        if (!customer?.id || !canEdit || lock.current) return; lock.current = true; setBusy(true);
+        try { const saved = await db.saveCustomerProfile(change, customer.id, user.username, customer.updatedAt || 0); setCustomers(c => c.map(record => record.id === saved.id ? saved : record)); showToast(message, 'success'); setStatusOpen(false); }
+        catch (error) { showToast(error instanceof Error ? error.message : 'Could not update customer.', 'error'); }
+        finally { lock.current = false; setBusy(false); }
+    }
+    async function saveStatus(e: React.FormEvent) {
+        e.preventDefault(); if (!customer || busy || !canEdit) return;
+        if (nextStatus !== CustomerStatus.ACTIVE && !reason.trim()) return showToast('Add a reason for the account restriction.', 'error');
+        if (!await confirmAction({ title: 'Change customer status?', message: nextStatus === CustomerStatus.ACTIVE ? 'This customer will be available for new sales.' : 'New sales will be blocked. Existing invoices, payments and history remain available.', confirmLabel: 'Update status', tone: nextStatus === CustomerStatus.ACTIVE ? 'default' : 'danger', details: [{ label: 'Customer', value: customer.name }, { label: 'Status', value: nextStatus }] })) return;
+        await updateProfile({ status: nextStatus, statusReason: reason.trim() }, 'Customer status updated.');
+    }
+    function openPayment(sale: Sale) { if (!canCollect) return; paymentId.current = crypto.randomUUID(); setPaymentSale(sale); setPayment({ amount: String(outstandingAmount(sale)), method: 'Cash', reference: '' }); setPaymentError(''); }
+    async function collectPayment(e: React.FormEvent) {
+        e.preventDefault(); if (!paymentSale?.id || !canCollect || lock.current) return; setPaymentError(''); const amount = Number(payment.amount);
+        if (!Number.isFinite(amount) || amount <= 0 || money(amount) > outstandingAmount(paymentSale)) return setPaymentError('Enter a positive amount no greater than the invoice balance.');
+        lock.current = true; setBusy(true);
         try {
-            const payload = {
-                name,
-                phone,
-                email: (formData.email || '').trim(),
-                address: (formData.address || '').trim(),
-                category: formData.category || CustomerCategory.RETAIL,
-                status: formData.status || CustomerStatus.ACTIVE,
-                joinedDate: editingCustomer ? editingCustomer.joinedDate : Date.now()
-            } as Customer;
+            if (!await confirmAction({ title: 'Record customer payment?', message: 'Confirm that this money has been received.', confirmLabel: 'Record payment', details: [{ label: 'Invoice', value: paymentSale.receiptNo }, { label: 'Received', value: currency(amount) }, { label: 'Method', value: payment.method }] })) return;
+            const saved = await db.recordSalePayment(paymentSale.id, { id: paymentId.current, amount, method: payment.method, reference: payment.reference.trim(), timestamp: Date.now(), user: user.username });
+            setSales(s => s.map(record => record.id === saved.id ? saved : record)); setPaymentSale(null); showToast('Payment recorded. Balance updated.', 'success');
+        } catch (error) { setPaymentError(error instanceof Error ? error.message : 'Payment failed. Please retry.'); }
+        finally { lock.current = false; setBusy(false); }
+    }
+    const purchaseTable = (rows: Sale[], actions = true) => <div className="customer-table-scroll"><table className="customer-table"><thead><tr><th>Invoice / date</th><th>Items</th><th>Sale type</th><th className="numeric">Total</th><th className="numeric">Received</th><th className="numeric">Outstanding</th>{actions && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{rows.map(s => <tr key={s.id || s.receiptNo}><td>{actions ? <button className="customer-link" onClick={() => setInvoice(s)}>{s.receiptNo}</button> : s.receiptNo}<small>{date(s.timestamp)}</small></td><td>{s.items.map(i => `${i.name} × ${i.quantity}`).join(', ')}</td><td><Status value={getSaleType(s)} /></td><td className="numeric">{currency(s.total)}</td><td className="numeric">{currency(receivedAmount(s))}</td><td className="numeric">{currency(outstandingAmount(s))}</td>{actions && <td>{outstandingAmount(s) > 0 && canCollect && <button className="customer-button compact" onClick={() => openPayment(s)}>Record payment</button>}</td>}</tr>)}</tbody></table>{!rows.length && <div className="customer-empty"><ReceiptText size={26} /><h3>No invoices found</h3><p>Purchases linked to this customer appear here.</p></div>}</div>;
+    if (!canView) return <AccessDenied message="Your account does not have permission to view customer profiles." />;
 
-            if (editingCustomer?.id) {
-                await db.customers.update(editingCustomer.id, payload);
-            } else {
-                await db.customers.add(payload);
-            }
-            setIsModalOpen(false);
-            setEditingCustomer(null);
-            showToast('Client saved successfully', 'success');
-            await fetchData();
-        } catch (e) { showToast('Failed to save', 'error'); }
-        finally { savingRef.current = false; setIsSaving(false); }
-    };
+    return <div className="customers-page">
+        <header className="customer-page-header"><div>{selected && <button className="customer-back" onClick={async () => { if (note.trim() !== (customer?.notes || '') && !await confirmAction({ title: 'Leave without saving notes?', message: 'Your unsaved customer notes will be lost.', confirmLabel: 'Discard notes', tone: 'danger' })) return; setSelectedId(null); setPurchaseQuery(''); setPurchaseStatus(''); }}><ArrowLeft size={16} /> All customers</button>}<h1>{selected ? 'Customer profile' : 'Customers'}</h1><p>{selected ? 'Contact details, purchases and account activity in one place.' : 'Manage customer relationships and keep every account in view.'}</p></div><div className="customer-actions"><button className="customer-button" disabled={loading || busy} onClick={async () => { if (customer && note.trim() !== (customer.notes || '') && !await confirmAction({ title: 'Refresh customer profile?', message: 'Unsaved notes may be replaced by the latest saved version.', confirmLabel: 'Refresh', tone: 'danger' })) return; await refresh(); }}><RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh</button>{!selected && canExport && <button className="customer-button" disabled={!filtered.length || loading || !!loadError} onClick={() => csv('customers.csv', [['Customer', 'Phone', 'Email', 'Category', 'Status', 'Purchases', 'Sales value', 'Money received', 'Outstanding', 'Last purchase'], ...filtered.map(a => [a.customer.name, a.customer.phone, a.customer.email || '', a.customer.category, a.customer.status, a.orders, a.salesValue, a.received, a.outstanding, date(a.lastPurchase)])])}><Download size={16} /> Export list</button>}{!selected && canCreate && <button className="customer-button primary" onClick={() => openEditor()}><UserPlus size={16} /> Add customer</button>}</div></header>
+        {loadError && <div className="customer-alert" role="alert"><AlertCircle size={18} />{loadError}<button onClick={() => void refresh()}>Retry</button></div>}
+        {loading && <p className="customer-loading" role="status">Refreshing customer records…</p>}
+        {!selected ? <>
+            <div className="customer-metrics"><Metric label="Total customers" value={loading || loadError ? '—' : String(customers.length)} icon={<Users size={18} />} /><Metric label="Active accounts" value={loading || loadError ? '—' : String(customers.filter(c => c.status === CustomerStatus.ACTIVE).length)} icon={<ShieldCheck size={18} />} /><Metric label="Customers with a balance" value={loading || loadError ? '—' : String(accounts.filter(a => a.outstanding > 0).length)} icon={<ReceiptText size={18} />} /><Metric label="Outstanding balances" value={loading || loadError ? '—' : currency(money(accounts.reduce((sum, a) => sum + a.outstanding, 0)))} icon={<Wallet size={18} />} /></div>
+            <section className="customer-card"><div className="customer-toolbar"><label className="customer-search"><Search size={18} /><input aria-label="Search customers" placeholder="Search name, phone, email or location" value={query} onChange={e => setQuery(e.target.value)} /></label><select aria-label="Customer status" value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option>{Object.values(CustomerStatus).map(v => <option key={v}>{v}</option>)}</select><select aria-label="Customer category" value={category} onChange={e => setCategory(e.target.value)}><option value="">All categories</option>{Object.values(CustomerCategory).map(v => <option key={v}>{v}</option>)}</select><select aria-label="Balance filter" value={balanceFilter} onChange={e => setBalanceFilter(e.target.value)}><option value="">All balances</option><option value="due">Outstanding balance</option><option value="clear">No balance due</option></select><select aria-label="Sort customers" value={sort} onChange={e => setSort(e.target.value)}><option value="recent">Newest customers</option><option value="name">Name A–Z</option><option value="balance">Highest balance</option><option value="value">Highest sales value</option></select></div>
+                <div className="customer-table-scroll"><table className="customer-table"><thead><tr><th>Customer</th><th>Category / status</th><th className="numeric">Purchases</th><th className="numeric">Sales value</th><th className="numeric">Outstanding</th><th>Last purchase</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{filtered.slice((page - 1) * pageSize, page * pageSize).map(a => <tr key={a.customer.id}><td><button className="customer-person" onClick={() => { setSelectedId(a.customer.id!); setTab('overview'); }}><span className="customer-avatar">{initials(a.customer.name)}</span><span><strong>{a.customer.name}</strong><small>{a.customer.phone}</small></span></button></td><td><span>{a.customer.category}</span><small><Status value={a.customer.status} /></small></td><td className="numeric">{a.orders}</td><td className="numeric">{currency(a.salesValue)}</td><td className={`numeric ${a.outstanding > 0 ? 'customer-due' : ''}`}>{currency(a.outstanding)}</td><td>{date(a.lastPurchase)}</td><td><button className="customer-icon-button" aria-label={`Open ${a.customer.name}'s profile`} onClick={() => { setSelectedId(a.customer.id!); setTab('overview'); }}><ArrowUpRight size={18} /></button></td></tr>)}</tbody></table></div>
+                {!filtered.length && !loading && !loadError && <div className="customer-empty"><Users size={30} /><h3>{customers.length ? 'No matching customers' : 'Your customer directory starts here'}</h3><p>{customers.length ? 'Try another search or clear the filters.' : 'Add a customer to keep their contacts, purchases and balances together.'}</p>{customers.length ? <button className="customer-button" onClick={() => { setQuery(''); setStatus(''); setCategory(''); setBalanceFilter(''); }}>Clear filters</button> : canCreate && <button className="customer-button primary" onClick={() => openEditor()}>Add customer</button>}</div>}
+                <footer className="customer-pagination"><span>{filtered.length ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, filtered.length)} of {filtered.length} customers</span><div><select aria-label="Customers per page" value={pageSize} onChange={e => setPageSize(Number(e.target.value))}>{[10, 25, 50].map(v => <option key={v} value={v}>{v} per page</option>)}</select><button disabled={page === 1} onClick={() => setPage(page - 1)} aria-label="Previous page"><ChevronLeft size={18} /></button><span>{page} / {pages}</span><button disabled={page >= pages} onClick={() => setPage(page + 1)} aria-label="Next page"><ChevronRight size={18} /></button></div></footer>
+            </section><p className="customer-footnote">Sales value includes unpaid invoices. Outstanding balances and money received are tracked separately.</p>
+        </> : <>
+            <section className="customer-card customer-profile-header"><span className="customer-avatar large">{initials(customer!.name)}</span><div className="customer-profile-identity"><h2>{customer!.name}</h2><div className="customer-inline"><Status value={customer!.status} /><span>{customer!.category}</span><span>Customer since {date(customer!.joinedDate)}</span></div></div><div className="customer-actions">{canExport && <button className="customer-button" onClick={() => setStatementOpen(true)}><FileText size={16} /> Statement</button>}{canEdit && <button className="customer-button primary" onClick={() => openEditor(customer)}><Edit2 size={16} /> Edit profile</button>}</div></section>
+            {(customer!.status === CustomerStatus.INACTIVE || customer!.status === CustomerStatus.BLACKLISTED) && <div className="customer-alert"><AlertCircle size={18} /><div><strong>{customer!.status} account — new sales are blocked.</strong><p>{customer!.statusReason || 'No reason recorded.'} Existing invoices and payments remain available.</p></div></div>}
+            <div className="customer-metrics"><Metric label="Sales value" value={currency(selected.salesValue)} /><Metric label="Money received" value={currency(selected.received)} /><Metric label="Outstanding" value={currency(selected.outstanding)} /><Metric label="Purchases" value={String(selected.orders)} /></div>
+            <nav className="customer-tabs" aria-label="Customer profile sections">{['overview', 'purchases', 'payments', 'notes'].map(v => <button key={v} aria-current={tab === v ? 'page' : undefined} onClick={() => setTab(v)}>{v[0].toUpperCase() + v.slice(1)}{v === 'purchases' && <span>{selected.orders}</span>}</button>)}</nav>
+            {tab === 'overview' && <div className="customer-profile-grid"><aside className="customer-card customer-section"><h3>Contact & account</h3><dl className="customer-contact"><dt>Phone</dt><dd><a href={`tel:+${normalizeCustomerPhone(customer!.phone)}`}>{customer!.phone}</a></dd><dt>Email</dt><dd>{customer!.email ? <a href={`mailto:${customer!.email}`}>{customer!.email}</a> : 'Not provided'}</dd><dt>Address</dt><dd>{customer!.address || 'Not provided'}</dd><dt>Tax number / TIN</dt><dd>{customer!.tin || 'Not provided'}</dd><dt>Last purchase</dt><dd>{date(selected.lastPurchase)}</dd><dt>Last profile update</dt><dd>{date(customer!.updatedAt)}{customer!.updatedBy ? ` · ${customer!.updatedBy}` : ''}</dd></dl>{canEdit && <div className="customer-account-controls"><h4>Account controls</h4><p>Restrict new sales without losing purchase history.</p><button className="customer-button" onClick={() => { setNextStatus(customer!.status); setReason(customer!.statusReason || ''); setStatusOpen(true); }}><ShieldCheck size={16} /> Manage status</button></div>}</aside><section className="customer-card"><div className="customer-section-heading"><div><h3>Unpaid invoices</h3><p>{currency(selected.outstanding)} outstanding · Showing up to 5 latest unpaid invoices</p></div><button className="customer-link" onClick={() => { setTab('purchases'); setPurchaseStatus('unpaid'); }}>All unpaid invoices</button></div>{purchaseTable(selected.purchases.filter(s => outstandingAmount(s) > 0).slice(0, 5))}</section></div>}
+            {tab === 'purchases' && <section className="customer-card"><div className="customer-toolbar"><label className="customer-search"><Search size={18} /><input aria-label="Search customer invoices" placeholder="Search invoice, product or IMEI" value={purchaseQuery} onChange={e => setPurchaseQuery(e.target.value)} /></label><select aria-label="Sale type" value={purchaseStatus} onChange={e => setPurchaseStatus(e.target.value)}><option value="">All sale types</option><option value="unpaid">Unpaid invoices</option>{['Cash sale', 'Debt', 'Partial sale'].map(v => <option key={v}>{v}</option>)}</select>{canExport && <button className="customer-button" disabled={!purchases.length} onClick={() => csv('customer-purchases.csv', [['Invoice', 'Date', 'Sale type', 'Total', 'Received', 'Outstanding'], ...purchases.map(s => [s.receiptNo, date(s.timestamp), getSaleType(s), s.total, receivedAmount(s), outstandingAmount(s)])])}><Download size={16} /> Export results</button>}</div>{purchaseTable(purchases.slice((purchasePage - 1) * 10, purchasePage * 10))}<footer className="customer-pagination"><span>{purchases.length} invoices</span><div><button aria-label="Previous invoices" disabled={purchasePage === 1} onClick={() => setPurchasePage(purchasePage - 1)}><ChevronLeft size={18} /></button><span>{purchasePage} / {purchasePages}</span><button aria-label="Next invoices" disabled={purchasePage >= purchasePages} onClick={() => setPurchasePage(purchasePage + 1)}><ChevronRight size={18} /></button></div></footer></section>}
+            {tab === 'payments' && <section className="customer-card"><div className="customer-section-heading"><div><h3>Payment history</h3><p>Actual money received, excluding cash change. Later payments use their collection date.</p></div></div><div className="customer-table-scroll"><table className="customer-table"><thead><tr><th>Date received</th><th>Invoice</th><th>Payment method</th><th>Reference / recorded by</th><th className="numeric">Amount</th></tr></thead><tbody>{receipts.slice((receiptPage - 1) * 20, receiptPage * 20).map(r => <tr key={r.id}><td>{date(r.timestamp)}</td><td>{r.receiptNo}</td><td>{r.method}</td><td>{r.reference || '—'}<small>{r.user || 'Not recorded'}</small></td><td className="numeric">{currency(r.amount)}</td></tr>)}</tbody></table>{!receipts.length && <div className="customer-empty"><Wallet size={28} /><h3>No payments received</h3><p>Debt sales appear here when a payment is recorded.</p></div>}</div><footer className="customer-pagination"><span>{receipts.length} payments</span><div><button aria-label="Previous payments" disabled={receiptPage === 1} onClick={() => setReceiptPage(receiptPage - 1)}><ChevronLeft size={18} /></button><span>{receiptPage} / {receiptPages}</span><button aria-label="Next payments" disabled={receiptPage >= receiptPages} onClick={() => setReceiptPage(receiptPage + 1)}><ChevronRight size={18} /></button></div></footer></section>}
+            {tab === 'notes' && <section className="customer-card customer-section"><h3>Internal customer notes</h3><p className="customer-muted">For authorized staff. Notes are excluded from exported statements.</p><label className="customer-field">Notes<textarea rows={8} maxLength={5000} disabled={!canEdit || busy} value={note} onChange={e => setNote(e.target.value)} placeholder="Preferences, follow-up details or relevant service information" /></label><div className="customer-actions"><span className="customer-muted">{note.length} / 5,000</span>{canEdit && <button className="customer-button primary" disabled={busy || note.trim() === (customer!.notes || '')} onClick={async () => { if (await confirmAction({ title: 'Save internal notes?', message: 'These notes will be visible to authorized staff.', confirmLabel: 'Save notes' })) await updateProfile({ notes: note.trim() }, 'Notes saved.'); }}>Save notes</button>}</div></section>}
+        </>}
 
-    const handleViewStatement = async (customer: Customer) => {
-        const request = ++statementRequestRef.current;
-        setStatementLoading(true);
-        try {
-            const allSales = await db.sales.toArray();
-            if (request !== statementRequestRef.current) return;
-            const sales = getCustomerSales(allSales, customer, customers);
-            setCustomerSales(sales.sort((a, b) => b.timestamp - a.timestamp));
-            setSelectedCustomerForStatement(customer);
-            setIsStatementModalOpen(true);
-        } catch {
-            if (request === statementRequestRef.current) showToast('Could not load the customer statement. Please try again.', 'error');
-        } finally {
-            if (request === statementRequestRef.current) setStatementLoading(false);
-        }
-    };
-
-    useEffect(() => {
-        const viewCustName = sessionStorage.getItem('sna_view_customer_statement');
-        if (viewCustName && customers.length > 0) {
-            sessionStorage.removeItem('sna_view_customer_statement');
-            const customer = customers.find(c => c.name === viewCustName);
-            if (customer) {
-                handleViewStatement(customer);
-            }
-        }
-    }, [customers]);
-
-    const handleSendWhatsApp = () => {
-        if (!selectedCustomerForStatement) return;
-
-        const businessName = settings?.businessName || 'SNA Mobile ERP';
-        const totalSpent = customerSales.reduce((sum, s) => sum + s.total, 0).toLocaleString();
-
-        let message = `*Account Statement - ${businessName}*\n\n`;
-        message += `*Customer:* ${selectedCustomerForStatement.name}\n`;
-        message += `*Total Transactions:* ${customerSales.length}\n`;
-        message += `*Total Spent:* ${totalSpent} UGX\n\n`;
-        message += `*Outstanding:* ${customerSales.reduce((sum, sale) => sum + outstandingAmount(sale), 0).toLocaleString()} UGX\n\n`;
-        message += `*Recent Purchases:*\n`;
-
-        customerSales.slice(0, 10).forEach(sale => {
-            message += `• ${new Date(sale.timestamp).toLocaleDateString()}: ${sale.total.toLocaleString()} UGX (${sale.receiptNo})\n`;
-        });
-
-        if (customerSales.length > 10) {
-            message += `\n_Showing last 10 transactions._`;
-        }
-
-        message += `\n\nThank you for your continued business!`;
-
-        const encodedMessage = encodeURIComponent(message);
-        const phone = normalizeCustomerPhone(selectedCustomerForStatement.phone);
-        if (!phone) return showToast('This customer has no phone number.', 'error');
-        window.open(`https://wa.me/${phone}?text=${encodedMessage}`, '_blank', 'noopener,noreferrer');
-    };
-
-    const handleDelete = async (id: string) => {
-        if (!confirm('Are you sure?')) return;
-        try {
-            await db.customers.delete(id);
-            showToast('Client removed', 'success');
-            await fetchData();
-        } catch { showToast('Failed to remove client. Please try again.', 'error'); }
-    };
-
-    const exportCustomersToCSV = () => {
-        if (customers.length === 0) return showToast("No data to export", 'info');
-        const headers = ['Name', 'Phone', 'Email', 'Category', 'Status', 'Joined Date', 'Total Spent', 'Visits', 'Loyalty Points', 'Outstanding'];
-        const rows = customers.map(c => [
-            c.name,
-            c.phone,
-            c.email || '',
-            c.category,
-            c.status,
-            new Date(c.joinedDate).toLocaleDateString(),
-            c.totalSpending || 0,
-            c.visitCount || 0,
-            c.loyaltyPoints || 0,
-            c.balance || 0
-        ]);
-        const csvContent = [headers, ...rows].map(row => row.map(escapeCustomerCSVCell).join(',')).join('\r\n');
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `Customers_Report_${new Date().toISOString().split('T')[0]}.csv`;
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        showToast('Exported successfully', 'success');
-    };
-
-    // Filter Logic
-    const filteredCustomers = useMemo(() => {
-        return customers.filter(c => {
-            const query = searchTerm.trim().toLowerCase();
-            return (!statusFilter || c.status === statusFilter) && (
-                (c.name || '').toLowerCase().includes(query) || (c.phone || '').includes(query)
-                || (c.email || '').toLowerCase().includes(query)
-            );
-        });
-    }, [customers, searchTerm, statusFilter]);
-
-    // Pagination Logic
-    const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
-    useEffect(() => {
-        setCurrentPage(page => Math.min(page, Math.max(1, totalPages)));
-    }, [totalPages]);
-    const paginatedCustomers = useMemo(() => {
-        const start = (currentPage - 1) * itemsPerPage;
-        return filteredCustomers.slice(start, start + itemsPerPage);
-    }, [filteredCustomers, currentPage]);
-
-    // Stats for Widgets
-    const stats = useMemo(() => {
-        const recent = customers.slice(0, 5);
-        return { recent };
-    }, [customers]);
-
-    const blacklistedCount = useMemo(() => customers.filter(c => c.status === CustomerStatus.BLACKLISTED).length, [customers]);
-
-    return (
-        <div className="min-h-screen bg-slate-50 p-4 lg:p-6 space-y-6   font-sans pb-24">
-
-            {/* --- TOP SECTION: QUICK ACTIONS & STATS --- */}
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-
-                {/* 1. Quick Action Card (Col Span 5) */}
-                <div className="xl:col-span-5 bg-white p-4 rounded-3xl  border border-slate-100 flex flex-col justify-between relative overflow-hidden group">
-
-                    <div className="relative z-10 mb-4">
-                        <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                            Customer actions
-                        </h2>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3 relative z-10">
-                        <button onClick={() => { setEditingCustomer(null); setFormData({ category: CustomerCategory.RETAIL, status: CustomerStatus.ACTIVE }); setIsModalOpen(true); }} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-slate-900 text-white hover:bg-slate-800 transition-all duration-300   ">
-                            <UserPlus size={20} strokeWidth={1.75} />
-                            <span className="text-[11px] font-bold uppercase">Add New</span>
-                        </button>
-                        <button onClick={exportCustomersToCSV} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition-all duration-300   ">
-                            <Download size={20} strokeWidth={1.75} />
-                            <span className="text-[11px] font-bold uppercase">Export</span>
-                        </button>
-                        <button onClick={fetchData} disabled={loading} className="flex flex-col items-center gap-1.5 p-3 rounded-2xl bg-slate-50 text-slate-600 hover:bg-slate-900 hover:text-white transition-all duration-300    disabled:opacity-50">
-                            <RefreshCw size={20} className={loading ? 'animate-spin' : ''} strokeWidth={1.75} />
-                            <span className="text-[11px] font-bold uppercase">Refresh</span>
-                        </button>
-                    </div>
-                </div>
-
-                {/* 2. Stats Tickers (Col Span 7) */}
-                <div className="xl:col-span-7 grid grid-cols-1 md:grid-cols-3 gap-4">
-                    {[
-                        { label: 'Total Clients', value: customers.length, icon: Users, color: 'text-slate-600', bg: 'bg-slate-50' },
-                        { label: 'Loyalty Points', value: customers.reduce((a, c) => a + (c.loyaltyPoints || 0), 0).toLocaleString(), icon: BadgeCheck, color: 'text-slate-600', bg: 'bg-slate-50' },
-                        { label: 'Total Revenue', value: `${(customers.reduce((a, c) => a + (c.totalSpending || 0), 0) / 1000000).toFixed(1)}M`, icon: TrendingUp, color: 'text-slate-600', bg: 'bg-slate-50' },
-                    ].map((stat, i) => (
-                        <div key={i} className="bg-white p-3.5 rounded-3xl  border border-slate-100 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${stat.bg} ${stat.color}`}>
-                                    <stat.icon size={20} strokeWidth={1.75} />
-                                </div>
-                                <div>
-                                    <p className="text-xl font-bold text-slate-900">{stat.value}</p>
-                                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-tight">{stat.label}</p>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-
-            {/* --- MAIN SPLIT LAYOUT --- */}
-            <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-
-                {/* LEFT PANEL: TABLE (Cols 8) */}
-                <div className="xl:col-span-8 space-y-4">
-                    {blacklistedCount > 0 && (
-                        <div className="bg-rose-50 border border-rose-100 p-4 rounded-[2rem] flex items-center justify-between   ">
-                            <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center   ">
-                                    <AlertCircle size={24} strokeWidth={1.75} />
-                                </div>
-                                <div>
-                                    <p className="text-sm font-black text-rose-900 uppercase tracking-tight">Blacklisted customers</p>
-                                    <p className="text-xs text-rose-600 font-medium">You have <span className="font-bold">{blacklistedCount} blacklisted</span> clients that require attention.</p>
-                                </div>
-                            </div>
-                            <button onClick={() => { setSearchTerm(''); setStatusFilter(CustomerStatus.BLACKLISTED); }} className="px-5 py-2.5 bg-rose-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-black transition-all   ">
-                                Review List
-                            </button>
-                        </div>
-                    )}
-
-                    <div className="bg-white rounded-3xl  border border-slate-100 overflow-hidden flex flex-col">
-
-                        {/* Header & Tabs */}
-                        <div className="p-4 border-b border-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                            <div>
-                                <h3 className="text-base font-bold text-slate-800">Client Directory</h3>
-                                <p className="text-xs text-slate-400 font-normal mt-0.5">Contact details and purchase history</p>
-                            </div>
-                        </div>
-
-                        {/* Search Bar (Optional inline) */}
-                        <div className="px-4 py-3 border-b border-slate-50 bg-slate-50/30 flex flex-wrap gap-3">
-                            <div className="relative max-w-xs">
-                                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} strokeWidth={1.75} />
-                                <input
-                                    className="w-full pl-8 pr-8 h-10 bg-white border border-slate-100/50 rounded-xl text-xs font-normal focus:ring-2 focus:ring-blue-100 outline-none "
-                                    aria-label="Search customers"
-                                    placeholder="Search name, phone or email..."
-                                    value={searchTerm}
-                                    onChange={e => setSearchTerm(e.target.value)}
-                                />
-                                {searchTerm && (
-                                    <button
-                                        onClick={() => setSearchTerm('')}
-                                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500 transition-colors"
-                                    >
-                                        <X size={14} strokeWidth={1.75} />
-                                    </button>
-                                )}
-                            </div>
-                            <select aria-label="Filter customers by status" value={statusFilter} onChange={e => setStatusFilter(e.target.value as CustomerStatus | '')} className="h-10 px-3 bg-white border border-slate-100 rounded-xl text-xs">
-                                <option value="">All statuses</option>
-                                {Object.values(CustomerStatus).map(status => <option key={status} value={status}>{status}</option>)}
-                            </select>
-                        </div>
-                        {loadError && <p role="alert" className="px-4 py-3 text-sm text-red-600">Unable to refresh customer data. Use Refresh to retry.</p>}
-                        {loading && <p role="status" className="px-4 py-3 text-sm text-slate-500">Loading customers...</p>}
-
-                        {/* Table */}
-                        <div className="flex-1 overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="bg-slate-50/50">
-                                    <tr>
-                                        <th className="pl-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Client Name</th>
-                                        <th className="py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Date Joined</th>
-                                        <th className="py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Engagement</th>
-                                        <th className="py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Points</th>
-                                        <th className="py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Spent</th>
-                                        <th className="pr-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider">Status</th>
-                                        <th className="pr-4 py-3 text-[11px] font-bold text-slate-400 uppercase tracking-wider text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-50">
-                                    {paginatedCustomers.map(c => (
-                                        <tr key={c.id} className="hover:bg-blue-50/30 transition-colors group cursor-pointer" onClick={() => { setEditingCustomer(c); setFormData(c); setIsModalOpen(true); }}>
-                                            <td className="pl-4 py-4">
-                                                <div className="flex items-center gap-2.5">
-                                                    <div>
-                                                        <div className="flex items-center gap-1.5">
-                                                            <p className="text-sm font-bold text-slate-900">{c.name}</p>
-                                                        </div>
-                                                        <p className="text-xs text-slate-500 font-medium">{c.category}</p>
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="py-4">
-                                                <span className="text-sm font-medium text-slate-600">{new Date(c.joinedDate).toLocaleDateString()}</span>
-                                            </td>
-                                            <td className="py-4 w-40">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                                        <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min((c.visitCount || 0) * 5, 100)}%` }}></div>
-                                                    </div>
-                                                    <span className="text-xs font-bold text-slate-700">{c.visitCount || 0} <span className="font-medium text-slate-500">visits</span></span>
-                                                </div>
-                                            </td>
-                                            <td className="py-4">
-                                                <div className="flex items-center gap-1 text-amber-600 font-bold text-sm">
-                                                    <BadgeCheck size={14} strokeWidth={1.75} />
-                                                    {c.loyaltyPoints || 0}
-                                                </div>
-                                            </td>
-                                            <td className="py-4">
-                                                <span className="text-sm font-bold text-slate-900">{(c.totalSpending || 0).toLocaleString()} <span className="text-xs text-slate-500 font-medium">UGX</span></span>
-                                            </td>
-                                            <td className="pr-4 py-4">
-                                                <div className="flex flex-col gap-1">
-                                                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase w-fit flex items-center gap-1.5  ${c.status === CustomerStatus.ACTIVE ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' :
-                                                        c.status === CustomerStatus.BLACKLISTED ? 'bg-rose-600 text-white ' :
-                                                            'bg-slate-100 text-slate-400'
-                                                        }`}>
-                                                        {c.status === CustomerStatus.BLACKLISTED && <AlertCircle size={14} strokeWidth={1.75} />}
-                                                        {c.status}
-                                                    </span>
-                                                    {(c.loyaltyPoints || 0) >= 1 && (
-                                                        <span className="px-2.5 py-1 rounded-full text-[9px] font-black uppercase bg-amber-50 text-amber-700   w-fit flex items-center gap-1 ">
-                                                            <BadgeCheck size={14} strokeWidth={1.75} />
-                                                            Loyal Client
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </td>
-                                            <td className="pr-4 py-4 text-right">
-                                                <div className="flex justify-end gap-2">
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); handleViewStatement(c); }}
-                                                        className="p-1.5 text-slate-400 hover:text-blue-600 bg-white border border-slate-200 rounded-lg  transition-colors"
-                                                        title="Statement"
-                                                        disabled={statementLoading}
-                                                    >
-                                                        <FileText size={14} strokeWidth={1.75} />
-                                                    </button>
-                                                    <button
-                                                        onClick={(e) => { e.stopPropagation(); setEditingCustomer(c); setFormData(c); setIsModalOpen(true); }}
-                                                        className="p-1.5 text-slate-400 hover:text-indigo-600 bg-white border border-slate-200 rounded-lg  transition-colors"
-                                                        title="Edit"
-                                                    >
-                                                        <Edit2 size={14} strokeWidth={1.75} />
-                                                    </button>
-                                                    {user.role === UserRole.ADMIN && (
-                                                        <button
-                                                            onClick={(e) => { e.stopPropagation(); handleDelete(c.id!); }}
-                                                            className="p-1.5 text-slate-400 hover:text-red-600 bg-white border border-slate-200 rounded-lg  transition-colors"
-                                                            title="Delete"
-                                                        >
-                                                            <Trash2 size={14} strokeWidth={1.75} />
-                                                        </button>
-                                                    )}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                    {!loading && !loadError && paginatedCustomers.length === 0 && (
-                                        <tr>
-                                            <td colSpan={7} className="py-20 text-center">
-                                                <div className="flex flex-col items-center justify-center text-slate-300">
-                                                    <div className="w-20 h-20 bg-slate-50 rounded-3xl flex items-center justify-center mb-6 border border-slate-100 ">
-                                                        <Users size={32} className="text-slate-200" strokeWidth={1.75} />
-                                                    </div>
-                                                    <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-400">No clients found</p>
-                                                    <p className="text-xs font-medium text-slate-400 mt-2">Try adjusting your search or filters</p>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-
-                            {/* Pagination Controls */}
-                            {totalPages > 1 && (
-                                <div className="p-4 border-t border-slate-50 flex items-center justify-between bg-slate-50/20">
-                                    <p className="text-xs text-slate-400 font-normal uppercase">Page {currentPage} of {totalPages}</p>
-                                    <div className="flex items-center gap-1">
-                                        <button
-                                            disabled={currentPage === 1}
-                                            onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                                            className="w-8 h-8 rounded-lg flex items-center justify-center border border-slate-100 bg-white text-slate-400 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                                        >
-                                            <ChevronLeft size={16} strokeWidth={1.75} />
-                                        </button>
-
-                                        {[...Array(totalPages)].map((_, i) => (
-                                            <button
-                                                key={i}
-                                                onClick={() => setCurrentPage(i + 1)}
-                                                className={`w-8 h-8 rounded-lg text-xs font-bold transition-all ${currentPage === i + 1 ? 'bg-slate-900 text-white' : 'bg-white border border-slate-100 text-slate-400 hover:border-slate-300'}`}
-                                            >
-                                                {i + 1}
-                                            </button>
-                                        ))}
-
-                                        <button
-                                            disabled={currentPage === totalPages}
-                                            onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                                            className="w-8 h-8 rounded-lg flex items-center justify-center border border-slate-100 bg-white text-slate-400 hover:text-slate-900 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                                        >
-                                            <ChevronRight size={16} strokeWidth={1.75} />
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-
-                {/* RIGHT PANEL: WIDGETS (Cols 4) */}
-                <div className="xl:col-span-4 space-y-6">
-
-                    {/* Widget 2: Recently added (List) */}
-                    <div className="bg-white rounded-3xl  border border-slate-100 p-4 flex-1">
-                        <div className="flex justify-between items-center mb-4">
-                            <h3 className="text-base font-bold text-slate-800">Recently added</h3>
-                            <span className="bg-slate-50 text-slate-400 text-xs font-normal px-1.5 py-0.5 rounded-lg">Last 5</span>
-                        </div>
-                        <div className="space-y-4">
-                            {stats.recent.map((c, i) => (
-                                <button type="button" key={c.id} onClick={() => handleViewStatement(c)} disabled={statementLoading} className="w-full text-left flex items-start gap-3 p-2 hover:bg-slate-50 rounded-xl transition-colors cursor-pointer group">
-                                    <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 shrink-0 group-hover:bg-white transition-colors">
-                                        <UserIcon size={14} strokeWidth={1.75} />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <p className="text-sm font-bold text-slate-900 truncate">{c.name}</p>
-                                        <p className="text-xs text-slate-500 mt-0.5 font-medium truncate">{c.category} • {c.phone}</p>
-                                    </div>
-                                    <div className="text-right shrink-0">
-                                        <p className="text-xs font-medium text-slate-500">{new Date(c.joinedDate).toLocaleDateString()}</p>
-                                    </div>
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-
-            {/* --- MODAL (Existing logic, restyled) --- */}
-            <Modal
-                isOpen={isModalOpen}
-                onClose={() => { if (!savingRef.current) setIsModalOpen(false); }}
-                title={
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600">
-                            <UserPlus size={20} strokeWidth={1.75} />
-                        </div>
-                        <div>
-                            <h2 className="text-lg font-bold text-slate-900">{editingCustomer ? 'Edit Client Profile' : 'Register New Client'}</h2>
-                            <p className="text-xs text-slate-500 font-bold uppercase tracking-wide mt-0.5">Contact details and account status</p>
-                        </div>
-                    </div>
-                }
-                maxWidth="2xl"
-                noPadding
-            >
-                <form onSubmit={handleSave} className="flex flex-col">
-                    <div className="p-8 space-y-6 overflow-y-auto max-h-[70vh]">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-2">
-                                <label className="win-label">Full Name / Business Name</label>
-                                <div className="relative">
-                                    <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
-                                    <input required className="win-input pl-12" value={formData.name || ''} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="e.g. John Doe or Apex Tech" />
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="win-label">Phone Number</label>
-                                <div className="relative">
-                                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
-                                    <input required className="win-input pl-12" value={formData.phone || ''} onChange={e => setFormData({ ...formData, phone: e.target.value })} placeholder="+256 700 000 000" />
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="win-label">Email Address (Optional)</label>
-                                <div className="relative">
-                                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
-                                    <input type="email" className="win-input pl-12" value={formData.email || ''} onChange={e => setFormData({ ...formData, email: e.target.value })} placeholder="client@example.com" />
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="win-label">Client Category</label>
-                                <div className="relative">
-                                    <Tag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} strokeWidth={1.75} />
-                                    <select className="win-input pl-12 appearance-none" value={formData.category} onChange={e => setFormData({ ...formData, category: e.target.value as any })}>
-                                        {Object.values(CustomerCategory).map(c => <option key={c} value={c}>{c}</option>)}
-                                    </select>
-                                    <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} strokeWidth={1.75} />
-                                </div>
-                            </div>
-                            <div className="space-y-2">
-                                <label htmlFor="customer-status" className="win-label">Client Status</label>
-                                <select id="customer-status" className="win-input" value={formData.status || CustomerStatus.ACTIVE} onChange={e => setFormData({ ...formData, status: e.target.value as CustomerStatus })}>
-                                    {Object.values(CustomerStatus).map(status => <option key={status} value={status}>{status}</option>)}
-                                </select>
-                            </div>
-                            <div className="col-span-full space-y-2">
-                                <label className="win-label">Physical Address</label>
-                                <div className="relative">
-                                    <MapPin className="absolute left-4 top-4 text-slate-400" size={18} strokeWidth={1.75} />
-                                    <textarea
-                                        className="win-input pl-12 h-24 resize-none py-3"
-                                        value={formData.address || ''}
-                                        onChange={e => setFormData({ ...formData, address: e.target.value })}
-                                        placeholder="Street, Building, Room No..."
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-4 shrink-0">
-                        <button type="button" disabled={isSaving} onClick={() => setIsModalOpen(false)} className="flex-1 py-3.5 rounded-2xl text-slate-600 font-bold hover:bg-slate-200 transition-all uppercase text-xs tracking-widest">
-                            Cancel
-                        </button>
-                        <button type="submit" disabled={isSaving} className="flex-1 py-3.5 rounded-2xl bg-slate-900 text-white font-bold   hover:bg-black transition-all uppercase text-xs tracking-widest flex items-center justify-center gap-2 disabled:opacity-50">
-                            <CheckCircle2 size={18} strokeWidth={1.75} />
-                            {isSaving ? 'Saving...' : editingCustomer ? 'Update Profile' : 'Register Client'}
-                        </button>
-                    </div>
-                </form>
-            </Modal>
-
-            {/* --- STATEMENT MODAL --- */}
-            <Modal
-                isOpen={isStatementModalOpen && !!selectedCustomerForStatement}
-                onClose={() => setIsStatementModalOpen(false)}
-                title={
-                    <div className="flex flex-col">
-                        <span className="text-lg font-bold text-slate-900">Customer Account Statement</span>
-                        <span className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5">Transaction History</span>
-                    </div>
-                }
-                maxWidth="4xl"
-                noPadding
-            >
-                <div className="flex-1 overflow-y-auto p-8 bg-slate-200 flex justify-center">
-                    <div id="customer-statement" className="receipt-a4-mode bg-white p-8  text-slate-900 w-full max-w-[210mm] min-h-[297mm]">
-                        {/* Report Header */}
-                        <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
-                            <div>
-                                <h1 className="text-2xl font-black uppercase tracking-tight mb-2">Account Statement</h1>
-                                <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Generated: {new Date().toLocaleDateString()}</p>
-
-                                <div className="mt-6">
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Statement For:</p>
-                                    <h2 className="text-xl font-bold text-slate-900">{selectedCustomerForStatement?.name}</h2>
-                                    <p className="text-sm text-slate-600">{selectedCustomerForStatement?.phone}</p>
-                                    <p className="text-xs text-slate-500 uppercase">{selectedCustomerForStatement?.category}</p>
-                                </div>
-                            </div>
-                            <div className="text-right">
-                                {settings?.logo && (
-                                    <img src={settings.logo} className="h-20 object-contain ml-auto mb-3" alt="Logo" />
-                                )}
-                                <h2 className="text-lg font-bold text-slate-900 uppercase">{settings?.businessName || 'SNA Mobile ERP'}</h2>
-                                <p className="text-xs text-slate-500">{settings?.address}</p>
-                                <p className="text-xs text-slate-500">{settings?.phone}</p>
-                            </div>
-                        </div>
-
-                        {/* Summary Cards */}
-                        <div className="grid grid-cols-2 gap-4 mb-8">
-                            <div className="p-4 border border-slate-200 rounded-lg">
-                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Total Transactions</p>
-                                <p className="text-xl font-black text-slate-900">
-                                    {customerSales.length}
-                                </p>
-                            </div>
-                            <div className="p-4 border border-slate-200 rounded-lg bg-emerald-50/50">
-                                <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">Total Spent</p>
-                                <p className="text-xl font-black text-emerald-700">
-                                    {customerSales.reduce((sum, s) => sum + s.total, 0).toLocaleString()} UGX
-                                </p>
-                            </div>
-                        </div>
-
-                        <p className="mb-6 text-sm font-semibold">Outstanding balance: UGX {customerSales.reduce((sum, sale) => sum + outstandingAmount(sale), 0).toLocaleString()}</p>
-                        {/* Transaction Table */}
-                        <div className="mb-8">
-                            <h3 className="text-xs font-black uppercase tracking-widest border-b border-slate-200 pb-2 mb-4 text-slate-500">Purchase History</h3>
-                            <table className="w-full text-left text-xs">
-                                <thead>
-                                    <tr className="border-b border-slate-200">
-                                        <th className="py-2 font-bold text-slate-500 uppercase">Date</th>
-                                        <th className="py-2 font-bold text-slate-500 uppercase">Receipt #</th>
-                                        <th className="py-2 font-bold text-slate-500 uppercase">Items</th>
-                                        <th className="py-2 font-bold text-slate-500 uppercase text-right">Amount</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100">
-                                    {customerSales.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-slate-500">No purchases recorded for this customer.</td></tr>}
-                                    {customerSales.map((sale, idx) => (
-                                        <tr key={idx}>
-                                            <td className="py-3 font-mono text-slate-600">{new Date(sale.timestamp).toLocaleDateString()}</td>
-                                            <td className="py-3 font-bold text-slate-900">{sale.receiptNo}</td>
-                                            <td className="py-3 text-slate-700">
-                                                {sale.items.map(i => `${i.name} (x${i.quantity})`).join(', ')}
-                                            </td>
-                                            <td className="py-3 text-right font-bold text-slate-900">{sale.total.toLocaleString()}<p className="text-xs font-normal">{getSaleType(sale)} · Paid {sale.amountPaid.toLocaleString()} · Due {outstandingAmount(sale).toLocaleString()}</p></td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
-
-                        {/* Footer / Signatures */}
-                        <div className="mt-12 pt-8 border-t-2 border-slate-100">
-                            <p className="text-[10px] text-center text-slate-400">Thank you for your continued business!</p>
-                            <p className="text-[10px] text-center text-slate-400 mt-2">Printed from SNA Mobile ERP System</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div className="p-5 border-t border-slate-100 bg-white flex gap-4 justify-end no-print">
-                    <button onClick={() => setIsStatementModalOpen(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl font-bold text-xs uppercase hover:bg-slate-200 transition-colors">Close</button>
-                    <button onClick={handleSendWhatsApp} className="px-6 py-2.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl font-bold text-xs uppercase hover:bg-emerald-100 transition-colors flex items-center gap-2">
-                        <MessageCircle size={16} strokeWidth={1.75} /> WhatsApp
-                    </button>
-                    <button onClick={() => printSection('#customer-statement')} className="px-6 py-2.5 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase hover:bg-black transition-all flex items-center gap-2">
-                        <Printer size={16} strokeWidth={1.75} /> Print Statement
-                    </button>
-                </div>
-            </Modal>
-
-        </div>
-    );
-};
-
-export default Customers;
+        <Modal isOpen={editorOpen} onClose={() => void closeEditor()} title={editingId ? 'Edit customer profile' : 'New customer'} maxWidth="2xl"><form onSubmit={saveCustomer} className="customer-form"><p className="customer-muted">Name and phone are required. Purchase history remains linked to this profile.</p>{formError && <p role="alert" className="customer-form-error">{formError}</p>}{customerMatches.length > 0 && <div className="customer-alert" role="status"><div><strong>{customerMatches.some(m => m.phoneMatch) ? 'This phone number is already registered.' : 'Possible existing customer'}</strong><p>Review the existing profiles before creating another customer.</p>{customerMatches.map(m => <p key={m.customer.id}>{m.customer.name} - {m.customer.phone} ({m.phoneMatch ? 'same phone' : m.emailMatch ? 'same email' : 'same name'}) <button type="button" className="customer-link" disabled={busy} onClick={async () => { if (!await confirmAction({ title: 'Open existing customer?', message: 'Your unsaved form entries will be discarded.', confirmLabel: 'Open profile' })) return; setEditorOpen(false); setSelectedId(m.customer.id!); setTab('overview'); }}>{'Open profile'}</button></p>)}</div></div>}<div className="customer-form-grid"><label className="customer-field">Full name *<input required autoComplete="name" maxLength={120} value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></label><label className="customer-field">Phone number *<input required type="tel" autoComplete="tel" placeholder="0700 123 456" value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} /></label><label className="customer-field">Email address<input type="email" autoComplete="email" value={form.email || ''} onChange={e => setForm({ ...form, email: e.target.value })} /></label><label className="customer-field">Customer category<select value={form.category} onChange={e => setForm({ ...form, category: e.target.value as CustomerCategory })}>{Object.values(CustomerCategory).map(v => <option key={v}>{v}</option>)}</select></label><label className="customer-field wide">Address<input autoComplete="street-address" maxLength={300} value={form.address || ''} onChange={e => setForm({ ...form, address: e.target.value })} /></label><label className="customer-field">Tax number / TIN (optional)<input maxLength={40} value={form.tin || ''} onChange={e => setForm({ ...form, tin: e.target.value })} /></label><label className="customer-field wide">Internal notes<textarea rows={3} maxLength={5000} value={form.notes || ''} onChange={e => setForm({ ...form, notes: e.target.value })} /></label></div><div className="customer-form-footer"><button type="button" className="customer-button" disabled={busy} onClick={() => void closeEditor()}>Cancel</button><button className="customer-button primary" disabled={busy}>{busy ? 'Saving…' : editingId ? 'Save changes' : 'Create customer'}</button></div></form></Modal>
+        <Modal isOpen={statusOpen && !!customer} onClose={() => { if (!busy) setStatusOpen(false); }} title="Manage customer status" maxWidth="md"><form onSubmit={saveStatus} className="customer-form"><p className="customer-muted">Existing invoices and account history are retained when an account is restricted.</p><label className="customer-field">Account status<select value={nextStatus} onChange={e => setNextStatus(e.target.value as CustomerStatus)}>{Object.values(CustomerStatus).map(v => <option key={v}>{v}</option>)}</select></label><label className="customer-field">Reason {nextStatus !== CustomerStatus.ACTIVE ? '*' : '(optional)'}<textarea required={nextStatus !== CustomerStatus.ACTIVE} maxLength={500} rows={3} value={reason} onChange={e => setReason(e.target.value)} /></label><div className="customer-form-footer"><button type="button" className="customer-button" disabled={busy} onClick={() => setStatusOpen(false)}>Cancel</button><button className="customer-button primary" disabled={busy}>Update status</button></div></form></Modal>
+        <Modal isOpen={!!paymentSale} onClose={() => { if (!busy) setPaymentSale(null); }} title="Record customer payment" maxWidth="md"><form onSubmit={collectPayment} className="customer-form"><div className="customer-payment-summary"><strong>{paymentSale?.receiptNo}</strong><p>Outstanding: {currency(paymentSale ? outstandingAmount(paymentSale) : 0)}</p></div>{paymentError && <p role="alert" className="customer-form-error">{paymentError}</p>}<label className="customer-field">Amount received (UGX)<input required type="number" min="0.01" step="0.01" max={paymentSale ? outstandingAmount(paymentSale) : 0} value={payment.amount} onChange={e => setPayment({ ...payment, amount: e.target.value })} /></label><label className="customer-field">Payment method<select value={payment.method} onChange={e => setPayment({ ...payment, method: e.target.value })}>{['Cash', 'Mobile Money', 'Bank'].map(v => <option key={v}>{v}</option>)}</select></label><label className="customer-field">Transaction reference (optional)<input maxLength={100} value={payment.reference} onChange={e => setPayment({ ...payment, reference: e.target.value })} /></label><div className="customer-form-footer"><button type="button" className="customer-button" disabled={busy} onClick={() => setPaymentSale(null)}>Cancel</button><button className="customer-button primary" disabled={busy}>{busy ? 'Recording…' : 'Review payment'}</button></div></form></Modal>
+        <Modal isOpen={!!invoice} onClose={() => setInvoice(null)} title="Purchase details" maxWidth="2xl">{invoice && <div className="customer-form"><div className="customer-section-heading"><div><h3>{invoice.receiptNo}</h3><p>{date(invoice.timestamp)} · {invoice.cashierName}</p></div><Status value={getSaleType(invoice)} /></div><div className="customer-table-scroll"><table className="customer-table"><thead><tr><th>Product / IMEI</th><th>Quantity</th><th className="numeric">Line total</th></tr></thead><tbody>{invoice.items.map((i, index) => <tr key={index}><td><strong>{i.name}</strong>{(i.imeis || (i.sn ? [i.sn] : [])).map(imei => <small key={imei}>IMEI / serial: {imei}</small>)}</td><td>{i.quantity}</td><td className="numeric">{currency(i.total)}</td></tr>)}</tbody></table></div><dl className="customer-invoice-totals"><div><dt>Invoice total (after discounts and tax)</dt><dd>{currency(invoice.total)}</dd></div><div><dt>Received</dt><dd>{currency(receivedAmount(invoice))}</dd></div><div><dt>Outstanding</dt><dd>{currency(outstandingAmount(invoice))}</dd></div></dl></div>}</Modal>
+        <Modal isOpen={statementOpen && !!selected} onClose={() => setStatementOpen(false)} title="Customer account statement" maxWidth="6xl">{selected && <><div id="customer-statement" className="customer-statement"><header><h2>{settings?.businessName || 'SNAI Mobile Shop'}</h2><p>{settings?.address} · {settings?.phone}</p><h3>Customer account statement</h3><p>{customer!.name} · {customer!.phone}</p><p>All recorded invoices · Generated {date(Date.now())}</p></header><div className="customer-metrics"><Metric label="Sales value" value={currency(selected.salesValue)} /><Metric label="Money received" value={currency(selected.received)} /><Metric label="Outstanding" value={currency(selected.outstanding)} /></div>{purchaseTable(selected.purchases, false)}<p className="customer-footnote">Balances reflect payments recorded as of this statement. Cash change is excluded from money received.</p></div><div className="customer-form-footer"><button className="customer-button" onClick={() => printSection('#customer-statement')}><Printer size={16} /> Print</button><button className="customer-button primary" disabled={busy} onClick={async () => { setBusy(true); try { await exportSectionToPDF('#customer-statement', `Customer-statement-${customer!.id}.pdf`); } catch { showToast('Could not export the statement.', 'error'); } finally { setBusy(false); } }}><Download size={16} /> Download PDF</button></div></>}</Modal>
+    </div>;
+}
+function Metric({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) { return <div className="customer-metric"><div><span>{label}</span>{icon}</div><strong>{value}</strong></div>; }

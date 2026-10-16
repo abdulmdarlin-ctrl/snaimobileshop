@@ -1,3 +1,4 @@
+import ConfirmationDialog from './components/ConfirmationDialog';
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
@@ -20,5 +21,8 @@ if (!rootElement) {
 
 const root = ReactDOM.createRoot(rootElement);
 root.render(
-  <App />
+  <>
+    <App />
+    <ConfirmationDialog />
+  </>
 );

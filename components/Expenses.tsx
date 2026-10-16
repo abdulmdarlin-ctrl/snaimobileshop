@@ -1,3 +1,4 @@
+import { confirmAction } from '../utils/dialog';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../db';
 import { Expense, UserRole, User, ExpenseCategory } from '../types';
@@ -164,7 +165,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
       if (!formData.description.trim()) return showToast("Description required", 'error');
       if (!Number.isFinite(formData.amount) || Number(formData.amount) <= 0) return showToast("Amount must be positive", 'error');
 
-      if (!confirm("Save this expense?")) return;
+      if (!await confirmAction({"title": "Save expense?", "message": "Record this expense in the business ledger.", "confirmLabel": "Save expense"})) return;
       saving.current = true;
       setIsSaving(true);
       try {
@@ -566,7 +567,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                </div>
 
                <button disabled={isSaving} aria-busy={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm  hover:bg-black transition-all mt-2">
-                  {isSaving ? 'Saving…' : editingId ? 'Update Expense' : 'Record Expense'}
+                  {isSaving ? 'Savingâ€¦' : editingId ? 'Update Expense' : 'Record Expense'}
                </button>
             </form>
          </Modal>

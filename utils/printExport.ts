@@ -1,3 +1,4 @@
+import { notifyDialog } from './dialog';
 
 import { jsPDF } from 'jspdf';
 import html2canvas from 'html2canvas';
@@ -108,7 +109,7 @@ export const printSection = (selector: string, callback?: () => void) => {
       iframe.contentWindow?.print();
     } catch (e) {
       console.error("Printing failed:", e);
-      alert("Could not open print dialog. Please check browser settings.");
+      void notifyDialog("Could not open print dialog. Please check browser settings.");
     } finally {
       // Clean up the iframe after a delay to allow the print dialog to open.
       setTimeout(() => {
@@ -232,7 +233,7 @@ export const exportSectionToPDF = async (selector: string, filename: string = 'S
     }
   } catch (error) {
     console.error('PDF Export failed:', error);
-    alert('Failed to generate PDF. Please try again.');
+    void notifyDialog('Failed to generate PDF. Please try again.');
   } finally {
     document.body.style.cursor = 'default';
   }

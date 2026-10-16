@@ -1,3 +1,4 @@
+import { customerStatus, normalizeCustomerPhone, validateCustomerContact, getCustomerSales } from './utils/customers';
 
 import {
   collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, runTransaction
@@ -6,7 +7,7 @@ import { dbInstance, createSecondaryUser } from './firebaseConfig';
 import { validateRecord } from './utils/validation';
 import { validateImeis, itemImeis } from './utils/imei';
 import { calculateSaleTotals, money, stockChanges, validateItems, validatePayment, getSaleType, outstandingAmount } from './utils/pos';
-import { Product, Sale, SaleItem, Repair, Supplier, User, AppSettings, UserRole, Expense, ExpenseCategory, StockLog, AuditLog, Purchase, Loan, Agent } from './types';
+import { Customer, Product, Sale, SaleItem, Repair, Supplier, User, AppSettings, UserRole, Expense, ExpenseCategory, StockLog, AuditLog, Purchase, Loan, Agent } from './types';
 
 // --- DATABASE COLLECTIONS ---
 const COLLECTIONS = {
@@ -73,6 +74,7 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
 
     add: async (data: T) => {
       if (collectionName === 'products') return saveInventoryProduct(data as unknown as Product) as Promise<any>;
+      if (collectionName === 'customers') return db.saveCustomerProfile(data as unknown as Customer, undefined, (data as unknown as Customer).updatedBy || 'System') as Promise<any>;
       validateRecord(collectionName, data);
       const cleanData = sanitizeData(data);
       const docRef = await addDoc(getColRef(), cleanData);
@@ -81,6 +83,7 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
 
     update: async (id: string, data: Partial<T>) => {
       if (collectionName === 'products') { await saveInventoryProduct(data as Partial<Product>, id); return; }
+      if (collectionName === 'customers') { await db.saveCustomerProfile(data as Partial<Customer>, id, (data as Partial<Customer>).updatedBy || 'System'); return; }
       if (!id) throw new Error('Select a record to update.');
       validateRecord(collectionName, data, true);
       const cleanData = sanitizeData(data);
@@ -151,6 +154,61 @@ async function saveInventoryProduct(data: Partial<Product>, id?: string) {
 }
 
 export const db = {
+  saveCustomerProfile: async (data: Partial<Customer>, id: string | undefined, actor: string, expectedUpdatedAt?: number) => {
+    const ref = id ? doc(dbInstance, 'customers', id) : doc(collection(dbInstance, 'customers'));
+    const customerId = id || ref.id;
+    // The phone registry protects concurrent registrations. Existing unindexed
+    // customers are also checked so legacy records are not silently duplicated.
+    const snapshot = await getDocs(collection(dbInstance, 'customers'));
+    const customers = snapshot.docs.map(record => ({ ...record.data(), id: record.id })) as Customer[];
+    const oldCustomer = customers.find(customer => customer.id === id);
+    const proposedPhone = normalizeCustomerPhone(data.phone ?? oldCustomer?.phone ?? '');
+    if (customers.some(customer => customer.id !== id && normalizeCustomerPhone(customer.phone) === proposedPhone)) throw new Error('A customer with this phone number already exists.');
+    let legacySales: Sale[] = [];
+    if (oldCustomer && ((data.phone != null && data.phone !== oldCustomer.phone) || (data.name != null && data.name !== oldCustomer.name))) {
+      const sales = await getDocs(collection(dbInstance, 'sales'));
+      legacySales = getCustomerSales(sales.docs.map(record => ({ ...record.data(), id: record.id })) as Sale[], oldCustomer, customers).filter(sale => !sale.customerId);
+      if (legacySales.length > 400) throw new Error('This profile has too many legacy invoices to update safely in one operation. Contact an administrator to link its history first.');
+    }
+    return runTransaction(dbInstance, async transaction => {
+      const previous = await transaction.get(ref);
+      if (id && !previous.exists()) throw new Error('Customer no longer exists. Refresh the directory.');
+      const previousCustomer = previous.data() as Customer | undefined;
+      if (expectedUpdatedAt !== undefined && (previousCustomer?.updatedAt || 0) !== expectedUpdatedAt) throw new Error('This customer was updated by another attendant. Refresh the profile before saving.');
+      if (oldCustomer && (previousCustomer?.name !== oldCustomer.name || previousCustomer?.phone !== oldCustomer.phone)) throw new Error('Customer contact details changed elsewhere. Refresh and try again.');
+      const customer = { ...(previousCustomer || {}), ...data, id: customerId, updatedAt: Date.now(), updatedBy: actor } as Customer;
+      customer.status = customerStatus(customer.status);
+      validateRecord('customers', customer);
+      validateCustomerContact(customer.name, customer.phone, customer.email);
+      if (!['Active', 'Inactive', 'Blacklisted'].includes(customer.status)) throw new Error('Choose a valid customer status.');
+      if (!['Retail', 'Wholesale', 'Middle Man', 'VIP'].includes(customer.category)) throw new Error('Choose a valid customer category.');
+      if (customer.status !== 'Active' && customer.status !== previousCustomer?.status && !customer.statusReason?.trim()) throw new Error('Add a reason for this account restriction.');
+      const phone = normalizeCustomerPhone(customer.phone);
+      const phoneRef = doc(dbInstance, 'customerPhones', phone);
+      const owner = await transaction.get(phoneRef);
+      if (owner.exists() && owner.data().customerId !== customerId) throw new Error('A customer with this phone number already exists.');
+      const oldPhone = normalizeCustomerPhone(previousCustomer?.phone);
+      let oldPhoneRef: any;
+      let releaseOldPhone = false;
+      if (oldPhone && oldPhone !== phone) {
+        oldPhoneRef = doc(dbInstance, 'customerPhones', oldPhone);
+        const oldOwner = await transaction.get(oldPhoneRef);
+        releaseOldPhone = oldOwner.exists() && (oldOwner.data() as { customerId?: string }).customerId === customerId;
+      }
+      const links = [];
+      for (const sale of legacySales) {
+        const saleRef = doc(dbInstance, 'sales', sale.id!);
+        const current = await transaction.get(saleRef);
+        if (current.exists() && !current.data().customerId && getCustomerSales([{ ...current.data(), id: sale.id } as Sale], oldCustomer!, customers).length) links.push({ ref: saleRef, revision: (current.data().revision || 0) + 1 });
+      }
+      if (releaseOldPhone) transaction.delete(oldPhoneRef);
+      transaction.set(phoneRef, { customerId });
+      for (const link of links) transaction.update(link.ref, { customerId, revision: link.revision });
+      transaction.set(ref, sanitizeData(customer));
+      transaction.set(doc(collection(dbInstance, 'auditLogs')), { action: id ? 'Customer profile updated' : 'Customer created', entityType: 'Customer', entityId: customerId, user: actor, timestamp: Date.now(), details: `${customer.name}: ${customer.status}`, changedFields: Object.keys(data), ...(previousCustomer ? { previousStatus: previousCustomer.status || 'Active' } : {}) });
+      return customer;
+    });
+  },
   collectRepairPayment: async (id: string, amount: number, expectedDeposit: number, actor: string, method: string) => {
     if (!Number.isFinite(amount) || amount <= 0 || !['Cash', 'Mobile Money', 'Bank'].includes(method)) throw new Error('Enter a valid payment.');
     return runTransaction(dbInstance, async transaction => {
@@ -267,6 +325,7 @@ export const db = {
       if (mode === 'create' && existing.exists()) return { ...existing.data(), id: existing.id } as Sale;
       const customer = await transaction.get(doc(dbInstance, COLLECTIONS.customers, sale.customerId));
       if (!customer.exists() || customer.data().status === 'Blacklisted') throw new Error('Select an existing customer who is not blacklisted.');
+      if (mode === 'create' && customer.data().status === 'Inactive') throw new Error('This customer is inactive. Reactivate the account before creating a new sale.');
       if (!customer.data().name?.trim() || !customer.data().phone?.trim()) throw new Error('Update the customer name and phone before completing the sale.');
       cleanSale.customerName = customer.data().name;
       cleanSale.customerPhone = customer.data().phone;
@@ -424,7 +483,7 @@ export const db = {
   getStatus: () => 'live' as const,
   resetSystem: async () => {
     console.warn("System reset requires manual Cloud Firestore deletion.");
-    alert("Please contact administrator to reset cloud database.");
+    throw new Error("Cloud database resets must be performed by an administrator. No data has been erased.");
   }
 };
 

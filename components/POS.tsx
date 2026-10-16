@@ -1,8 +1,9 @@
+import { confirmAction } from '../utils/dialog';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../db';
 import { itemImeis, validateImeis } from '../utils/imei';
 import { calculateSaleTotals, money, validateItems, validatePayment, getSaleType, outstandingAmount } from '../utils/pos';
-import { normalizeCustomerPhone, escapeCustomerCSVCell } from '../utils/customers';
+import { findCustomerMatches, validateCustomerContact, normalizeCustomerPhone, escapeCustomerCSVCell } from '../utils/customers';
 import { Product, Sale, SaleItem, User, AppSettings, ProductType, UserRole, CustomerCategory, CustomerStatus, SaleType } from '../types';
 import {
    Search, ShoppingCart, Trash2, Plus, Minus, CreditCard,
@@ -244,10 +245,10 @@ const POS: React.FC<POSProps> = ({ user }) => {
       window.dispatchEvent(new Event('storage'));
    };
 
-   const handleResumeSale = (heldSale: any) => {
+   const handleResumeSale = async (heldSale: any) => {
       try { validateItems(heldSale.items); calculateSaleTotals(heldSale.items, heldSale.checkoutForm?.discountPercentage || 0); }
       catch { showToast('This held sale contains invalid items. It has not been changed.', 'error'); return; }
-      if (cart.length > 0 && !confirm("Current cart will be cleared. Continue?")) return;
+      if (cart.length > 0 && !await confirmAction({ title: 'Resume held sale?', message: 'This replaces the items currently in your cart with the held sale.', confirmLabel: 'Resume sale', tone: 'danger' })) return;
       skipReprice.current = heldSale.pricingMode !== pricingMode;
       saleIdRef.current = `held-${heldSale.id}`;
       setPaymentReference(heldSale.paymentReference || '');
@@ -544,8 +545,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setCart(prev => prev.filter(item => item.productId !== productId));
    };
 
-   const clearCart = () => {
-      if (cart.length && !confirm('Clear all items from this cart?')) return;
+   const clearCart = async () => {
+      if (cart.length && !await confirmAction({ title: 'Clear the cart?', message: 'All items in the current cart will be removed.', confirmLabel: 'Clear cart', tone: 'danger' })) return;
       setCart([]);
       setSaleType('Cash sale');
       setActiveHeldSaleId(null);
@@ -638,7 +639,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       if (loading || dataError) throw new Error('Refresh the product list before completing this sale.');
       const customer = customers.find(c => c.name === checkoutForm.customerName && c.phone === checkoutForm.customerPhone);
       if (!customer?.id || !customer.phone?.trim()) throw new Error('Select a customer with a phone number before completing the sale.');
-      if (customer?.status === CustomerStatus.BLACKLISTED) throw new Error('This customer is blacklisted. Select another customer.');
+      if (customer?.status === CustomerStatus.BLACKLISTED || customer?.status === CustomerStatus.INACTIVE) throw new Error('This customer account is restricted. Select an active customer.');
    };
 
    const handleInitiateConfirm = () => {
@@ -652,7 +653,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       collectionLock.current = true;
       setCollecting(true);
       try {
-         if (!confirm(`Record UGX ${collectionForm.amount.toLocaleString()} against ${paymentSale.receiptNo}?`)) return;
+         if (!await confirmAction({ title: 'Record customer payment?', message: 'Confirm that this payment has been received before updating the balance.', confirmLabel: 'Record payment', details: [{ label: 'Invoice', value: paymentSale.receiptNo }, { label: 'Amount received', value: `UGX ${collectionForm.amount.toLocaleString()}` }] })) return;
          const updated = await db.recordSalePayment(paymentSale.id, {
             id: collectionId.current, amount: collectionForm.amount, method: collectionForm.method,
             reference: collectionForm.reference.trim(), timestamp: Date.now(), user: user.username
@@ -745,7 +746,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    };
 
    const handleSelectCustomer = (c: any) => {
-      if (c.status === CustomerStatus.BLACKLISTED) return showToast('This customer is blacklisted.', 'error');
+      if (c.status === CustomerStatus.BLACKLISTED || c.status === CustomerStatus.INACTIVE) return showToast('This customer account is restricted. Select an active customer.', 'error');
       setCheckoutForm(prev => ({
          ...prev,
          customerName: c.name,
@@ -755,6 +756,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setShowCustomerResults(false);
    };
 
+   const customerMatches = findCustomerMatches(customers, newCustomerForm);
    const handleCreateCustomer = async () => {
       if (customerLock.current) return;
       if (!newCustomerForm.name.trim() || !normalizeCustomerPhone(newCustomerForm.phone)) return showToast('Enter a customer name and phone number.', 'error');
@@ -762,13 +764,16 @@ const POS: React.FC<POSProps> = ({ user }) => {
       customerLock.current = true;
 
       try {
+         validateCustomerContact(newCustomerForm.name, newCustomerForm.phone, newCustomerForm.email);
+         if (customerMatches.length && !await confirmAction({ title: 'Possible existing customer', message: 'Review the matching name or email before creating a separate customer.', confirmLabel: 'Create separate customer', details: customerMatches.map(m => ({ label: m.customer.name, value: m.customer.phone })) })) return;
          const newC = await db.customers.add({
             ...newCustomerForm,
             name: newCustomerForm.name.trim(),
             phone: newCustomerForm.phone.trim(),
             status: CustomerStatus.ACTIVE,
             category: CustomerCategory.RETAIL,
-            joinedDate: Date.now()
+            joinedDate: Date.now(),
+            updatedBy: user.username
          });
          const createdCustomer = newC;
 
@@ -777,7 +782,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          setIsCreatingCustomer(false);
          showToast("Customer created & selected", 'success');
       } catch (e) {
-         showToast("Failed to create customer", 'error');
+         showToast(e instanceof Error ? e.message : 'Failed to create customer', 'error');
       } finally { customerLock.current = false; }
    };
 
@@ -815,7 +820,18 @@ const POS: React.FC<POSProps> = ({ user }) => {
          if (!originalSale) throw new Error('Original sale is unavailable. Refresh sales history.');
          validateItems(saleToEdit.items);
          if (!saleToEdit.customerId) throw new Error('Select a customer before saving this sale.');
-         if (!confirm(`Update ${saleToEdit.receiptNo}?\nItems: ${saleToEdit.items.reduce((sum, item) => sum + item.quantity, 0)}\nTotal: UGX ${saleToEdit.total.toLocaleString()}\nOutstanding: UGX ${outstandingAmount(saleToEdit).toLocaleString()}\nStock will be adjusted to match.`)) return;
+         if (!await confirmAction({
+            title: 'Save sale changes?',
+            message: 'Review the updated sale below. Saving will update the invoice and adjust inventory to match its items.',
+            confirmLabel: 'Save changes',
+            details: [
+               { label: 'Invoice', value: saleToEdit.receiptNo },
+               { label: 'Customer', value: saleToEdit.customerName || 'Selected customer' },
+               { label: 'Items', value: String(saleToEdit.items.reduce((sum, item) => sum + item.quantity, 0)) },
+               { label: 'New total', value: `UGX ${saleToEdit.total.toLocaleString()}` },
+               { label: 'Outstanding', value: `UGX ${outstandingAmount(saleToEdit).toLocaleString()}` }
+            ]
+         })) return;
          const net = originalSale.items.reduce((sum, item) => sum + item.price * item.quantity, 0) * (1 - (originalSale.globalDiscountPercentage || 0) / 100);
          const taxRate = originalSale.taxPercentage ?? (net > 0 ? (originalSale.tax || 0) / net * 100 : 0);
          const updatedSale = await db.commitSale({ ...saleToEdit, taxPercentage: taxRate }, !!settings?.enableNegativeStock, 'edit', user.username);
@@ -1467,6 +1483,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                            </div>
                         </div>
 
+                        {customerMatches.length > 0 && <div className="p-3 border border-amber-200 rounded-lg text-xs space-y-2" role="status"><strong>Existing customer matches</strong>{customerMatches.map(m => <div key={m.customer.id}><p>{m.customer.name} - {m.customer.phone} ({m.phoneMatch ? 'same phone' : m.emailMatch ? 'same email' : 'same name'})</p><button type="button" className="text-blue-700 underline" disabled={m.customer.status === CustomerStatus.INACTIVE || m.customer.status === CustomerStatus.BLACKLISTED} onClick={() => { handleSelectCustomer(m.customer); setIsCreatingCustomer(false); }}>Select existing customer</button></div>)}</div>}
                         <button onClick={handleCreateCustomer} className="w-full py-3 bg-blue-600 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-blue-700 transition-all   flex items-center justify-center gap-2">
                            <Check size={16} strokeWidth={1.75} /> Save & Select
                         </button>
@@ -2719,8 +2736,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     onChange={e => updateEditItem(idx, 'price', Number(e.target.value))}
                                  />
                               </div>
-                              <button type="button" aria-label={`Remove ${item.name}`} className="p-2 text-red-600" onClick={() => {
-                                 if (confirm(`Remove ${item.name} from this sale?`)) recalculateEditedSale(saleToEdit.items.filter((_, index) => index !== idx));
+                              <button type="button" aria-label={`Remove ${item.name}`} className="p-2 text-red-600" onClick={async () => {
+                                 if (await confirmAction({ title: 'Remove sale item?', message: `Remove ${item.name} from this invoice? Stock changes apply only when you save the sale.`, confirmLabel: 'Remove item', tone: 'danger' })) recalculateEditedSale(saleToEdit.items.filter((_, index) => index !== idx));
                               }}><Trash2 size={16} /></button>
                               <div className="w-24 text-right">
                                  <label className="text-[11px] font-bold text-slate-400 uppercase block">Total</label>

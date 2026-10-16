@@ -1,3 +1,4 @@
+import { confirmAction } from '../utils/dialog';
 import React, { useState } from 'react';
 import { parseImeis, validateImeis } from '../utils/imei';
 
@@ -35,7 +36,7 @@ export default function PhoneImeiInput({ imeis, quantity, onChange, onQuantityCh
                     const value = imeis[index] || '';
                     const duplicate = !!value && imeis.filter(imei => imei === value).length > 1;
                     return <label key={index} className="block text-xs font-medium text-slate-700">
-                        Phone {index + 1} — IMEI
+                        Phone {index + 1} â€” IMEI
                         <input className="win-input mt-1 font-mono" type="text" inputMode="numeric" autoComplete="off" maxLength={15}
                             value={value} placeholder="15-digit IMEI" aria-invalid={duplicate || (!!value && !/^\d{15}$/.test(value))}
                             onChange={e => { const next = Array.from({ length: rows }, (_, i) => imeis[i] || ''); next[index] = e.target.value.trim(); onChange(next); }} />
@@ -53,8 +54,8 @@ export default function PhoneImeiInput({ imeis, quantity, onChange, onQuantityCh
         </label>}
         <p className="text-sm text-slate-600" aria-live="polite">{count} IMEIs entered / {quantity} phones in stock</p>
         {error && <p className="text-sm text-red-600" role="status">{error}</p>}
-        {imeis.length > quantity && mode === 'individual' && <button type="button" className="text-sm underline text-red-700" onClick={() => {
-            if (Number.isSafeInteger(quantity) && quantity >= 0 && window.confirm(`Remove the last ${imeis.length - quantity} IMEI entries to match Current Stock?`)) onChange(imeis.slice(0, quantity));
+        {imeis.length > quantity && mode === 'individual' && <button type="button" className="text-sm underline text-red-700" onClick={async () => {
+            if (Number.isSafeInteger(quantity) && quantity >= 0 && await confirmAction({ title: 'Remove extra IMEIs?', message: `Remove the last ${imeis.length - quantity} entries to match Current Stock? The change is saved when you save the product.`, confirmLabel: 'Remove entries', tone: 'danger' })) onChange(imeis.slice(0, quantity));
         }}>Remove extra entries to match stock</button>}
     </section>;
 }

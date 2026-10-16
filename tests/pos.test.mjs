@@ -15,6 +15,7 @@ function load(relative, dependencies = {}) {
     return exports;
 }
 const pos = load('../utils/pos.ts');
+const customerTools = load('../utils/customers.ts');
 const validation = load('../utils/validation.ts');
 const imeiTools = load('../utils/imei.ts');
 const item = (quantity = 1, price = 100) => ({ productId: 'p1', name: 'Phone', quantity, price, originalPrice: 100, total: price * quantity });
@@ -51,17 +52,19 @@ function database() {
     let failCommit = false;
     const firestore = {
         collection: (_, name) => name,
-        doc: (...args) => args.length === 1 ? `${args[0]}/audit-${++sequence}` : `${args[1]}/${args[2]}`,
+        getDocs: async name => ({ docs: [...records.entries()].filter(([key]) => key.startsWith(name + '/')).map(([key, value]) => ({ id: key.split('/')[1], data: () => value })) }),
+        doc: (...args) => args.length === 1 ? (args[0] === 'customers' ? { id: `new-${++sequence}`, toString() { return `customers/${this.id}`; } } : `${args[0]}/audit-${++sequence}`) : `${args[1]}/${args[2]}`,
         runTransaction: async (_, callback) => {
             const writes = [];
             const transaction = {
                 get: async ref => {
+                    ref = String(ref);
                     assert.equal(writes.length, 0, 'All reads must precede writes');
                     return { exists: () => records.has(ref), data: () => records.get(ref), id: ref.split('/')[1] };
                 },
-                update: (ref, data) => writes.push(() => records.set(ref, { ...records.get(ref), ...data })),
-                set: (ref, data) => writes.push(() => records.set(ref, data)),
-                delete: ref => writes.push(() => records.delete(ref))
+                update: (ref, data) => writes.push(() => records.set(String(ref), { ...records.get(String(ref)), ...data })),
+                set: (ref, data) => writes.push(() => records.set(String(ref), data)),
+                delete: ref => writes.push(() => records.delete(String(ref)))
             };
             const result = await callback(transaction);
             if (failCommit) throw new Error('Simulated commit failure');
@@ -69,7 +72,7 @@ function database() {
             return result;
         }
     };
-    const { db, safeStringify } = load('../db.ts', { 'firebase/firestore': firestore, './firebaseConfig': { dbInstance: {} }, './types': {}, './utils/pos': pos, './utils/validation': validation, './utils/imei': imeiTools });
+    const { db, safeStringify } = load('../db.ts', { 'firebase/firestore': firestore, './firebaseConfig': { dbInstance: {} }, './types': {}, './utils/pos': pos, './utils/validation': validation, './utils/imei': imeiTools, './utils/customers': customerTools });
     const sale = { id: 's1', receiptNo: 'INV-1', items: [item()], amountPaid: 100, paymentMethod: 'Cash', cashierName: 'cashier', timestamp: 1, customerId: 'c1', customerName: 'Alice', customerPhone: '0700123456' };
     return { db, safeStringify, records, sale, fail: () => { failCommit = true; } };
 }
@@ -352,4 +355,56 @@ test('repair collection rolls back on commit failure and rejects overpayment', a
     fail();
     await assert.rejects(db.collectRepairPayment('r1', 80, 20, 'cashier', 'Cash'), /Simulated/);
     assert.equal(records.get('repairs/r1').depositPaid, 20);
+});
+
+
+test('customer status controls block new inactive sales but retain payment collection', async () => {
+    const { db, records, sale } = database();
+    const debt = await db.commitSale({ ...sale, saleType: 'Debt', amountPaid: 0 });
+    records.get('customers/c1').status = 'Inactive';
+    await assert.rejects(db.commitSale({ ...sale, id: 's2' }), /inactive/);
+    const paid = await db.recordSalePayment(debt.id, { id: 'payment1', amount: 20, method: 'Cash', reference: '', timestamp: 5, user: 'cashier' });
+    assert.equal(paid.amountDue, 80);
+});
+test('customer profile saves validate contacts, preserve history links and audit changes', async () => {
+    const { db, records } = database();
+    Object.assign(records.get('customers/c1'), { category: 'Retail', joinedDate: 1 });
+    records.set('sales/legacy', { receiptNo: 'OLD', customerName: 'Alice', customerPhone: '0700123456', total: 100, amountPaid: 0, items: [] });
+    const saved = await db.saveCustomerProfile({ name: 'Alice Updated', phone: '0700222333', notes: 'Follow up' }, 'c1', 'admin');
+    assert.equal(saved.name, 'Alice Updated');
+    assert.equal(records.get('sales/legacy').customerId, 'c1');
+    assert.equal(records.get('customerPhones/256700222333').customerId, 'c1');
+    assert.ok([...records.values()].some(record => record.action === 'Customer profile updated'));
+    await assert.rejects(db.saveCustomerProfile({ phone: 'abc' }, 'c1', 'admin'), /valid phone/);
+    await assert.rejects(db.saveCustomerProfile({ status: 'Blacklisted' }, 'c1', 'admin'), /reason/);
+    await db.saveCustomerProfile({ status: 'Inactive', statusReason: 'Account closed' }, 'c1', 'admin');
+    assert.equal(records.get('customers/c1').notes, 'Follow up');
+});
+test('customer profiles reject duplicate phone ownership and roll back failed saves', async () => {
+    const { db, records, fail } = database();
+    Object.assign(records.get('customers/c1'), { category: 'Retail', joinedDate: 1 });
+    records.set('customerPhones/256700222333', { customerId: 'c2' });
+    await assert.rejects(db.saveCustomerProfile({ phone: '0700222333' }, 'c1', 'admin'), /already exists/);
+    fail();
+    await assert.rejects(db.saveCustomerProfile({ notes: 'Unsaved note' }, 'c1', 'admin'), /Simulated/);
+    assert.equal(records.get('customers/c1').notes, undefined);
+    assert.equal(records.has('customerPhones/256700123456'), false);
+});
+
+
+test('stale customer editor cannot overwrite a newer profile update', async () => {
+    const { db, records } = database();
+    Object.assign(records.get('customers/c1'), { category: 'Retail', joinedDate: 1, updatedAt: 20, notes: 'Latest note' });
+    await assert.rejects(db.saveCustomerProfile({ notes: 'Old draft' }, 'c1', 'admin', 10), /another attendant/);
+    assert.equal(records.get('customers/c1').notes, 'Latest note');
+});
+
+
+test('creating customers reserves the phone and rejects a second registration', async () => {
+    const { db, records } = database();
+    const saved = await db.saveCustomerProfile({ name: 'New customer', phone: '0700555666', status: 'Active', category: 'Retail', joinedDate: 1 }, undefined, 'admin');
+    assert.ok(saved.id);
+    assert.equal(records.get(`customers/${saved.id}`).name, 'New customer');
+    assert.equal(records.get('customerPhones/256700555666').customerId, saved.id);
+    await assert.rejects(db.saveCustomerProfile({ name: 'Duplicate', phone: '+256700555666', status: 'Active', category: 'Retail', joinedDate: 1 }, undefined, 'admin'), /already exists/);
 });

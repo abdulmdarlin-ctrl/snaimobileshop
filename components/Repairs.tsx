@@ -1,3 +1,4 @@
+import { confirmAction } from '../utils/dialog';
 import { normalizeCustomerPhone } from '../utils/customers';
 import { getSaleType } from '../utils/pos';
 
@@ -112,7 +113,7 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
 
    const handleSave = async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!confirm("Save this repair job and its payment details?")) return;
+      if (!await confirmAction({"title": "Save repair job?", "message": "Save the job details, parts and payment information.", "confirmLabel": "Save repair"})) return;
       setLoading(true);
 
       try {
@@ -253,7 +254,7 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
       try {
          if (!repair.id || amount <= 0) return;
 
-         if (!confirm(`Collect UGX ${amount.toLocaleString()} for repair ${repair.jobCardNo}?`)) return;
+         if (!await confirmAction({ title: 'Collect repair payment?', message: 'Confirm that this payment has been received. The job balance will be updated.', confirmLabel: 'Record payment', details: [{ label: 'Job card', value: repair.jobCardNo }, { label: 'Amount received', value: `UGX ${amount.toLocaleString()}` }] })) return;
          await db.collectRepairPayment(repair.id, amount, repair.depositPaid || 0, user.fullName || user.username, paymentMethod);
          showToast(`Payment recorded for job card ${repair.jobCardNo}`, 'success');
 

@@ -24,7 +24,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
     // Close on escape key
     useEffect(() => {
         const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
+            if (e.key === 'Escape' && !document.querySelector('.confirmation-layer')) onClose();
         };
         if (isOpen) window.addEventListener('keydown', handleEsc);
         return () => window.removeEventListener('keydown', handleEsc);
@@ -62,11 +62,11 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
             <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
 
             {/* Modal Content */}
-            <div className={`relative w-full ${maxWidthClasses[maxWidth]} bg-white rounded-[2rem] flex flex-col max-h-[90vh] border border-slate-200 overflow-hidden`}>
+            <div className={`relative w-full ${maxWidthClasses[maxWidth]} bg-white rounded-xl flex flex-col max-h-[90vh] border border-slate-200 overflow-hidden`}>
                 {title && (
                     <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50 shrink-0">
                         {typeof title === 'string' ? (
-                            <h2 className="text-xl font-black text-slate-900 tracking-tight">{title}</h2>
+                            <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
                         ) : title}
                         <button
                             aria-label="Close dialog"

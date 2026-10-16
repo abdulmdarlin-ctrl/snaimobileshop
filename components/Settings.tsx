@@ -1,3 +1,4 @@
+import { confirmAction, notifyDialog } from '../utils/dialog';
 ﻿
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp, getApp, deleteApp } from 'firebase/app';
@@ -428,7 +429,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
    const handleSaveSettings = async () => {
 
-      if (!confirm("Save these system settings?")) return;if (!settings) return;
+      if (!await confirmAction({"title": "Save system settings?", "message": "These settings will apply to the business after saving.", "confirmLabel": "Save settings"})) return;if (!settings) return;
       setSaving(true);
       try {
          await db.settings.put(settings);
@@ -453,7 +454,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
    };
 
    const handleImportProducts = async () => {
-      if (!confirm('Import these products into inventory?')) return;
+      if (!await confirmAction({"title": "Import inventory?", "message": "Add the selected product records to inventory. Review the file before continuing.", "confirmLabel": "Import products"})) return;
       if (!importText.trim()) return;
       setImporting(true);
       try {
@@ -542,7 +543,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
    const handleRestore = async () => {
       if (!restoreFile) return;
-      if (!confirm("WARNING: This will merge the backup data into your current system. Existing IDs may cause conflicts. Proceed?")) return;
+      if (!await confirmAction({ title: 'Restore business backup?', message: 'This merges the backup into the current database. Records with matching IDs may be changed. Check that you selected the correct backup.', confirmLabel: 'Restore backup', tone: 'danger' })) return;
 
       setRestoring(true);
       const reader = new FileReader();
@@ -577,18 +578,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
    };
 
    const handleFactoryReset = async () => {
-      const confirmation = prompt('CRITICAL WARNING: This will permanently erase all business data. Type "CONFIRM" to proceed.');
-      if (confirmation === 'CONFIRM') {
-         try {
-            await logAudit('SYSTEM_RESET', 'Factory reset initiated');
-            await db.resetSystem();
-            showToast("System reset successful. Reloading.", 'success');
-            localStorage.clear();
-            window.location.reload();
-         } catch (err) {
-            showToast("Reset operation failed.", 'error');
-         }
-      }
+      await notifyDialog('Cloud database resets must be performed by an administrator. No business data has been erased.', 'Administrator action required');
    };
 
    const handleDeleteUser = (user: User) => {
@@ -623,7 +613,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
       }
       const newStatus = !(user.isActive ?? true);
       const action = newStatus ? 'Activate' : 'Suspend';
-      if (confirm(`Are you sure you want to ${action.toUpperCase()} ${user.username}'s account?`)) {
+      if (await confirmAction({ title: `${action} staff account?`, message: `Update access for ${user.username}?`, confirmLabel: `${action} account`, tone: action === 'Activate' ? 'default' : 'danger' })) {
          await db.users.update(user.id!, { isActive: newStatus });
          await logAudit('USER_STATUS_CHANGE', `${action}d user: ${user.username}`);
          loadData();
@@ -666,7 +656,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
    };
 
    const handleUserSave = async () => {
-      if (!confirm('Save this user account and access permissions?')) return;
+      if (!await confirmAction({"title": "Save staff access?", "message": "Save this staff account and its assigned access permissions.", "confirmLabel": "Save access"})) return;
       if (!userForm.username) return showToast("Username required", 'error');
       // Only require password for new users
       if (!editingUser && !userForm.password) return showToast("Password required for new users", 'error');
@@ -1088,11 +1078,6 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                     onChange={(e) => {
                                        if (e.target.files?.[0]) {
                                           setRestoreFile(e.target.files[0]);
-                                          setTimeout(() => {
-                                             if (confirm("Restore this backup file?")) {
-                                                // Trigger restore
-                                             }
-                                          }, 100);
                                        }
                                     }}
                                  />

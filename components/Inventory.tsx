@@ -1,3 +1,4 @@
+import { confirmAction } from '../utils/dialog';
 import PhoneImeiInput from './PhoneImeiInput';
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -115,7 +116,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          };
          if (dataToSave.type === ProductType.PHONE) validateImeis(dataToSave.imeis || [], dataToSave.stockQuantity || 0);
 
-         if (!confirm("Save this product?")) return;
+         if (!await confirmAction({"title": "Save inventory changes?", "message": "Save the product details, stock quantity and any registered phone IMEIs.", "confirmLabel": "Save product"})) return;
 
          if (editingProduct?.id) {
             await db.products.update(editingProduct.id, dataToSave);
@@ -149,7 +150,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          return;
       }
 
-      if (!confirm("Apply this stock adjustment?")) return;
+      if (!await confirmAction({"title": "Apply stock adjustment?", "message": "Update the available quantity and record the reason in the stock history.", "confirmLabel": "Adjust stock"})) return;
       setIsSaving(true);
       try {
          await db.adjustStock({

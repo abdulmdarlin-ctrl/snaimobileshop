@@ -81,6 +81,9 @@ export interface Agent {
 }
 
 export interface Customer {
+  statusReason?: string;
+  updatedAt?: number;
+  updatedBy?: string;
   id?: string;
   name: string;
   phone: string;

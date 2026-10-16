@@ -1,3 +1,4 @@
+import { confirmAction, requestText } from '../utils/dialog';
 import React, { useState, useEffect } from 'react';
 import { db } from '../db';
 import { Product } from '../types';
@@ -145,7 +146,7 @@ const IMEImanager: React.FC<IMEImanagerProps> = ({
       return;
     }
 
-    if (confirm('Are you sure you want to delete this IMEI number?')) {
+    if (await confirmAction({ title: 'Delete IMEI?', message: 'This serial number will be removed from the register.', confirmLabel: 'Delete IMEI', tone: 'danger' })) {
       try {
         const success = serialNumberDB.deleteSerialNumber(serial.id!);
         if (success) {
@@ -198,8 +199,8 @@ const IMEImanager: React.FC<IMEImanagerProps> = ({
     }
   };
 
-  const bulkAddIMEIs = () => {
-    const input = prompt('Enter IMEI numbers (one per line):');
+  const bulkAddIMEIs = async () => {
+    const input = await requestText({ title: 'Add IMEIs in bulk', message: 'Enter one primary 15-digit IMEI per phone. Your entries will be validated before they are added.', inputLabel: 'Phone IMEIs', multiline: true, confirmLabel: 'Validate and add' });
     if (!input || !product) return;
 
     const imeis = input.split('\n').map(s => s.trim()).filter(s => s);

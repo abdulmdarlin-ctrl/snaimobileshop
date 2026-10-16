@@ -1,3 +1,4 @@
+import { cancelDialogs } from './utils/dialog';
 import { activeStaffProfile } from './utils/staff';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -55,6 +56,8 @@ const App: React.FC = () => {
 
   // Initialize page - all users start on dashboard
   const [currentPage, setCurrentPage] = useState<Page>('dashboard');
+
+  useEffect(() => { cancelDialogs(); }, [user?.id, currentPage]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
   const [dbStatus, setDbStatus] = useState<'live' | 'mock'>('live');

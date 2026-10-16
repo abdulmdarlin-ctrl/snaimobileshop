@@ -1,3 +1,4 @@
+import { confirmAction } from '../utils/dialog';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { db } from '../db';
@@ -101,7 +102,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
     // --- ACTIONS ---
     const handleSaveAgent = async (e: React.FormEvent) => {
         e.preventDefault();
-      if (!confirm("Save this agent profile?")) return;
+      if (!await confirmAction({"title": "Save agent profile?", "message": "Save the agent details shown in this form.", "confirmLabel": "Save agent"})) return;
         setIsSaving(true);
         try {
             if (!agentForm.name) throw new Error("Agent Name Required");
@@ -141,7 +142,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
     const handleIssueStock = async (e: React.FormEvent) => {
         e.preventDefault();
       if (issueSaving.current) return;
-      if (!confirm("Issue this stock to the selected agent?")) return;
+      if (!await confirmAction({"title": "Issue stock to agent?", "message": "This records the consignment and deducts its items from available stock.", "confirmLabel": "Issue stock"})) return;
         if (!selectedAgent) return;
         issueSaving.current = true;
         setIsSaving(true);
@@ -176,7 +177,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
     const handleUpdateStatus = async (e: React.FormEvent) => {
         e.preventDefault();
-      if (!confirm("Update this consignment and payment status?")) return;
+      if (!await confirmAction({"title": "Update consignment?", "message": "Save the updated consignment details and remitted amount.", "confirmLabel": "Update consignment"})) return;
         if (!statusUpdateId) return;
         setIsSaving(true);
         try {

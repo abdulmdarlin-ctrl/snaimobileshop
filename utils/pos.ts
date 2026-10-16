@@ -64,11 +64,11 @@ export function saleReceipts(sale: Sale) {
     const payments = (sale.payments || []).filter(p => Number.isFinite(p.amount) && p.amount > 0);
     const laterTotal = money(payments.reduce((sum, p) => sum + p.amount, 0));
     const initial = money(Math.max(0, paid - laterTotal));
-    const receipts = initial > 0 ? [{ amount: initial, timestamp: sale.timestamp, method: sale.paymentMethod }] : [];
+    const receipts = initial > 0 ? [{ amount: initial, timestamp: sale.timestamp, method: sale.paymentMethod, reference: sale.paymentReference || '', user: sale.cashierName }] : [];
     let remaining = money(paid - initial);
     for (const payment of payments) {
         const amount = money(Math.min(remaining, payment.amount));
-        if (amount > 0) receipts.push({ amount, timestamp: payment.timestamp, method: payment.method as Sale['paymentMethod'] });
+        if (amount > 0) receipts.push({ amount, timestamp: payment.timestamp, method: payment.method as Sale['paymentMethod'], reference: payment.reference || '', user: payment.user });
         remaining = money(remaining - amount);
     }
     return receipts;
