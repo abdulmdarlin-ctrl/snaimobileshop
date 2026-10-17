@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
+import { createRequire } from 'node:module';
+import vm from 'node:vm';
 import test from 'node:test';
 import ts from 'typescript';
 import JsBarcode from 'jsbarcode';
@@ -102,5 +104,78 @@ test('production worker reads real barcode crops off the main thread and continu
         assert.equal(await result, '490154203237518');
         assert.equal(await client.decode({ width: 600, height: 100, data: new Uint8ClampedArray(600 * 100 * 4).fill(255) }), null);
         assert.equal(await client.decode(barcodeImage('354910793340623', 'CODE39')), '354910793340623');
+        const edgeFrame = () => {
+            const image = barcodeImage('490154203237518');
+            const row = image.data.slice(image.width * 20 * 4, image.width * 21 * 4);
+            image.data.fill(255);
+            for (let y = 5; y < 10; y++) image.data.set(row, image.width * y * 4);
+            return image;
+        };
+        for (let i = 0; i < 5; i++) assert.equal(await client.decode(edgeFrame()), null);
+        assert.equal(await client.decode(edgeFrame()), '490154203237518');
+        assert.equal(await client.decode(edgeFrame()), '490154203237518', 'thorough reads receive an immediate confirmation sample');
     } finally { client.dispose(); }
+});
+
+test('bitmap capture transfers ownership and closes unused images without queuing', async () => {
+    const worker = new FakeWorker(), client = new BarcodeWorkerClient(worker);
+    worker.send({ type: 'ready', bitmaps: true }); await client.ready;
+    assert.equal(client.supportsBitmaps, true);
+    let closed = 0;
+    const bitmap = { width: 600, height: 100, close() { closed++; } };
+    const pending = client.decodeBitmap(bitmap);
+    assert.equal(worker.messages[0].message.type, 'bitmap');
+    assert.equal(worker.messages[0].transfer[0], bitmap);
+    assert.equal(await client.decodeBitmap({ width: 600, height: 100, close() { closed++; } }), null);
+    assert.equal(closed, 1, 'unused busy-frame bitmap is closed');
+    worker.send({ type: 'result', id: 1, text: '490154203237518' });
+    assert.equal(await pending, '490154203237518');
+    client.dispose();
+    await assert.rejects(client.decodeBitmap(bitmap), /not ready/);
+    assert.equal(closed, 2, 'unused bitmap after disposal is closed');
+});
+async function bitmapWorker(detector) {
+    const workerSource = await readFile(new URL('../workers/imeiDecoder.worker.ts', import.meta.url), 'utf8');
+    const messages = [], metrics = { reads: 0, draws: 0, closed: 0 };
+    class Surface {
+        constructor(width, height) { this.width = width; this.height = height; }
+        getContext() { return {
+            drawImage: bitmap => { metrics.draws++; this.bitmap = bitmap; },
+            getImageData: () => { metrics.reads++; return { data: this.bitmap.data }; },
+        }; }
+    }
+    const scope = { postMessage: message => messages.push(message), BarcodeDetector: detector };
+    vm.runInNewContext(transpile(workerSource, ts.ModuleKind.CommonJS), { self: scope, exports: {}, require: createRequire(import.meta.url), OffscreenCanvas: Surface, Uint8ClampedArray, console });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(messages[0].type, 'ready');
+    assert.equal(messages[0].bitmaps, true);
+    const image = barcodeImage('490154203237518');
+    image.close = () => { metrics.closed++; };
+    return { scope, image, messages, metrics };
+}
+test('native worker detection avoids pixel readback and chooses the barcode closest to the guide center', async () => {
+    class Detector {
+        static async getSupportedFormats() { return ['code_128']; }
+        async detect() { return [
+            { rawValue: '354910793340623', boundingBox: { y: 0, height: 10 } },
+            { rawValue: '490154203237518', boundingBox: { y: 40, height: 20 } },
+        ]; }
+    }
+    const { scope, image, messages, metrics } = await bitmapWorker(Detector);
+    await scope.onmessage({ data: { type: 'bitmap', id: 1, bitmap: image } });
+    assert.equal(messages[1].text, '490154203237518');
+    assert.equal(metrics.reads, 0);
+    assert.equal(metrics.draws, 0);
+    assert.equal(metrics.closed, 1);
+});
+test('failed native detection falls back to real ZXing decoding inside the worker and releases images', async () => {
+    class Detector {
+        static async getSupportedFormats() { return ['code_128']; }
+        async detect() { throw new Error('Unsupported hardware'); }
+    }
+    const { scope, image, messages, metrics } = await bitmapWorker(Detector);
+    await scope.onmessage({ data: { type: 'bitmap', id: 1, bitmap: image } });
+    assert.equal(messages[1].text, '490154203237518');
+    assert.equal(metrics.reads, 1);
+    assert.equal(metrics.closed, 1);
 });

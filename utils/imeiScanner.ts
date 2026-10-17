@@ -59,3 +59,9 @@ export function createLiveImeiTracker() {
         reset() { candidate = ''; hits = 0; lastRead = 0; latched = ''; },
     };
 }
+
+// Keep fast confirmation responsive while giving slower devices time to render and cool.
+export function nextScanDelay(elapsedMs: number, confirming = false) {
+    const elapsed = Number.isFinite(elapsedMs) ? Math.max(0, elapsedMs) : 0;
+    return Math.max(60, (confirming ? 100 : 180) - elapsed, Math.min(600, elapsed * 2));
+}

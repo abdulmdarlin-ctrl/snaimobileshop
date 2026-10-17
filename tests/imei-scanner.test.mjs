@@ -7,7 +7,7 @@ import zxing from '@zxing/library';
 
 const source = await readFile(new URL('../utils/imeiScanner.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
-const { scannedImei, mergeScannedImeis, scanRegion, createLiveImeiTracker, cameraPreviewRegion, SCAN_GUIDE } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { scannedImei, mergeScannedImeis, scanRegion, createLiveImeiTracker, cameraPreviewRegion, SCAN_GUIDE, nextScanDelay } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const first = '490154203237518';
 function withCheck(prefix) {
     const sum = [...prefix].reduce((total, digit, index) => { const n = +digit * (index % 2 ? 2 : 1); return total + (n > 9 ? n - 9 : n); }, 0);
@@ -94,4 +94,13 @@ test('the visible guide, preview crop and decoded pixels map to the same sensor 
         assert.ok(Math.abs(previewCrop.width / canvasWidth - SCAN_GUIDE.width) < 1e-10);
         assert.ok(Math.abs(previewCrop.height / canvasHeight - SCAN_GUIDE.height) < 1e-10);
     }
+});
+
+test('scan pacing confirms quickly on fast phones and leaves render time on slow phones', () => {
+    assert.equal(nextScanDelay(10, true), 90);
+    assert.equal(nextScanDelay(10), 170);
+    assert.equal(nextScanDelay(150), 300);
+    assert.equal(nextScanDelay(400), 600);
+    assert.equal(nextScanDelay(NaN), 180);
+    assert.equal(nextScanDelay(-1), 180);
 });

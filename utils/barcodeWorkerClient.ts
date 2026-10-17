@@ -1,5 +1,5 @@
-export type BarcodeDecodeRequest = { type: 'decode'; id: number; width: number; height: number; pixels: ArrayBuffer };
-export type BarcodeDecodeResponse = { type: 'ready' } | { type: 'result'; id: number; text: string | null };
+export type BarcodeDecodeRequest = { type: 'decode'; id: number; width: number; height: number; pixels: ArrayBuffer } | { type: 'bitmap'; id: number; bitmap: ImageBitmap };
+export type BarcodeDecodeResponse = { type: 'ready'; bitmaps?: boolean } | { type: 'result'; id: number; text: string | null };
 type Channel = Pick<Worker, 'onmessage' | 'onerror' | 'onmessageerror' | 'postMessage' | 'terminate'>;
 
 // One transferred crop at a time: never queue old camera frames behind a slow decode.
@@ -10,6 +10,7 @@ export class BarcodeWorkerClient {
     private resolveReady!: () => void;
     private rejectReady!: (error: Error) => void;
     private initialized = false;
+    supportsBitmaps = false;
     private closed = false;
     private sequence = 0;
 
@@ -20,7 +21,7 @@ export class BarcodeWorkerClient {
         this.readyTimer = setTimeout(() => this.fail(new Error('The barcode reader took too long to load. Restart the scanner.')), startupTimeout);
         worker.onmessage = (event: MessageEvent<BarcodeDecodeResponse>) => {
             if (this.closed) return;
-            if (event.data.type === 'ready') { clearTimeout(this.readyTimer); this.initialized = true; this.resolveReady(); return; }
+            if (event.data.type === 'ready') { clearTimeout(this.readyTimer); this.initialized = true; this.supportsBitmaps = event.data.bitmaps === true; this.resolveReady(); return; }
             const pending = this.pending;
             if (event.data.type !== 'result' || !pending || event.data.id !== pending.id) return;
             clearTimeout(pending.timeout); this.pending = null; pending.resolve(event.data.text);
@@ -30,16 +31,21 @@ export class BarcodeWorkerClient {
     }
     get busy() { return this.pending !== null; }
     decode(frame: ImageData): Promise<string | null> {
-        if (this.closed || !this.initialized) return Promise.reject(new Error('The barcode reader is not ready. Restart the scanner.'));
-        if (this.pending) return Promise.resolve(null);
-        return new Promise((resolve, reject) => {
+        const pixels = frame.data.buffer as ArrayBuffer;
+        return this.submit(id => ({ type: 'decode', id, width: frame.width, height: frame.height, pixels }), [pixels]);
+    }
+    decodeBitmap(bitmap: ImageBitmap): Promise<string | null> {
+        return this.submit(id => ({ type: 'bitmap', id, bitmap }), [bitmap], () => bitmap.close());
+    }
+    private submit(request: (id: number) => BarcodeDecodeRequest, transfer: Transferable[], release = () => {}) {
+        if (this.closed || !this.initialized) { release(); return Promise.reject(new Error('The barcode reader is not ready. Restart the scanner.')); }
+        if (this.pending) { release(); return Promise.resolve(null); }
+        return new Promise<string | null>((resolve, reject) => {
             const id = ++this.sequence;
             const timeout = setTimeout(() => this.fail(new Error('Barcode reading stalled. Restart the scanner or use Photo.')), this.decodeTimeout);
             this.pending = { id, resolve, reject, timeout };
-            try {
-                const pixels = frame.data.buffer as ArrayBuffer;
-                this.worker.postMessage({ type: 'decode', id, width: frame.width, height: frame.height, pixels } satisfies BarcodeDecodeRequest, [pixels]);
-            } catch { this.fail(new Error('The barcode image could not be sent to the background reader. Restart the scanner.')); }
+            try { this.worker.postMessage(request(id), transfer); }
+            catch { release(); this.fail(new Error('The barcode image could not be sent to the background reader. Restart the scanner.')); }
         });
     }
     private fail(error: Error) {

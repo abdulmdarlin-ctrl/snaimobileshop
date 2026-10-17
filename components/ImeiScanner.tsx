@@ -2,15 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, X, Trash2, Flashlight, ImagePlus, Check, Pause, RotateCcw } from 'lucide-react';
 import type { BrowserMultiFormatReader } from '@zxing/browser';
-import { scannedImei, scanRegion, cameraPreviewRegion, SCAN_GUIDE, createLiveImeiTracker } from '../utils/imeiScanner';
+import { scannedImei, scanRegion, SCAN_GUIDE, createLiveImeiTracker, nextScanDelay } from '../utils/imeiScanner';
 import { confirmAction } from '../utils/dialog';
 import { BarcodeWorkerClient } from '../utils/barcodeWorkerClient';
 import { requestBarcodeCamera, barcodeCameraCapabilities, enableBarcodeAutofocus, cameraErrorMessage, cameraZoom, resetCameraZoom, waitForCameraFrame, type BarcodeCameraCapabilities } from '../utils/camera';
 
 interface Props { existing: string[]; onApply: (values: string[]) => void; onClose: () => void; }
 export default function ImeiScanner({ existing, onApply, onClose }: Props) {
-    const video = useRef<HTMLVideoElement>(null), previewCanvas = useRef<HTMLCanvasElement>(null), cropCanvas = useRef<HTMLCanvasElement>(null), panel = useRef<HTMLDivElement>(null);
-    const stream = useRef<MediaStream | null>(null), animation = useRef<number | null>(null), startup = useRef<AbortController | null>(null);
+    const video = useRef<HTMLVideoElement>(null), cropCanvas = useRef<HTMLCanvasElement>(null), cropInspector = useRef<HTMLDetailsElement>(null), panel = useRef<HTMLDivElement>(null);
+    const stream = useRef<MediaStream | null>(null), startup = useRef<AbortController | null>(null);
     const liveReader = useRef<BarcodeWorkerClient | null>(null), scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null), zoomTimer = useRef<ReturnType<typeof setTimeout> | null>(null), zoomRevision = useRef(0);
     const generation = useRef(0), alive = useRef(true), reader = useRef<Promise<BrowserMultiFormatReader> | null>(null);
     const collected = useRef<string[]>([]), last = useRef({ value: '', time: 0 }), tracker = useRef(createLiveImeiTracker());
@@ -27,11 +27,9 @@ export default function ImeiScanner({ existing, onApply, onClose }: Props) {
         liveReader.current?.dispose(); liveReader.current = null;
         if (scanTimer.current !== null) clearTimeout(scanTimer.current); scanTimer.current = null;
         if (zoomTimer.current !== null) clearTimeout(zoomTimer.current); zoomTimer.current = null; zoomRevision.current++;
-        if (animation.current !== null) cancelAnimationFrame(animation.current);
-        animation.current = null;
         stream.current?.getTracks().forEach(track => track.stop()); stream.current = null;
         if (video.current) { video.current.pause(); video.current.srcObject = null; }
-        for (const canvas of [previewCanvas.current, cropCanvas.current]) if (canvas) canvas.width = canvas.width;
+        if (cropCanvas.current) cropCanvas.current.width = cropCanvas.current.width;
         if (alive.current) { setPhase('stopped'); setFrameReady(false); setTorch(false); setCapabilities({}); }
     }
     async function close() {
@@ -99,27 +97,9 @@ export default function ImeiScanner({ existing, onApply, onClose }: Props) {
             const actualZoom = await resetCameraZoom(track, caps);
             if (!alive.current || run !== generation.current) return;
             setZoom(actualZoom);
-            const mainCanvas = previewCanvas.current!, scanCanvas = cropCanvas.current!;
-            const mainContext = mainCanvas.getContext('2d', { alpha: false }), scanContext = scanCanvas.getContext('2d', { alpha: false, willReadFrequently: true });
-            if (!mainContext || !scanContext) throw new Error('Camera preview is unavailable.');
-            let painted = false, lastPaint = 0;
-            // Preview rendering never waits for barcode decoding or copies full camera resolution.
-            const paint = (now: number) => {
-                if (!alive.current || run !== generation.current) return;
-                animation.current = requestAnimationFrame(paint);
-                if (now - lastPaint < 30 || preview.readyState < 2 || !preview.videoWidth || !preview.videoHeight) return;
-                lastPaint = now;
-                try {
-                    const visible = cameraPreviewRegion(preview.videoWidth, preview.videoHeight);
-                    const width = Math.max(4, Math.floor(Math.min(640, visible.width) / 4) * 4), height = width * 3 / 4;
-                    if (mainCanvas.width !== width || mainCanvas.height !== height) { mainCanvas.width = width; mainCanvas.height = height; }
-                    mainContext.drawImage(preview, visible.x, visible.y, visible.width, visible.height, 0, 0, width, height);
-                    if (!painted) { painted = true; setFrameReady(true); }
-                } catch {
-                    stop(); setError('The camera picture could not be displayed. Restart the camera or choose another rear camera.');
-                }
-            };
-            animation.current = requestAnimationFrame(paint);
+            // Let the browser display native video directly; do not copy the entire preview at 30 fps.
+            setFrameReady(true);
+            const scanCanvas = cropCanvas.current!;
             let background: BarcodeWorkerClient;
             try { background = new BarcodeWorkerClient(new Worker(new URL('../workers/imeiDecoder.worker.ts', import.meta.url), { type: 'module' })); }
             catch { throw Object.assign(new Error('The background barcode reader is unavailable. Try another browser or use Photo.'), { name: 'BarcodeWorkerError' }); }
@@ -128,25 +108,57 @@ export default function ImeiScanner({ existing, onApply, onClose }: Props) {
             catch (error) { throw Object.assign(error as Error, { name: 'BarcodeWorkerError' }); }
             if (!alive.current || run !== generation.current) return;
             setPhase('running'); setMessage('Live picture ready. Keep one IMEI1 barcode centered between the corners.');
+            let useBitmaps = background.supportsBitmaps && typeof createImageBitmap === 'function', lastFrameTime = -1;
+            const drawCrop = (source: CanvasImageSource, width: number, height: number, crop?: ReturnType<typeof scanRegion>) => {
+                if (scanCanvas.width !== width || scanCanvas.height !== height) { scanCanvas.width = width; scanCanvas.height = height; }
+                const context = scanCanvas.getContext('2d', { alpha: false, willReadFrequently: true });
+                if (!context) throw new Error('Barcode capture is unavailable. Restart the scanner.');
+                if (crop) context.drawImage(source, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
+                else context.drawImage(source, 0, 0, width, height);
+                return context;
+            };
             const readFrame = async () => {
                 if (!alive.current || run !== generation.current) return;
+                const started = performance.now();
+                let confirming = false;
                 try {
-                    if (preview.readyState >= 2 && preview.videoWidth && preview.videoHeight && !background.busy) {
-                        // Draw the guide's sensor crop directly: preserve barcode detail without copying the full frame.
+                    // Skip repeated video frames, rather than confirming the same frozen camera frame twice.
+                    if (preview.readyState >= 2 && preview.videoWidth && preview.videoHeight && preview.currentTime !== lastFrameTime && !background.busy) {
+                        lastFrameTime = preview.currentTime;
                         const crop = scanRegion(preview.videoWidth, preview.videoHeight), scale = Math.min(1, 960 / crop.width);
                         const width = Math.max(1, Math.round(crop.width * scale)), height = Math.max(1, Math.round(crop.height * scale));
-                        if (scanCanvas.width !== width || scanCanvas.height !== height) { scanCanvas.width = width; scanCanvas.height = height; }
-                        scanContext.drawImage(preview, crop.x, crop.y, crop.width, crop.height, 0, 0, width, height);
-                        const raw = await background.decode(scanContext.getImageData(0, 0, width, height));
+                        let bitmap: ImageBitmap | null = null, raw: string | null = null;
+                        try {
+                            if (useBitmaps) {
+                                try { bitmap = await createImageBitmap(preview, crop.x, crop.y, crop.width, crop.height, { resizeWidth: width, resizeHeight: height, resizeQuality: 'low' }); }
+                                catch { useBitmaps = false; }
+                            }
+                            if (!alive.current || run !== generation.current) return;
+                            if (bitmap) {
+                                if (cropInspector.current?.open) drawCrop(bitmap, width, height);
+                                const reading = background.decodeBitmap(bitmap); bitmap = null;
+                                raw = await reading;
+                            } else {
+                                // Older browsers keep a bounded crop fallback, with decoding still off the UI thread.
+                                const context = drawCrop(preview, width, height, crop);
+                                raw = await background.decode(context.getImageData(0, 0, width, height));
+                            }
+                        } finally { bitmap?.close(); }
                         if (!alive.current || run !== generation.current) return;
-                        if (raw) { try { const confirmed = tracker.current.observe(raw); if (confirmed) accept(confirmed); } catch { accept(raw); } }
+                        if (raw) {
+                            try {
+                                const confirmed = tracker.current.observe(raw);
+                                confirming = !confirmed && !collected.current.includes(raw) && !existing.includes(raw);
+                                if (confirmed) accept(confirmed);
+                            } catch { accept(raw); }
+                        }
                     }
                 } catch (error) {
                     if (alive.current && run === generation.current) { stop(); setError((error as Error).message || 'Barcode reading stopped. Restart the scanner.'); }
                     return;
                 }
-                // Schedule from completion, not a fixed interval. Slow phones cannot accumulate a scan backlog.
-                if (alive.current && run === generation.current) scanTimer.current = setTimeout(() => { void readFrame(); }, 220);
+                // Adapt to actual processing cost. One frame in flight, with rendering time between samples.
+                if (alive.current && run === generation.current) scanTimer.current = setTimeout(() => { void readFrame(); }, nextScanDelay(performance.now() - started, confirming));
             };
             void readFrame();
         } catch (error) {
@@ -186,15 +198,14 @@ export default function ImeiScanner({ existing, onApply, onClose }: Props) {
         <div className="imei-scanner-body">
             <div className="imei-scan-modes" aria-label="Barcode scanning method"><button type="button" aria-pressed={mode === 'live'} onClick={() => { setMode('live'); if (phase !== 'running' && phase !== 'starting') void start(); }}><Camera size={17} /> Live scanner</button><button type="button" aria-pressed={mode === 'photo'} onClick={() => { stop(); setMode('photo'); }}><ImagePlus size={17} /> Photo</button></div>
             <div className="imei-camera-preview" data-scanning={phase === 'running'} data-picture={frameReady}>
-                <video ref={video} muted playsInline autoPlay aria-hidden="true" />
-                <canvas ref={previewCanvas} className="imei-camera-surface" aria-label="Live rear camera picture for barcode positioning" />
+                <video ref={video} muted playsInline autoPlay disablePictureInPicture aria-label="Live rear camera view" />
                 <div className="imei-camera-shade" aria-hidden="true" />
                 <div className="imei-camera-guide" style={{ left: `${SCAN_GUIDE.left * 100}%`, top: `${SCAN_GUIDE.top * 100}%`, width: `${SCAN_GUIDE.width * 100}%`, height: `${SCAN_GUIDE.height * 100}%` }} aria-hidden="true"><i /><i /><i /><i /></div>
                 <span className="imei-live-badge">{phase === 'running' && frameReady ? 'LIVE CAMERA' : phase === 'starting' ? 'CONNECTING' : 'PAUSED'}<strong>{values.length} scanned</strong></span>
                 {!frameReady && <div className="imei-preview-placeholder"><Camera size={30} /><span>{phase === 'starting' ? 'Waiting for camera picture...' : 'Start the camera to position your barcode'}</span></div>}
                 <span className="imei-camera-caption">{frameReady ? 'Keep the complete barcode inside the corners' : 'Your camera picture will appear here'}</span>
             </div>
-            <div className="imei-crop-inspector" data-ready={frameReady}><div><span>Barcode area being read</span><small>IMEI1 only</small></div><canvas ref={cropCanvas} aria-label="Exact center crop used for barcode decoding" /></div>
+            <details ref={cropInspector} className="imei-crop-inspector" data-ready={frameReady}><summary>View barcode crop <span>IMEI1 only</span></summary><canvas ref={cropCanvas} aria-label="Exact center crop used for barcode decoding" /></details>
             {!liveCameraSupported && <p className="imei-camera-notice">Live scanning needs the HTTPS website and camera permission. Open the secure shop address on your phone.</p>}
             {mode === 'live' ? <div className="imei-camera-actions"><button type="button" disabled={!liveCameraSupported || phase === 'photo'} onClick={() => phase === 'running' || phase === 'starting' ? stop() : void start()}>{phase === 'running' || phase === 'starting' ? <><Pause size={17} /> Pause</> : <><Camera size={17} /> Start camera</>}</button><button type="button" disabled={!liveCameraSupported || phase === 'photo'} onClick={() => void start()}><RotateCcw size={17} /> Restart camera</button>{phase === 'running' && capabilities.torch && <button type="button" aria-pressed={torch} onClick={() => void cameraSetting({ torch: !torch })}><Flashlight size={17} /> Light {torch ? 'off' : 'on'}</button>}</div> : <div className="imei-camera-actions">
                 <label className={phase === 'photo' ? 'disabled' : ''}><Camera size={17} /> Take barcode photo<input aria-label="Take barcode photo with phone camera" type="file" accept="image/*" capture="environment" disabled={phase === 'photo'} onChange={event => { void photo(event.target.files?.[0]); event.target.value = ''; }} /></label>
