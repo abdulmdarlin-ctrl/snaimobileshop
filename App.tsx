@@ -4,11 +4,12 @@ import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, dbInstance } from './firebaseConfig';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { seedInitialData, db, safeStringify } from './db';
 import { User, UserRole, AppSettings } from './types';
 import Sidebar from './components/Sidebar';
 import Topbar from './components/Topbar';
+import MobileNavigation from './components/MobileNavigation';
 import Dashboard from './components/Dashboard';
 import Inventory from './components/Inventory';
 import POS from './components/POS';
@@ -52,6 +53,15 @@ const App: React.FC = () => {
     return () => { active = false; unsubscribe(); };
   }, []);
 
+  const mainScrollRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const update = () => {
+      if (!viewport || viewport.scale === 1) document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height || window.innerHeight)}px`);
+    };
+    update(); window.addEventListener('resize', update); viewport?.addEventListener('resize', update);
+    return () => { window.removeEventListener('resize', update); viewport?.removeEventListener('resize', update); document.documentElement.style.removeProperty('--app-viewport-height'); };
+  }, []);
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
   // Initialize page - all users start on dashboard
@@ -59,7 +69,15 @@ const App: React.FC = () => {
 
   useEffect(() => { cancelDialogs(); }, [user?.id, currentPage]);
 
+  useEffect(() => { mainScrollRef.current?.scrollTo({ top: 0 }); }, [currentPage]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
+  const [isMobileLayout, setIsMobileLayout] = useState(window.innerWidth < 1024);
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 1023px)');
+    const update = () => { setIsMobileLayout(query.matches); setIsSidebarOpen(!query.matches); };
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
   const [dbStatus, setDbStatus] = useState<'live' | 'mock'>('live');
   const [isSystemLoading, setIsSystemLoading] = useState(true);
 
@@ -161,18 +179,18 @@ const App: React.FC = () => {
       case 'reports': return <Reports user={user} />;
       case 'expenses': return <Expenses user={user} />;
       case 'customers': return <Customers user={user} />;
-      case 'settings': return <Settings user={user} onNavigate={setCurrentPage} onSettingsChange={fetchSettings} />;
+      case 'settings': return <Settings user={user} onNavigate={setCurrentPage} onSettingsChange={() => { void fetchSettings().catch(error => { setDbStatus('mock'); console.error('Settings refresh failed', error); }); }} />;
       default: return <Dashboard onNavigate={setCurrentPage} user={user} />;
     }
   };
 
   return (
     <ToastProvider>
-      <div className="flex h-screen bg-slate-50 overflow-hidden">
+      <div className="app-shell flex bg-slate-50 overflow-hidden">
         {/* Mobile Backdrop */}
         {isSidebarOpen && (
           <div
-            className="fixed inset-0 bg-slate-900/50 z-40 lg:hidden backdrop-blur-sm animate-in fade-in duration-200"
+            className="mobile-menu-backdrop fixed inset-0 bg-slate-900/50 z-40 lg:hidden backdrop-blur-sm animate-in fade-in duration-200"
             onClick={() => setIsSidebarOpen(false)}
           />
         )}
@@ -184,9 +202,10 @@ const App: React.FC = () => {
           isOpen={isSidebarOpen}
           toggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           settings={settings}
+          onLogout={handleLogout}
         />
 
-        <div className="flex-1 flex flex-col min-w-0 h-full relative">
+        <div inert={isMobileLayout && isSidebarOpen} className="flex-1 flex flex-col min-w-0 h-full relative">
           <Topbar
             user={user}
             onLogout={handleLogout}
@@ -194,13 +213,14 @@ const App: React.FC = () => {
             currentPage={currentPage}
             onMenuToggle={() => setIsSidebarOpen(!isSidebarOpen)}
           />
-          <main className="flex-1 overflow-y-auto p-4 lg:p-6 scrollbar-hide">
-            <div className="max-w-[1600px] mx-auto w-full h-full">
+          <main ref={mainScrollRef} className="app-main flex-1 min-h-0 min-w-0 overflow-y-auto p-4 lg:p-6">
+            <div className="app-page max-w-[1600px] mx-auto w-full h-full min-w-0">
               <ErrorBoundary key={currentPage}>
                 {renderPage()}
               </ErrorBoundary>
             </div>
           </main>
+          <MobileNavigation role={user.role} currentPage={currentPage} onNavigate={setCurrentPage} onOpenMenu={() => setIsSidebarOpen(true)} />
         </div>
       </div>
     </ToastProvider>

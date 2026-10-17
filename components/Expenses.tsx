@@ -227,10 +227,10 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
    };
 
    return (
-      <div className="h-[calc(100vh-80px)] flex flex-col font-sans text-slate-800 pb-2 relative ">
+      <div className="expenses-workspace h-[calc(100vh-80px)] flex flex-col font-sans text-slate-800 pb-2 relative ">
 
          {/* Header Actions */}
-         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 px-1 gap-4 shrink-0 no-print">
+         <div className="mobile-page-toolbar flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 px-1 gap-4 shrink-0 no-print">
             <div>
                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Expense Manager</h1>
                <div className="flex flex-wrap items-center gap-2 mt-1">
@@ -457,7 +457,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
 
                      {/* Detailed Table */}
                      <div className="flex-1 h-full w-full overflow-y-auto pr-2 custom-scrollbar">
-                        <table className="w-full text-left border-collapse">
+                        <table className="responsive-record-table w-full text-left border-collapse">
                            <thead className="sticky top-0 bg-white z-10  ">
                               <tr>
                                  <th className="pb-3 pt-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider pl-2">Category Name</th>
@@ -468,7 +468,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                            <tbody className="space-y-2">
                               {filteredStats.categoryData.map((cat, i) => (
                                  <tr key={i} className="group hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0">
-                                    <td className="py-3 pl-2">
+                                    <td data-label="Category" className="py-3 pl-2">
                                        <div className="flex items-center gap-3">
                                           <div className="w-2 h-8 rounded-full shrink-0" style={{ backgroundColor: cat.color }}></div>
                                           <div>
@@ -479,11 +479,11 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                                           </div>
                                        </div>
                                     </td>
-                                    <td className="py-3 text-right">
+                                    <td data-label="Amount (UGX)" className="py-3 text-right">
                                        <span className="text-sm font-black text-slate-900 block">{cat.value.toLocaleString()}</span>
                                        <span className="text-[10px] text-slate-400 font-bold uppercase">UGX</span>
                                     </td>
-                                    <td className="py-3 text-right pr-2">
+                                    <td data-label="Share" className="py-3 text-right pr-2">
                                        <span className="inline-block px-2 py-1 bg-slate-100 rounded text-xs font-bold text-slate-600">
                                           {cat.percentage.toFixed(1)}%
                                        </span>
@@ -641,7 +641,7 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                </div>
 
                <div className="flex-1 overflow-y-auto">
-                  <table className="w-full text-left border-collapse">
+                  <table className="responsive-record-table w-full text-left border-collapse">
                      <thead className="bg-white sticky top-0 z-10 border-b border-slate-100 ">
                         <tr>
                            <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Date</th>
@@ -657,21 +657,21 @@ const Expenses: React.FC<ExpensesProps> = ({ user }) => {
                            e.category.toLowerCase().includes(historySearch.toLowerCase())
                         ).map(expense => (
                            <tr key={expense.id} className="hover:bg-slate-50 transition-colors">
-                              <td className="px-6 py-3 text-xs text-slate-500 font-mono">
+                              <td data-label="Date" className="px-6 py-3 text-xs text-slate-500 font-mono">
                                  {new Date(expense.date).toLocaleDateString()}
                               </td>
-                              <td className="px-6 py-3 text-xs font-bold text-slate-800">
+                              <td data-label="Description" className="px-6 py-3 text-xs font-bold text-slate-800">
                                  {expense.description}
                               </td>
-                              <td className="px-6 py-3">
+                              <td data-label="Category" className="px-6 py-3">
                                  <span className="px-2 py-1 bg-slate-100 rounded text-[10px] font-bold uppercase text-slate-600">
                                     {expense.category}
                                  </span>
                               </td>
-                              <td className="px-6 py-3 text-right text-xs font-black text-slate-900">
+                              <td data-label="Amount (UGX)" className="px-6 py-3 text-right text-xs font-black text-slate-900">
                                  {Number(expense.amount).toLocaleString()}
                               </td>
-                              <td className="px-6 py-3 text-right">
+                              <td data-label="Actions" className="px-6 py-3 text-right">
                                  <div className="flex justify-end gap-2">
                                     <button
                                        onClick={() => {

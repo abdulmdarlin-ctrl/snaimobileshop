@@ -1,0 +1,46 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { webcrypto } from 'node:crypto';
+import vm from 'node:vm';
+import test from 'node:test';
+import ts from 'typescript';
+import React from 'react';
+import { renderToString } from 'react-dom/server';
+
+const require = createRequire(import.meta.url);
+const localCrypto = { getRandomValues: webcrypto.getRandomValues.bind(webcrypto) };
+const browser = { matchMedia: () => ({ matches: false }), innerWidth: 390 };
+function load(relative, dependencies = {}, crypto = localCrypto) {
+    const source = readFileSync(new URL(relative, import.meta.url), 'utf8');
+    const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.React, esModuleInterop: true } });
+    const exports = {};
+    vm.runInNewContext(outputText, { exports, crypto, window: browser, console, require: name => {
+        if (name in dependencies) return dependencies[name];
+        if (name === 'react' || name === 'lucide-react') return require(name);
+        throw new Error(`Unexpected dependency ${name}`);
+    } });
+    return exports;
+}
+
+test('phone sales renders on local HTTP without crypto.randomUUID', () => {
+    const ids = load('../utils/id.ts');
+    const pos = load('../components/POS.tsx', {
+        '../utils/id': ids, '../utils/databaseErrors': load('../utils/databaseErrors.ts'),
+        '../utils/dialog': {}, '../db': {}, '../utils/imei': load('../utils/imei.ts'),
+        '../utils/pos': load('../utils/pos.ts'), '../utils/customers': load('../utils/customers.ts'),
+        '../types': load('../types.ts'), '../utils/printExport': {},
+        './Toast': { useToast: () => ({ showToast() {} }) }, './Modal': { default: () => null, __esModule: true },
+        'qrcode': {}, '../assets/SNAI-LOGO.png': 'logo.png',
+    });
+    const html = renderToString(React.createElement(pos.default, { user: { id: 'attendant', username: 'Attendant', role: 'Admin' } }));
+    assert.match(html, /Products/);
+    assert.match(html, /Order/);
+});
+
+test('UUID fallback preserves v4 format and generates distinct transaction IDs', () => {
+    const { createId } = load('../utils/id.ts');
+    const ids = Array.from({ length: 200 }, () => createId());
+    assert.equal(new Set(ids).size, ids.length);
+    for (const id of ids) assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});

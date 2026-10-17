@@ -1,3 +1,4 @@
+import { databaseErrorMessage, isDatabaseQuotaError } from '../utils/databaseErrors';
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import { X, CheckCircle, AlertCircle, Info } from 'lucide-react';
 
@@ -19,6 +20,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const [toasts, setToasts] = useState<Toast[]>([]);
 
     const showToast = useCallback((message: string, type: ToastType = 'info') => {
+        if (isDatabaseQuotaError(message)) message = databaseErrorMessage(message, message);
         const id = Math.random().toString(36).substring(2, 9);
         setToasts((prev) => [...prev, { id, message, type }]);
         setTimeout(() => {
@@ -33,10 +35,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return (
         <ToastContext.Provider value={{ showToast }}>
             {children}
-            <div className="fixed bottom-4 right-4 z-[10000] flex flex-col gap-2 pointer-events-none">
+            <div className="app-toasts fixed bottom-4 right-4 z-[10000] flex flex-col gap-2 pointer-events-none">
                 {toasts.map((toast) => (
                     <div
                         key={toast.id}
+                        role={toast.type === 'error' ? 'alert' : 'status'}
                         className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl  border    duration-300 ${toast.type === 'success' ? 'bg-emerald-50 border-emerald-100 text-emerald-800' :
                             toast.type === 'error' ? 'bg-red-50 border-red-100 text-red-800' :
                                 'bg-white border-slate-100 text-slate-800'
@@ -46,7 +49,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                         {toast.type === 'error' && <AlertCircle size={18} className="text-red-500" strokeWidth={1.75} />}
                         {toast.type === 'info' && <Info size={18} className="text-blue-500" strokeWidth={1.75} />}
                         <p className="text-sm font-bold">{toast.message}</p>
-                        <button onClick={() => removeToast(toast.id)} className="ml-2 opacity-50 hover:opacity-100">
+                        <button aria-label="Dismiss notification" onClick={() => removeToast(toast.id)} className="ml-2 opacity-50 hover:opacity-100">
                             <X size={14} strokeWidth={1.75} />
                         </button>
                     </div>

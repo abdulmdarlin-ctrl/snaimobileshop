@@ -49,10 +49,20 @@ test('cash supports change; noncash must exactly match amount due', () => {
 function database() {
     let sequence = 0;
     const records = new Map([['products/p1', { name: 'Phone', stockQuantity: 3 }], ['customers/c1', { name: 'Alice', phone: '0700123456', status: 'Active' }]]);
-    let failCommit = false;
+    let failCommit = false, commitError = null, readError = null;
+    const reads = [], subscriptions = [];
     const firestore = {
         collection: (_, name) => name,
-        getDocs: async name => ({ docs: [...records.entries()].filter(([key]) => key.startsWith(name + '/')).map(([key, value]) => ({ id: key.split('/')[1], data: () => value })) }),
+        query: (name, count) => ({ name, count }), limit: count => count,
+        getDocs: async target => {
+            if (readError) throw readError;
+            reads.push(target);
+            const name = typeof target === 'string' ? target : target.name;
+            const docs = [...records.entries()].filter(([key]) => key.startsWith(name + '/')).slice(0, target.count ?? Infinity).map(([key, value]) => ({ id: key.split('/')[1], data: () => value }));
+            return { docs, empty: docs.length === 0 };
+        },
+        getDoc: async ref => { reads.push(ref); return { exists: () => records.has(String(ref)), data: () => records.get(String(ref)), id: String(ref).split('/')[1] }; },
+        onSnapshot: (ref, next, error) => { const listener = { ref, next, error, stopped: false }; subscriptions.push(listener); return () => { listener.stopped = true; }; },
         doc: (...args) => args.length === 1 ? (args[0] === 'customers' ? { id: `new-${++sequence}`, toString() { return `customers/${this.id}`; } } : `${args[0]}/audit-${++sequence}`) : `${args[1]}/${args[2]}`,
         runTransaction: async (_, callback) => {
             const writes = [];
@@ -67,6 +77,7 @@ function database() {
                 delete: ref => writes.push(() => records.delete(String(ref)))
             };
             const result = await callback(transaction);
+            if (commitError) throw commitError;
             if (failCommit) throw new Error('Simulated commit failure');
             writes.forEach(write => write());
             return result;
@@ -74,7 +85,7 @@ function database() {
     };
     const { db, safeStringify } = load('../db.ts', { 'firebase/firestore': firestore, './firebaseConfig': { dbInstance: {} }, './types': {}, './utils/pos': pos, './utils/validation': validation, './utils/imei': imeiTools, './utils/customers': customerTools });
     const sale = { id: 's1', receiptNo: 'INV-1', items: [item()], amountPaid: 100, paymentMethod: 'Cash', cashierName: 'cashier', timestamp: 1, customerId: 'c1', customerName: 'Alice', customerPhone: '0700123456' };
-    return { db, safeStringify, records, sale, fail: () => { failCommit = true; } };
+    return { db, safeStringify, records, sale, reads, subscriptions, setReadError: error => { readError = error; }, setCommitError: error => { commitError = error; }, fail: () => { failCommit = true; } };
 }
 test('checkout and retries deduct stock exactly once', async () => {
     const { db, records, sale } = database();
@@ -407,4 +418,48 @@ test('creating customers reserves the phone and rejects a second registration', 
     assert.equal(records.get(`customers/${saved.id}`).name, 'New customer');
     assert.equal(records.get('customerPhones/256700555666').customerId, saved.id);
     await assert.rejects(db.saveCustomerProfile({ name: 'Duplicate', phone: '+256700555666', status: 'Active', category: 'Retail', joinedDate: 1 }, undefined, 'admin'), /already exists/);
+});
+
+test('quota exhaustion never commits a partial sale and the same order can safely retry', async () => {
+    const { db, records, sale, setCommitError } = database();
+    setCommitError(Object.assign(new Error('Quota exceeded.'), { code: 'resource-exhausted' }));
+    await assert.rejects(db.commitSale(sale), { code: 'resource-exhausted' });
+    assert.equal(records.has('sales/s1'), false);
+    assert.equal(records.get('products/p1').stockQuantity, 3);
+    setCommitError(null);
+    await db.commitSale(sale);
+    await db.commitSale(sale);
+    assert.equal(records.get('products/p1').stockQuantity, 2);
+    assert.equal([...records.keys()].filter(key => key.startsWith('sales/')).length, 1);
+});
+
+test('first-record reads request one document and propagate quota failures', async () => {
+    const { db, records, reads, setReadError } = database();
+    records.set('settings/main', { businessName: 'Shop' });
+    assert.equal((await db.settings.toCollection().first()).businessName, 'Shop');
+    assert.equal(reads[0].count, 1);
+    const quota = Object.assign(new Error('Quota exceeded.'), { code: 'resource-exhausted' });
+    setReadError(quota);
+    await assert.rejects(db.settings.toCollection().first(), { code: 'resource-exhausted' });
+});
+
+test('stock notifications subscribe once and expose listener cleanup without full reads', () => {
+    const { db, reads, subscriptions } = database();
+    let data, failure;
+    const unsubscribe = db.products.subscribe(value => { data = value; }, error => { failure = error; });
+    assert.equal(subscriptions.length, 1);
+    assert.equal(reads.length, 0);
+    subscriptions[0].next({ docs: [{ id: 'p1', data: () => ({ stockQuantity: 2 }) }] });
+    assert.equal(data[0].stockQuantity, 2);
+    subscriptions[0].error(new Error('Quota exceeded.'));
+    assert.equal(failure.message, 'Quota exceeded.');
+    unsubscribe();
+    assert.equal(subscriptions[0].stopped, true);
+});
+
+test('checkout refresh reads only distinct sold products', async () => {
+    const { db, reads } = database();
+    const products = await db.products.getMany(['p1', 'p1']);
+    assert.equal(products.length, 1);
+    assert.deepEqual(reads, ['products/p1']);
 });

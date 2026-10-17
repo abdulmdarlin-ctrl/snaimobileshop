@@ -57,14 +57,14 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
     };
 
     return createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 backdrop-blur-sm bg-slate-900/60   duration-200">
+        <div className="app-modal-layer fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 backdrop-blur-sm bg-slate-900/60   duration-200">
             {/* Overlay Click to Close */}
             <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
 
             {/* Modal Content */}
-            <div className={`relative w-full ${maxWidthClasses[maxWidth]} bg-white rounded-xl flex flex-col max-h-[90vh] border border-slate-200 overflow-hidden`}>
+            <div role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : 'Dialog'} className={`app-modal-panel relative w-full ${maxWidthClasses[maxWidth]} bg-white rounded-xl flex flex-col max-h-[90vh] border border-slate-200 overflow-hidden`}>
                 {title && (
-                    <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50 shrink-0">
+                    <div className="app-modal-heading flex items-center justify-between gap-3 p-6 border-b border-slate-100 bg-slate-50/50 shrink-0">
                         {typeof title === 'string' ? (
                             <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
                         ) : title}
@@ -78,7 +78,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
                     </div>
                 )}
 
-                <div className={`${contentClassName} ${noPadding ? '' : 'p-6'}`}>
+                <div className={`app-modal-body min-h-0 ${contentClassName} ${noPadding ? '' : 'p-6'}`}>
                     {children}
                 </div>
             </div>

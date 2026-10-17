@@ -1,3 +1,4 @@
+import { createId } from '../utils/id';
 import { confirmAction } from '../utils/dialog';
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
@@ -137,7 +138,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
         } catch (err: any) { showToast(err.message, 'error'); } finally { setIsSaving(false); }
     };
 
-    const issueId = useRef(crypto.randomUUID());
+    const issueId = useRef(createId());
     const issueSaving = useRef(false);
     const handleIssueStock = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -166,7 +167,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
             if (products.find(product => product.id === stockForm.productId)?.type === 'Phone') throw new Error('Serialized phone consignment is not supported by this form. Use the IMEI-tracked sales workflow; no stock has been issued.');
             await db.issueConsignment(payload);
-            issueId.current = crypto.randomUUID();
+            issueId.current = createId();
 
             setIsStockModalOpen(false);
             setStockForm(stockFormInitial);
@@ -398,7 +399,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                 <div className="bg-white p-4 rounded-3xl border border-slate-200  flex items-center gap-4">
                     <Search className="text-slate-400" size={18} strokeWidth={1.75} />
                     <input
-                        className="flex-1 bg-transparent outline-none text-sm font-bold placeholder:font-normal"
+                        className="flex-1 min-w-0 bg-transparent outline-none text-sm font-bold placeholder:font-normal"
                         placeholder="Search agents..."
                         value={searchTerm}
                         onChange={e => setSearchTerm(e.target.value)}
@@ -497,9 +498,9 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
     // --- PROFILE VIEW ---
     return (
-        <div className="space-y-6 pb-20 font-sans h-full flex flex-col">
+        <div className="consignment-profile space-y-6 pb-20 font-sans h-full flex flex-col">
             {/* Header / Nav */}
-            <div className="flex items-center gap-4 border-b border-slate-200 pb-4 shrink-0">
+            <div className="mobile-profile-heading flex items-center gap-4 border-b border-slate-200 pb-4 shrink-0">
                 <button onClick={() => setView('directory')} className="p-2 hover:bg-white rounded-full transition-colors border border-transparent hover:border-slate-200 text-slate-500">
                     <ArrowLeft size={20} strokeWidth={1.75} />
                 </button>
@@ -554,7 +555,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-3 gap-4 shrink-0">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
                 <div className="bg-white p-4 rounded-3xl border border-slate-200 ">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Active Stock</p>
                     <p className="text-2xl font-bold text-slate-900">{agentStats.items}</p>
@@ -610,7 +611,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                 </div>
 
                 <div className="flex-1 overflow-y-auto">
-                    <table className="w-full text-left">
+                    <table className="responsive-record-table w-full text-left">
                         <thead className="bg-white border-b border-slate-100 sticky top-0 z-10">
                             <tr>
                                 <th className="px-6 py-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Device / Model</th>
@@ -624,21 +625,21 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                         <tbody className="divide-y divide-slate-50">
                             {paginatedAgentLoans.map(l => (
                                 <tr key={l.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-6 py-3">
+                                    <td data-label="Device / IMEI" className="px-6 py-3">
                                         <p className="text-xs font-bold text-slate-900">{l.deviceModel}</p>
                                         <p className="text-[10px] text-slate-500 font-mono">{l.imei}</p>
                                     </td>
-                                    <td className="px-6 py-3">
+                                    <td data-label="Provider" className="px-6 py-3">
                                         <span className="px-2 py-1 bg-slate-100 rounded text-[9px] font-bold uppercase text-slate-600">{l.provider}</span>
                                     </td>
-                                    <td className="px-6 py-3 text-right">
+                                    <td data-label="Value (UGX)" className="px-6 py-3 text-right">
                                         <p className="text-xs font-bold text-slate-900">{l.totalLoanAmount.toLocaleString()}</p>
                                         {(l.remittedAmount || l.deposit) > 0 && <p className="text-[9px] text-emerald-600 font-bold">Paid: {(l.remittedAmount || l.deposit).toLocaleString()}</p>}
                                     </td>
-                                    <td className="px-6 py-3 text-center text-xs text-slate-500">
+                                    <td data-label="Date" className="px-6 py-3 text-center text-xs text-slate-500">
                                         {new Date(l.startDate).toLocaleDateString()}
                                     </td>
-                                    <td className="px-6 py-3 text-center">
+                                    <td data-label="Status" className="px-6 py-3 text-center">
                                         <span className={`px-2 py-1 rounded text-[9px] font-bold uppercase border ${l.status === 'Active' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
                                             l.status === 'Sold' ? 'bg-blue-50 text-blue-600 border-blue-100' :
                                                 l.status === 'Defaulted' ? 'bg-red-50 text-red-600 border-red-100' :
@@ -647,7 +648,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                                             {l.status}
                                         </span>
                                     </td>
-                                    <td className="px-6 py-3 text-right">
+                                    <td data-label="Actions" className="px-6 py-3 text-right">
                                         <button
                                             onClick={() => openStatusModal(l)}
                                             className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-[10px] font-bold uppercase text-slate-600 hover:border-slate-300 transition-all "
@@ -678,7 +679,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                 maxWidth="4xl"
                 noPadding
             >
-                <div className="flex-1 overflow-y-auto p-8 bg-slate-200 flex justify-center">
+                <div className="document-preview-scroll flex-1 overflow-y-auto p-8 bg-slate-200 flex justify-center">
                     <div id="agent-report" className="receipt-a4-mode bg-white p-8  text-slate-900 w-full max-w-[210mm] min-h-[297mm]">
                         {/* Report Header */}
                         <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
@@ -828,7 +829,7 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                             </select>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-5">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                             <div className="space-y-2">
                                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block ml-1">MODEL NAME</label>
                                 <input
@@ -975,8 +976,8 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
             {/* --- REGISTER AGENT MODAL --- */}
             {isAgentModalOpen && (
-                <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
-                    <div className="bg-white w-full max-w-md rounded-2xl  overflow-hidden border border-white/20">
+                <div className="adaptive-dialog-layer fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
+                    <div className="adaptive-dialog-panel bg-white w-full max-w-md rounded-2xl  overflow-hidden border border-white/20">
                         <div className="p-6 border-b border-slate-100 flex justify-between items-center">
                             <h2 className="text-lg font-bold text-slate-900">{editingId ? 'Edit Profile' : 'New Agent Profile'}</h2>
                             <button onClick={() => setIsAgentModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-900" strokeWidth={1.75} /></button>
@@ -1026,8 +1027,8 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
             {/* DELETE AGENT CONFIRMATION */}
             {agentToDelete && (
-                <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
-                    <div className="bg-white w-full max-w-sm rounded-[2.5rem]  p-8 text-center space-y-6 border border-white/20">
+                <div className="adaptive-dialog-layer fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
+                    <div className="adaptive-dialog-panel bg-white w-full max-w-sm rounded-[2.5rem]  p-8 text-center space-y-6 border border-white/20">
                         <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
                             <AlertTriangle size={32} strokeWidth={1.75} />
                         </div>

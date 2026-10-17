@@ -1,3 +1,5 @@
+import { databaseErrorMessage, isDatabaseQuotaError } from '../utils/databaseErrors';
+import { createId } from '../utils/id';
 import { confirmAction } from '../utils/dialog';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../db';
@@ -58,6 +60,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [customers, setCustomers] = useState<any[]>([]);
    const [categories, setCategories] = useState<string[]>(['All']);
    const [salesHistory, setSalesHistory] = useState<Sale[]>([]);
+   const [mobilePane, setMobilePane] = useState<'catalog' | 'order'>('catalog');
    const [cart, setCart] = useState<SaleItem[]>([]);
    const [loading, setLoading] = useState(true);
    const [pricingMode, setPricingMode] = useState<'Retail' | 'Wholesale' | 'Middle Man'>('Retail');
@@ -89,11 +92,12 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [isReceiptOpen, setIsReceiptOpen] = useState(false);
    const [processingPayment, setProcessingPayment] = useState(false);
    const paymentLock = useRef(false);
-   const saleIdRef = useRef<string>(crypto.randomUUID());
+   const saleIdRef = useRef<string>(createId());
    const adminLock = useRef(false);
    const customerLock = useRef(false);
    const [paymentReference, setPaymentReference] = useState('');
    const [dataError, setDataError] = useState(false);
+   const [checkoutError, setCheckoutError] = useState('');
    const skipReprice = useRef(false);
    const [printConfig, setPrintConfig] = useState({ showLogo: true });
 
@@ -133,7 +137,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [collectionForm, setCollectionForm] = useState({ amount: 0, method: 'Cash', reference: '' });
    const [collecting, setCollecting] = useState(false);
    const collectionLock = useRef(false);
-   const collectionId = useRef<string>(crypto.randomUUID());
+   const collectionId = useRef<string>(createId());
    const [hasManuallyAdjustedPayment, setHasManuallyAdjustedPayment] = useState(false);
 
    // Customer Search State in POS
@@ -219,7 +223,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
    const confirmHoldSale = () => {
       const newHeldSale = {
-         id: activeHeldSaleId || crypto.randomUUID(),
+         id: activeHeldSaleId || createId(),
          items: cart,
          pricingMode,
          checkoutForm,
@@ -237,7 +241,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setCart([]);
       setSaleType('Cash sale');
       setActiveHeldSaleId(null);
-      saleIdRef.current = crypto.randomUUID();
+      saleIdRef.current = createId();
       setPaymentReference('');
       setCheckoutForm({ amountPaid: 0, paymentMethod: 'Cash', customerName: '', customerPhone: '', discountPercentage: 0 });
       setIsHoldModalOpen(false);
@@ -298,7 +302,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setCustomers(cust);
       setSettings(sets || null);
       setSalesHistory(s.sort((a, b) => b.timestamp - a.timestamp));
-      } catch { setDataError(true); showToast('Could not refresh sales and stock. Please retry.', 'error'); }
+      } catch (error) { setDataError(true); showToast(databaseErrorMessage(error, 'Could not refresh sales and stock. Please retry.'), 'error'); }
       finally { setLoading(false); }
    };
 
@@ -517,7 +521,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       });
 
       // Keep focus on search input for rapid scanning
-      if (searchInputRef.current) {
+      if (searchInputRef.current && window.matchMedia('(min-width: 1024px) and (pointer: fine)').matches) {
          searchInputRef.current.focus();
       }
    };
@@ -550,7 +554,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setCart([]);
       setSaleType('Cash sale');
       setActiveHeldSaleId(null);
-      saleIdRef.current = crypto.randomUUID();
+      saleIdRef.current = createId();
       setPaymentReference('');
       setCheckoutForm({ amountPaid: 0, paymentMethod: 'Cash', customerName: '', customerPhone: '', discountPercentage: 0 });
    };
@@ -673,6 +677,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       catch (error) { showToast((error as Error).message, 'error'); return; }
       paymentLock.current = true;
       setProcessingPayment(true);
+      setCheckoutError('');
       try {
          const cartWithWarranty = cart.map(item => {
             const product = products.find(p => p.id === item.productId);
@@ -717,7 +722,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          }
          setLastSale(result);
          setSalesHistory(prev => [result, ...prev.filter(s => s.id !== result.id)]);
-         saleIdRef.current = crypto.randomUUID();
+         saleIdRef.current = createId();
          setPaymentReference('');
          setIsCheckoutOpen(false);
          setIsConfirmSaleModalOpen(false);
@@ -734,11 +739,18 @@ const POS: React.FC<POSProps> = ({ user }) => {
          // Auto Print or Open Receipt
          setIsReceiptOpen(true);
          showToast("Sale completed successfully", 'success');
-         void fetchData();
+         // Refresh only sold products; avoid re-reading every sale and customer after checkout.
+         void db.products.getMany(result.items.map(item => item.productId)).then(updated => {
+            const fresh = new Map(updated.map(product => [product.id, product]));
+            setProducts(previous => previous.map(product => fresh.get(product.id) || product));
+         }).catch(() => { setDataError(true); showToast('Sale saved successfully. Refresh stock before the next sale.', 'info'); });
 
       } catch (e) {
          console.error(e);
-         showToast(e instanceof Error ? e.message : 'Transaction failed. Please retry.', 'error');
+         const message = databaseErrorMessage(e, 'Transaction failed. Please retry.');
+         const explanation = isDatabaseQuotaError(e) ? `${message} This sale was not completed. Your order is still here; retry the same order once database access is restored.` : message;
+         setCheckoutError(explanation);
+         showToast(message, 'error');
       } finally {
          paymentLock.current = false;
          setProcessingPayment(false);
@@ -969,7 +981,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    };
 
    const renderCatalog = () => (
-      <div className="flex-1 flex flex-col min-w-0 bg-white rounded-3xl border border-slate-100  overflow-hidden h-full">
+      <div className="pos-catalog flex-1 flex flex-col min-w-0 bg-white rounded-3xl border border-slate-100  overflow-hidden h-full">
          {dataError && <div role="alert" className="p-3 bg-amber-50 text-amber-800 text-sm flex items-center justify-between gap-3">
             Stock and sales could not be refreshed.
             <button type="button" onClick={fetchData} className="underline font-semibold">Retry</button>
@@ -996,7 +1008,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         if (product) { addToCart(product); setSearchTerm(''); }
                         else showToast('Scan an exact SKU or select a product from the results.', 'info');
                      }}
-                     autoFocus
+                     autoFocus={window.matchMedia('(min-width: 1024px) and (pointer: fine)').matches}
                   />
                   {searchTerm && (
                      <button
@@ -1040,7 +1052,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          </div>
 
          {/* Product Grid */}
-         <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+         <div className="pos-product-scroll flex-1 overflow-y-auto p-6 bg-slate-50/50">
             {loading ? (
                <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4">
                   <Loader2 className="animate-spin text-rose-500" size={32} strokeWidth={1.75} />
@@ -1055,7 +1067,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   <p className="text-xs font-light text-slate-400 mt-2">Try a different search or category</p>
                </div>
             ) : (
-               <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-5">
+               <div className="pos-product-grid grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-5">
                   {filteredProducts.map(product => {
                      const isLowStock = product.stockQuantity <= 5;
                      const isOut = product.stockQuantity <= 0;
@@ -1064,7 +1076,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         <button
                            key={product.id}
                            onClick={() => addToCart(product)}
-                           className="bg-white p-4 rounded-2xl border border-slate-100    transition-all text-left group flex flex-col justify-between h-[210px] relative overflow-hidden "
+                           className="pos-product-card bg-white p-4 rounded-2xl border border-slate-100    transition-all text-left group flex flex-col justify-between h-[210px] relative overflow-hidden "
                         >
                            {isOut && (
                               <div className="absolute inset-0 bg-white/80 z-10 flex items-center justify-center backdrop-blur-[2px]">
@@ -1115,13 +1127,17 @@ const POS: React.FC<POSProps> = ({ user }) => {
    );
 
    return (
-      <div className="flex flex-col lg:flex-row h-full gap-6 font-sans pb-20 lg:pb-0   duration-500">
+      <div className="pos-workspace flex flex-col lg:flex-row h-full gap-6 font-sans" data-mobile-pane={mobilePane}>
+         <nav className="pos-mobile-switch" aria-label="Sales workspace">
+            <button type="button" aria-pressed={mobilePane === 'catalog'} onClick={() => setMobilePane('catalog')}><PackageSearch size={18} /> Products</button>
+            <button type="button" aria-pressed={mobilePane === 'order'} onClick={() => setMobilePane('order')}><ShoppingCart size={18} /> Order ({cart.reduce((sum, item) => sum + item.quantity, 0)})<span>UGX {total.toLocaleString()}</span></button>
+         </nav>
 
          {/* LEFT: Product Catalog */}
          {renderCatalog()}
 
          {/* RIGHT: Cart & Checkout */}
-         <div className="w-full lg:w-[400px] xl:w-[450px] bg-white rounded-3xl border border-slate-100  flex flex-col overflow-hidden shrink-0 h-full">
+         <div className="pos-order w-full lg:w-[400px] xl:w-[450px] bg-white rounded-3xl border border-slate-100  flex flex-col overflow-hidden shrink-0 h-full">
             {/* Cart Header */}
             <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-white">
                <div className="flex items-center gap-3">
@@ -1171,7 +1187,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </div>
                ) : (
                   cart.map((item, idx) => (
-                     <div key={idx} className="bg-white p-3 rounded-xl border border-slate-100  flex items-center gap-4   group">
+                     <div key={idx} className="sale-cart-line bg-white p-3 rounded-xl border border-slate-100 flex items-center gap-4 group">
                         <div className="w-10 h-10 bg-slate-100 rounded-lg flex items-center justify-center text-slate-500 shrink-0">
                            {getProductIcon(products.find(p => p.id === item.productId)?.type || ProductType.OTHERS)}
                         </div>
@@ -1526,6 +1542,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             noPadding
          >
             <div className="p-8 space-y-6">
+               {checkoutError && <p role="alert" className="customer-form-error">{checkoutError}</p>}
                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
                   <div className="flex justify-between items-baseline">
                      <span className="text-sm font-bold text-slate-500 uppercase">Total Payable</span>
@@ -1792,10 +1809,10 @@ const POS: React.FC<POSProps> = ({ user }) => {
             onClose={() => setIsHistoryModalOpen(false)}
             maxWidth="6xl"
             noPadding
-            contentClassName="flex-1 flex flex-col min-h-0"
+            contentClassName="sales-history-dialog flex-1 flex flex-col min-h-0"
          >
             {/* Modal Header */}
-            <div className="px-8 py-6 border-b border-slate-100 flex items-center justify-between no-print bg-white shrink-0 z-20">
+            <div className="sales-history-header px-8 py-6 border-b border-slate-100 flex items-center justify-between no-print bg-white shrink-0 z-20">
                <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center ">
                      <History size={24} strokeWidth={1.75} />
@@ -1806,7 +1823,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </div>
                </div>
 
-               <div className="flex items-center gap-2">
+               <div className="sales-history-exports flex items-center gap-2">
                   <button
                      onClick={() => setIsStatementModalOpen(true)}
                      className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold uppercase hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2"
@@ -1825,14 +1842,15 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   >
                      <Download size={14} strokeWidth={1.75} /> PDF
                   </button>
-                  <button onClick={() => setIsHistoryModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-100 transition-all ml-2"><X size={20} strokeWidth={1.75} /></button>
+                  <button aria-label="Close sales and reports" onClick={() => setIsHistoryModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-100 transition-all ml-2"><X size={20} strokeWidth={1.75} /></button>
                </div>
             </div>
 
+            <div className="sales-history-scroll">
             {/* Filters & Summary Section */}
-            <div className="shrink-0 bg-slate-50/50 border-b border-slate-100 no-print">
+            <div className="sales-history-summary shrink-0 bg-slate-50/50 border-b border-slate-100 no-print">
                {/* Summary Cards - Restructured */}
-               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 p-6">
+               <div className="sales-history-stats grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 p-6">
                   <div className="bg-slate-900 p-6 rounded-3xl text-white   relative overflow-hidden group">
                      <div className="absolute -top-4 -right-4 p-4 opacity-5 group-hover:opacity-10 transition-opacity text-white">
                         <DollarSign size={32} strokeWidth={1.75} />
@@ -1881,20 +1899,20 @@ const POS: React.FC<POSProps> = ({ user }) => {
                </div>
 
                {/* Filter Bar */}
-               <div className="px-6 pb-6 pt-4 flex flex-wrap gap-3 items-center">
-                  <div className="flex items-center bg-white border border-slate-200 rounded-xl p-1 ">
+               <div className="sales-history-filters px-6 pb-6 pt-4 flex flex-wrap gap-3 items-center">
+                  <div className="sales-history-dates flex items-center bg-white border border-slate-200 rounded-xl p-1 ">
                      <div className="px-3 border-r border-slate-100">
                         <Calendar size={14} className="text-slate-400" strokeWidth={1.75} />
                      </div>
                      <input
-                        type="date"
+                        type="date" aria-label="Sales report start date"
                         className="text-xs font-bold text-slate-700 bg-transparent border-none focus:ring-0 h-9 w-32"
                         value={reportStartDate}
                         onChange={e => setReportStartDate(e.target.value)}
                      />
                      <span className="text-slate-300 text-xs font-bold px-1">-</span>
                      <input
-                        type="date"
+                        type="date" aria-label="Sales report end date"
                         className="text-xs font-bold text-slate-700 bg-transparent border-none focus:ring-0 h-9 w-32"
                         value={reportEndDate}
                         onChange={e => setReportEndDate(e.target.value)}
@@ -1904,7 +1922,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   <div className="h-8 w-px bg-slate-200 mx-1"></div>
 
                   <div className="relative">
-                     <select
+                     <select aria-label="Sales category"
                         className="appearance-none bg-white border border-slate-200 pl-4 pr-10 h-11 rounded-xl text-xs font-bold text-slate-700  focus:ring-2 focus:ring-slate-100 outline-none cursor-pointer hover:bg-slate-50 transition-colors min-w-[140px]"
                         value={reportCategory}
                         onChange={e => setReportCategory(e.target.value)}
@@ -1915,7 +1933,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </div>
 
                   <div className="relative">
-                     <select
+                     <select aria-label="Payment method"
                         className="appearance-none bg-white border border-slate-200 pl-4 pr-10 h-11 rounded-xl text-xs font-bold text-slate-700  focus:ring-2 focus:ring-slate-100 outline-none cursor-pointer hover:bg-slate-50 transition-colors min-w-[120px]"
                         value={reportPaymentMethod}
                         onChange={e => setReportPaymentMethod(e.target.value)}
@@ -1932,7 +1950,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      <option value="All">All sale types</option><option>Cash sale</option><option>Debt</option><option>Partial sale</option>
                   </select>
                   <div className="relative">
-                     <select
+                     <select aria-label="Cashier"
                         className="appearance-none bg-white border border-slate-200 pl-4 pr-10 h-11 rounded-xl text-xs font-bold text-slate-700  focus:ring-2 focus:ring-slate-100 outline-none cursor-pointer hover:bg-slate-50 transition-colors min-w-[140px]"
                         value={reportCashier}
                         onChange={e => setReportCashier(e.target.value)}
@@ -1962,13 +1980,13 @@ const POS: React.FC<POSProps> = ({ user }) => {
             </div>
 
             {/* REPORT CONTENT AREA */}
-            <div className="flex-1 overflow-y-auto bg-white p-0 flex justify-center relative">
+            <div className="sales-history-content flex-1 overflow-y-auto bg-white p-0 flex justify-center relative">
                <div id="sales-history-table" className="w-full bg-white h-full">
                   <div className="px-6 py-3 flex flex-wrap gap-6 text-sm border-b border-slate-200">
                      <span>Received: UGX {money(filteredHistory.reduce((sum, sale) => sum + Math.min(sale.total, sale.amountPaid), 0)).toLocaleString()}</span>
                      <span className="font-semibold">Outstanding: UGX {money(filteredHistory.reduce((sum, sale) => sum + outstandingAmount(sale), 0)).toLocaleString()}</span>
                   </div>
-                  <table className="w-full text-left border-collapse">
+                  <table className="sales-history-records w-full text-left border-collapse">
                      <thead className="bg-slate-50/80 backdrop-blur-sm sticky top-0 z-10">
                         <tr>
                            <th className="px-6 py-4 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Receipt #</th>
@@ -1991,7 +2009,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                               return (
                                  <React.Fragment key={sale.id}>
                                     {showDateHeader && !isPrintingStatement && (
-                                       <tr className="bg-slate-100 sticky top-[57px] z-[5]">
+                                       <tr className="sales-history-date bg-slate-100 sticky top-[57px] z-[5]">
                                           <td colSpan={7} className="px-6 py-2">
                                              <div className="flex items-center gap-2">
                                                 <Calendar size={14} className="text-slate-400" strokeWidth={1.75} />
@@ -2002,8 +2020,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                           </td>
                                        </tr>
                                     )}
-                                    <tr className="hover:bg-slate-50/50 transition-colors group border-b border-slate-100">
-                                       <td className="px-6 py-4">
+                                    <tr className="sales-history-row hover:bg-slate-50/50 transition-colors group border-b border-slate-100">
+                                       <td data-label="Invoice" className="px-6 py-4">
                                           <div className="flex items-center gap-2">
                                              <div className="p-2 bg-slate-100 rounded-lg text-slate-500 group-hover:bg-slate-900 group-hover:text-white transition-colors">
                                                 <Receipt size={14} strokeWidth={1.75} />
@@ -2011,34 +2029,34 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                              <span className="font-mono text-xs font-bold text-slate-700 group-hover:text-slate-900">{sale.receiptNo}</span>
                                           </div>
                                        </td>
-                                       <td className="px-6 py-4">
+                                       <td data-label="Date / time" className="px-6 py-4">
                                           <div className="flex flex-col">
                                              <span className="text-xs font-bold text-slate-900">{new Date(sale.timestamp).toLocaleDateString()}</span>
                                              <span className="text-xs font-normal text-slate-400">{new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                           </div>
                                        </td>
-                                       <td className="px-6 py-4">
+                                       <td data-label="Customer" className="px-6 py-4">
                                           <div className="flex flex-col">
                                              <span className="text-xs font-bold text-slate-900">{sale.customerName || 'Walk-in Customer'}</span>
                                              <span className="text-xs text-slate-400">{typeof sale.customerType === 'string' ? sale.customerType : 'Retail'}</span>
                                           </div>
                                        </td>
-                                       <td className="px-6 py-4 text-center">
+                                       <td data-label="Items" className="px-6 py-4 text-center">
                                           <div className="inline-block px-2 py-1 bg-slate-100 text-slate-600 rounded-md text-xs font-bold">
                                              {sale.items.length}
                                           </div>
                                        </td>
-                                       <td className="px-6 py-4 text-right">
+                                       <td data-label="Profit (UGX)" className="px-6 py-4 text-right">
                                           <span className={`text-sm font-black ${sale.profit >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
                                              {sale.profit.toLocaleString()}
                                           </span>
                                        </td>
-                                       <td className="px-6 py-4 text-right">
+                                       <td data-label="Total (UGX)" className="px-6 py-4 text-right">
                                           <span className="text-sm font-black text-slate-900">{sale.total.toLocaleString()}</span>
                                           <div className="text-[11px] font-bold text-slate-400 uppercase mt-0.5">{getSaleType(sale)} · {sale.paymentMethod}</div>
                                           <div className="text-xs text-slate-600">Paid: {sale.amountPaid.toLocaleString()} · Due: {outstandingAmount(sale).toLocaleString()}</div>
                                        </td>
-                                       <td className="px-6 py-4 text-right no-print">
+                                       <td data-label="Actions" className="px-6 py-4 text-right no-print">
                                           <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                              <button
                                                 onClick={() => setExpandedSaleId(expandedSaleId === sale.id ? null : sale.id)}
@@ -2066,7 +2084,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                              )}
                                              {outstandingAmount(sale) > 0 && (
                                                 <button type="button" className="px-3 py-2 border border-slate-200 rounded text-xs font-semibold" onClick={() => {
-                                                   collectionId.current = crypto.randomUUID();
+                                                   collectionId.current = createId();
                                                    setCollectionForm({ amount: outstandingAmount(sale), method: 'Cash', reference: '' });
                                                    setPaymentSale(sale);
                                                 }}>Record payment</button>
@@ -2075,7 +2093,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        </td>
                                     </tr>
                                     {expandedSaleId === sale.id && (
-                                       <tr className="bg-slate-50/50   duration-200">
+                                       <tr className="sales-history-expanded bg-slate-50/50 duration-200">
                                           <td colSpan={7} className="p-0">
                                              <div className="p-4 m-4 bg-white rounded-lg border border-slate-200">
                                                 <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Items in this Sale</h4>
@@ -2117,8 +2135,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
                </div>
             </div>
 
+            </div>
             {/* Pagination Footer */}
-            <div className="shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center no-print">
+            <div className="sales-history-footer shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center no-print">
                <div>
                   <p className="text-xs font-bold text-slate-500">
                      Showing <span className="text-slate-900">{reportData.paginatedSales.length}</span> of <span className="text-slate-900">{reportData.totals.count}</span> transactions
@@ -2149,8 +2168,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
          {/* --- STATEMENT MODAL --- */}
          {
             isStatementModalOpen && (
-               <div className="fixed inset-0 bg-slate-900/60 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm ">
-                  <div className="bg-white w-full max-w-4xl rounded-2xl  overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
+               <div className="adaptive-dialog-layer fixed inset-0 bg-slate-900/60 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm ">
+                  <div className="adaptive-dialog-panel bg-white w-full max-w-4xl rounded-2xl  overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
                      <div className="p-5 border-b border-slate-100 flex items-center justify-between no-print bg-slate-50 shrink-0">
                         <div>
                            <h2 className="text-lg font-bold text-slate-900">Sales Statement</h2>
@@ -2163,7 +2182,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                            <button onClick={() => setIsStatementModalOpen(false)} className="p-2 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors"><X size={20} strokeWidth={1.75} /></button>
                         </div>
                      </div>
-                     <div className="flex-1 overflow-y-auto bg-white">
+                     <div className="document-preview-scroll flex-1 overflow-y-auto bg-white">
                         <div id="sales-statement" className="receipt-a4-mode p-12 w-full max-w-[210mm] mx-auto">
                            {/* Report Header */}
                            <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
@@ -2711,7 +2730,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      {saleToEdit.items.length === 0 && <p role="alert" className="text-sm text-red-600">Add at least one item before saving.</p>}
                      <div className="space-y-4">
                         {saleToEdit.items.map((item, idx) => (
-                           <div key={idx} className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
+                           <div key={idx} className="sale-edit-line flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
                               <div className="flex-1">
                                  <p className="text-xs font-bold text-slate-900">{item.name}</p>
                                  {imeiInput(item, imeis => setSaleToEdit({ ...saleToEdit, items: saleToEdit.items.map((entry, index) => index === idx ? { ...entry, imeis } : entry) }))}

@@ -1,6 +1,9 @@
 import { confirmAction } from '../utils/dialog';
 import React, { useState } from 'react';
 import { parseImeis, validateImeis } from '../utils/imei';
+import { Camera } from 'lucide-react';
+import ImeiScanner from './ImeiScanner';
+import { mergeScannedImeis } from '../utils/imeiScanner';
 
 interface Props {
     imeis: string[];
@@ -10,6 +13,7 @@ interface Props {
 }
 
 export default function PhoneImeiInput({ imeis, quantity, onChange, onQuantityChange }: Props) {
+    const [scannerOpen, setScannerOpen] = useState(false);
     const [mode, setMode] = useState<'individual' | 'bulk'>('individual');
     const [bulkText, setBulkText] = useState('');
     const count = imeis.filter(value => value.trim()).length;
@@ -20,7 +24,8 @@ export default function PhoneImeiInput({ imeis, quantity, onChange, onQuantityCh
     return <section className="space-y-3 border border-slate-200 rounded-lg p-4" aria-label="Phone serial numbers">
         <div className="flex flex-wrap items-center justify-between gap-3">
             <h3 className="text-sm font-semibold text-slate-900">Phone serial numbers (IMEI)</h3>
-            <div className="flex gap-2" aria-label="IMEI entry method">
+            <div className="flex flex-wrap gap-2" aria-label="IMEI entry method">
+                <button type="button" className="imei-open-scanner" onClick={() => setScannerOpen(true)}><Camera size={17} /> Scan barcodes</button>
                 {(['individual', 'bulk'] as const).map(option => <button key={option} type="button" aria-pressed={mode === option}
                     className={`px-3 py-2 text-sm rounded border ${mode === option ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-700 border-slate-300'}`}
                     onClick={() => { if (option === 'bulk') setBulkText(imeis.join('\n')); setMode(option); }}>
@@ -57,5 +62,9 @@ export default function PhoneImeiInput({ imeis, quantity, onChange, onQuantityCh
         {imeis.length > quantity && mode === 'individual' && <button type="button" className="text-sm underline text-red-700" onClick={async () => {
             if (Number.isSafeInteger(quantity) && quantity >= 0 && await confirmAction({ title: 'Remove extra IMEIs?', message: `Remove the last ${imeis.length - quantity} entries to match Current Stock? The change is saved when you save the product.`, confirmLabel: 'Remove entries', tone: 'danger' })) onChange(imeis.slice(0, quantity));
         }}>Remove extra entries to match stock</button>}
+        {scannerOpen && <ImeiScanner existing={imeis} onClose={() => setScannerOpen(false)} onApply={scanned => {
+            const merged = mergeScannedImeis(imeis, quantity, scanned);
+            onChange(merged.imeis); onQuantityChange(merged.quantity); setBulkText(merged.imeis.join('\n')); setScannerOpen(false);
+        }} />}
     </section>;
 }

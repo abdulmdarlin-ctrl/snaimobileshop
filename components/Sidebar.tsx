@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   LayoutDashboard, ShoppingCart, Wrench, BarChart3, Settings as SettingsIcon,
-  ChevronLeft, ChevronRight, Truck, Package, Layers, ReceiptText, Users, HandCoins, ContactRound
+  X, LogOut, ChevronLeft, ChevronRight, Truck, Package, Layers, ReceiptText, Users, HandCoins, ContactRound
 } from 'lucide-react';
 import { Page } from '../App';
 import { User, UserRole, AppSettings } from '../types';
@@ -13,10 +13,34 @@ interface SidebarProps {
   isOpen: boolean;
   toggleSidebar: () => void;
   settings?: AppSettings | null;
+  onLogout: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, isOpen, toggleSidebar, settings }) => {
+const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, isOpen, toggleSidebar, settings, onLogout }) => {
   const role = user.role;
+  const panelRef = useRef<HTMLElement>(null);
+  const [mobile, setMobile] = useState(() => window.innerWidth < 1024);
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 1023px)');
+    const update = () => setMobile(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  useEffect(() => {
+    if (!mobile || !isOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    panelRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    const keydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); toggleSidebar(); }
+      if (event.key !== 'Tab') return;
+      const controls = Array.from(panelRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || []);
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    document.addEventListener('keydown', keydown);
+    return () => { document.removeEventListener('keydown', keydown); if (previous?.isConnected) previous.focus(); };
+  }, [mobile, isOpen]);
 
   // RBAC Configuration for Menu
   const menuGroups = [
@@ -46,8 +70,40 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
     }
   ];
 
+  const descriptions: Record<Page, string> = {
+    dashboard: 'Business overview and quick actions', sales: 'Create sales and collect payments',
+    inventory: 'Products, prices and stock levels', customers: 'Profiles, statements and balances',
+    loans: 'Agents and consignment stock', repairs: 'Job cards and repair progress',
+    expenses: 'Record and review business costs', reports: 'Sales and financial performance',
+    settings: 'Your account and system preferences',
+  };
+
+  if (mobile) return isOpen ? (
+    <aside ref={panelRef} id="mobile-more-menu" className="mobile-more-panel" role="dialog" aria-modal="true" aria-labelledby="mobile-more-title">
+      <header className="mobile-more-header"><div><p>YOUR WORKSPACE</p><h2 id="mobile-more-title">More</h2></div><button type="button" aria-label="Close menu" onClick={toggleSidebar}><X size={22} /></button></header>
+      <div className="mobile-more-scroll">
+        <button className="mobile-more-account" onClick={() => setCurrentPage('settings')}>
+          <span className="mobile-account-avatar">{(user.fullName || user.username).trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase()}</span>
+          <span><strong>{user.fullName || user.username}</strong><small>{user.role} account</small></span><ChevronRight size={18} />
+        </button>
+        <nav aria-label="All workspace sections">{menuGroups.map(group => {
+          const items = group.items.filter(item => item.roles.includes(role));
+          if (!items.length) return null;
+          return <section key={group.label} className="mobile-more-section"><h3>{group.label}</h3><div>{items.map(item => {
+            const Icon = item.icon;
+            return <button key={item.id} aria-current={currentPage === item.id ? 'page' : undefined} onClick={() => setCurrentPage(item.id as Page)}>
+              <span className="mobile-more-icon"><Icon size={20} strokeWidth={1.8} /></span><span className="mobile-more-label"><strong>{item.label}</strong><small>{descriptions[item.id as Page]}</small></span><ChevronRight size={16} />
+            </button>;
+          })}</div></section>;
+        })}</nav>
+      </div>
+      <footer className="mobile-more-footer"><span>{settings?.businessName || 'Sna! Mobile Shop'}</span><button onClick={onLogout}><LogOut size={17} /> Sign out</button></footer>
+    </aside>
+  ) : null;
+
   return (
     <aside
+      ref={panelRef} inert={mobile && !isOpen} aria-label="Main navigation"
       className={`app-sidebar fixed lg:static inset-y-0 left-0 z-50 flex flex-col bg-[#0f172a] text-slate-300 transition-all duration-300   border-r border-slate-800 ${isOpen ? 'w-64 translate-x-0' : 'w-64 -translate-x-full lg:w-20 lg:translate-x-0'
         }`}
     >

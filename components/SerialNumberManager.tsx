@@ -233,7 +233,7 @@ const IMEImanager: React.FC<IMEImanagerProps> = ({
   return (
     <>
       <Modal isOpen={isOpen} onClose={onClose} title="IMEI Management">
-        <div className="space-y-4">
+        <div className="imei-manager-body space-y-4">
           {/* Header */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -302,7 +302,7 @@ const IMEImanager: React.FC<IMEImanagerProps> = ({
               filteredSerials.map((serial) => (
                 <div
                   key={serial.id}
-                  className={`border rounded-lg p-3 cursor-pointer transition-all ${
+                  className={`imei-manager-record border rounded-lg p-3 cursor-pointer transition-all ${
                     selectedSerials.find(s => s.id === serial.id) 
                       ? 'border-blue-500 bg-blue-50' 
                       : 'border-gray-200 hover:border-gray-300'

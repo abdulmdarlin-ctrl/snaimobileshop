@@ -1,3 +1,4 @@
+import { databaseErrorMessage } from '../utils/databaseErrors';
 import { confirmAction } from '../utils/dialog';
 import { normalizeCustomerPhone } from '../utils/customers';
 import { getSaleType } from '../utils/pos';
@@ -108,7 +109,8 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
    };
 
    const fetchSettings = async () => {
-      setSettings(await db.settings.toCollection().first() || null);
+      try { setSettings(await db.settings.toCollection().first() || null); }
+      catch (error) { showToast(databaseErrorMessage(error, 'Could not load repair settings.'), 'error'); }
    };
 
    const handleSave = async (e: React.FormEvent) => {
@@ -357,7 +359,7 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
       <div className="space-y-6 pb-20 font-sans   duration-500">
 
          {/* --- CONTROL PANEL --- */}
-         <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 ">
+         <div className="mobile-page-toolbar flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 ">
             <div className="relative w-full md:w-96 group">
                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <Search size={18} className="text-slate-400 group-focus-within:text-orange-500 transition-colors" strokeWidth={1.75} />
@@ -382,7 +384,7 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
          </div>
 
          {/* --- STATS GRID --- */}
-         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+         <div className="mobile-summary-grid grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-white p-5 rounded-2xl  border border-slate-100 flex items-center justify-between  transition-shadow group">
                <div>
                   <p className="text-sm text-slate-500 font-medium mb-1">Active Jobs</p>
@@ -429,7 +431,7 @@ const Repairs: React.FC<RepairsProps> = ({ user }) => {
          {/* --- REPAIR GRID --- */}
          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             {filtered.map(repair => (
-               <div key={repair.id} className="bg-white rounded-2xl border border-slate-200  overflow-hidden flex flex-col  transition-all group">
+               <div key={repair.id} className="repair-job-card bg-white rounded-2xl border border-slate-200 overflow-hidden flex flex-col transition-all group">
 
                   {/* Card Header */}
                   <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50/50">

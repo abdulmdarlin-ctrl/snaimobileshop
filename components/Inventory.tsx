@@ -1,3 +1,4 @@
+import { databaseErrorMessage } from '../utils/databaseErrors';
 import { confirmAction } from '../utils/dialog';
 import PhoneImeiInput from './PhoneImeiInput';
 
@@ -92,8 +93,8 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
    };
 
    const fetchSettings = async () => {
-      const s = await db.settings.toCollection().first();
-      setSettings(s || null);
+      try { const s = await db.settings.toCollection().first(); setSettings(s || null); }
+      catch (error) { showToast(databaseErrorMessage(error, 'Could not load inventory settings.'), 'error'); }
    };
 
    const handleSave = async (e: React.FormEvent) => {
@@ -318,10 +319,10 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
    };
 
    return (
-      <div className="h-full flex flex-col font-sans space-y-6 pb-6   duration-500">
+      <div className="inventory-workspace h-full flex flex-col font-sans space-y-6 pb-6   duration-500">
 
          {/* Control Panel (Header & Actions) */}
-         <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 ">
+         <div className="mobile-page-toolbar flex flex-col md:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100 ">
             <div className="relative w-full md:w-96 group">
                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <Search size={18} className="text-slate-400 group-focus-within:text-rose-500 transition-colors" strokeWidth={1.75} />
@@ -373,7 +374,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
          </div>
 
          {/* Stats Grid */}
-         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+         <div className="mobile-summary-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             {/* Total Items */}
             <div className="bg-white p-5 rounded-2xl  border border-slate-100 flex items-center justify-between  transition-shadow">
                <div>
@@ -447,7 +448,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                </div>
             ) : (
                <div className="flex-1 overflow-auto">
-                  <table className="w-full text-left border-collapse">
+                  <table className="mobile-record-table inventory-records w-full text-left border-collapse">
                      <thead className="bg-slate-50 sticky top-0 z-10  ">
                         <tr>
                            <th className="px-6 py-4 text-xs font-bold text-slate-400 uppercase tracking-wider">Product</th>
@@ -471,7 +472,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                     }`}
                               >
                                  {/* Product Info */}
-                                 <td className="px-6 py-4">
+                                 <td data-label="Product" className="px-6 py-4">
                                     <div className="flex items-center gap-3">
                                        <div className="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 bg-slate-100 text-slate-500">
                                           {getProductIcon(product.type)}
@@ -490,7 +491,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                  </td>
 
                                  {/* Stock */}
-                                 <td className="px-6 py-4 text-center">
+                                 <td data-label="Stock" className="px-6 py-4 text-center">
                                     <div className="flex justify-center">
                                        <span className={`px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wide flex items-center gap-1.5 ${isCritical ? 'bg-red-100 text-red-600' :
                                           isLowStock ? 'bg-orange-100 text-orange-600' :
@@ -504,13 +505,13 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                  </td>
 
                                  {/* Price */}
-                                 <td className="px-6 py-4 text-right">
+                                 <td data-label="Retail price (UGX)" className="px-6 py-4 text-right">
                                     <p className={`text-sm font-bold ${product.selling_price < product.costPrice ? 'text-red-500' : 'text-slate-900'}`}>{product.selling_price.toLocaleString()}</p>
                                     <p className={`text-xs ${product.selling_price < product.costPrice ? 'text-red-400' : 'text-slate-400'}`}>Cost: {product.costPrice.toLocaleString()}</p>
                                  </td>
 
                                  {/* Location */}
-                                 <td className="px-6 py-4">
+                                 <td data-label="Location" className="px-6 py-4">
                                     {product.location ? (
                                        <span className="flex items-center gap-1 text-xs text-slate-500">
                                           <MapPin size={14} className="text-slate-400" strokeWidth={1.75} /> {product.location}
@@ -521,7 +522,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                  </td>
 
                                  {/* Actions */}
-                                 <td className="px-6 py-4 text-right">
+                                 <td data-label="Actions" className="px-6 py-4 text-right">
                                     <div className="flex justify-end gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
                                        {canEdit && (
                                           <>
@@ -570,8 +571,8 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
          {/* Product Edit/Add Modal */}
          {isModalOpen && (
-            <div className="fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
-               <div className="bg-white w-full max-w-2xl rounded-2xl  overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
+            <div className="inventory-editor-layer fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
+               <div role="dialog" aria-modal="true" aria-label={editingProduct ? 'Edit product' : 'New product'} className="inventory-editor-panel bg-white w-full max-w-2xl rounded-2xl  overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
                   <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
                      <div className="flex items-center gap-3">
                         <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
@@ -582,7 +583,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                            <p className="text-xs text-slate-500 font-bold uppercase tracking-wide mt-0.5">Inventory Control</p>
                         </div>
                      </div>
-                     <button onClick={() => setIsModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-all"><X size={20} strokeWidth={1.75} /></button>
+                     <button aria-label="Close product editor" onClick={() => setIsModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-all"><X size={20} strokeWidth={1.75} /></button>
                   </div>
 
                   <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-8 space-y-6">
@@ -623,7 +624,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                      <div className="space-y-4">
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Pricing & Categorization</h3>
 
-                        <div className="grid grid-cols-3 gap-6">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                            <div>
                               <label className="block text-xs font-bold text-slate-600 mb-1.5">Cost Price</label>
                               <input type="number" min="0" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm font-normal focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 outline-none transition-all"
@@ -650,7 +651,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                      {/* Stock Level */}
                      <div className="space-y-4">
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Inventory Control</h3>
-                        <div className="grid grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                            <div className="space-y-1.5">
                               <label className="win-label">Current Stock</label>
                               <input type="number" min="0" step="1" className="win-input h-10 font-bold" value={formData.stockQuantity} onChange={e => setFormData({ ...formData, stockQuantity: Number(e.target.value) })} />

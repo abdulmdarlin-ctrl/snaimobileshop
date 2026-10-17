@@ -749,11 +749,11 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
    };
 
    return (
-      <div className="flex flex-col lg:flex-row h-full gap-6 pb-20   duration-500">
+      <div className="settings-workspace flex flex-col lg:flex-row h-full gap-6 pb-20">
          {/* ... (Left Sidebar & Sticky Header - No Changes) ... */}
 
          {/* LEFT SIDEBAR NAVIGATION */}
-         <div className="w-full lg:w-72 shrink-0 flex flex-col gap-6">
+         <div className="settings-navigation w-full lg:w-72 shrink-0 flex flex-col gap-6">
 
             {/* User Mini Profile */}
             <div className="bg-white rounded-3xl p-6 border border-slate-100  flex items-center gap-4">
@@ -768,7 +768,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
             {/* Navigation Menu */}
             <div className="bg-white rounded-3xl p-4 border border-slate-100  flex-1 h-fit">
-               <nav className="space-y-1">
+               <nav className="settings-tabs space-y-1" aria-label="Settings sections">
                   {menuItems.map((item) => {
                      const isActive = activeTab === item.id;
                      const Icon = item.icon;
@@ -795,7 +795,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
          </div>
 
          {/* RIGHT CONTENT AREA */}
-         <div className="flex-1 bg-white rounded-3xl border border-slate-100  flex flex-col overflow-hidden relative min-h-[600px]">
+         <div className="settings-content min-w-0 flex-1 bg-white rounded-3xl border border-slate-100 flex flex-col overflow-hidden relative min-h-[600px]">
 
             {/* Sticky Header */}
             <div className="px-8 py-6 border-b border-slate-50 flex flex-col sm:flex-row items-start sm:items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-20 gap-4">
@@ -1435,7 +1435,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            </div>
                         </div>
 
-                        <table className="w-full text-left">
+                        <table className="responsive-record-table w-full text-left">
                            <thead className="bg-slate-50 border-b border-slate-100">
                               <tr>
                                  <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Time</th>
@@ -1448,10 +1448,10 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            <tbody className="divide-y divide-slate-50">
                               {filteredAuditLogs.length > 0 ? filteredAuditLogs.map(log => (
                                  <tr key={log.id} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-6 py-4 text-xs font-medium text-slate-500">
+                                    <td data-label="Time" className="px-6 py-4 text-xs font-medium text-slate-500">
                                        {new Date(log.timestamp).toLocaleDateString()} <span className="text-slate-300">|</span> {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </td>
-                                    <td className="px-6 py-4">
+                                    <td data-label="User" className="px-6 py-4">
                                        <div className="flex items-center gap-2">
                                           <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-bold text-slate-500 uppercase">
                                              {log.user.charAt(0)}
@@ -1459,8 +1459,8 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                           <span className="text-xs font-bold text-slate-900">{log.user}</span>
                                        </div>
                                     </td>
-                                    <td className="px-6 py-4"><span className="px-2 py-1 bg-slate-100 rounded text-[9px] font-black uppercase text-slate-600 border border-slate-200">{log.action}</span></td>
-                                    <td className="px-6 py-4">
+                                    <td data-label="Action" className="px-6 py-4"><span className="px-2 py-1 bg-slate-100 rounded text-[9px] font-black uppercase text-slate-600 border border-slate-200">{log.action}</span></td>
+                                    <td data-label="Entity affected" className="px-6 py-4">
                                        {log.entityType ? (
                                           <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-blue-50 text-[10px] font-bold text-blue-700 font-mono border border-blue-100">
                                              <Hash size={14} className="text-blue-400" strokeWidth={1.75} />
@@ -1470,7 +1470,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                           <span className="text-slate-300 text-[10px] italic">--</span>
                                        )}
                                     </td>
-                                    <td className="px-6 py-4 text-xs text-slate-600 font-medium">{log.details}</td>
+                                    <td data-label="Details" className="px-6 py-4 text-xs text-slate-600 font-medium">{log.details}</td>
                                  </tr>
                               )) : (
                                  <tr>

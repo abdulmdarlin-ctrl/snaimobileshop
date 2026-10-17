@@ -384,10 +384,10 @@ const Reports: React.FC<{ user: User }> = ({ user }) => {
    const COLORS = ['#0f172a', '#e11d48', '#64748b', '#cbd5e1', '#f59e0b', '#10b981'];
 
    return (
-      <div className="bg-[#f8fafc] min-h-screen p-4 lg:p-8 font-sans text-slate-900 space-y-8   pb-20">
+      <div className="reports-workspace bg-[#f8fafc] min-h-screen p-4 lg:p-8 font-sans text-slate-900 space-y-8   pb-20">
 
          {/* --- CONTROL PANEL --- */}
-         <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100  no-print sticky top-0 z-10">
+         <div className="mobile-page-toolbar flex flex-col lg:flex-row justify-between items-center gap-4 bg-white p-4 rounded-2xl border border-slate-100  no-print sticky top-0 z-10">
             <div>
                <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Analytics Dashboard</div>
                <h1 className="text-xl font-black text-slate-900 tracking-tight">Financial Overview</h1>
@@ -442,7 +442,7 @@ const Reports: React.FC<{ user: User }> = ({ user }) => {
          <div id="reports-container" className="space-y-6">
 
             {/* --- OVERVIEW CARDS --- */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5">
+            <div className="mobile-summary-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-5">
                {analytics.overview.map((item, i) => (
                   <div key={i} className="bg-white rounded-[20px] p-4  border border-slate-200 flex flex-col justify-between min-h-[100px]">
                      <div>
@@ -571,7 +571,7 @@ const Reports: React.FC<{ user: User }> = ({ user }) => {
                {/* Split 1: Revenue Categories */}
                <div className="bg-white p-6 rounded-[20px]  border border-slate-200 flex flex-col">
                   <h3 className="text-sm font-bold text-[#0f172a] mb-6">Sales value by category</h3>
-                  <div className="flex items-center justify-between flex-1">
+                  <div className="report-split-row flex items-center justify-between flex-1">
                      <div className="w-[120px] h-[120px]">
                         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                            <PieChart>
@@ -606,7 +606,7 @@ const Reports: React.FC<{ user: User }> = ({ user }) => {
                {/* Split 2: Expense Categories */}
                <div className="bg-white p-6 rounded-[20px]  border border-slate-200 flex flex-col">
                   <h3 className="text-sm font-bold text-[#0f172a] mb-6">Cost Breakdown</h3>
-                  <div className="flex items-center justify-between flex-1">
+                  <div className="report-split-row flex items-center justify-between flex-1">
                      {selectedCategory === 'All' ? (
                         <>
                            <div className="w-[120px] h-[120px]">
@@ -639,7 +639,7 @@ const Reports: React.FC<{ user: User }> = ({ user }) => {
                {/* Split 3: Payment Methods */}
                <div className="bg-white p-6 rounded-[20px]  border border-slate-200 flex flex-col">
                   <h3 className="text-sm font-bold text-[#0f172a] mb-6">Sales money received by method</h3>
-                  <div className="flex items-center justify-between flex-1">
+                  <div className="report-split-row flex items-center justify-between flex-1">
                      <div className="w-[120px] h-[120px]">
                         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                            <PieChart>
@@ -671,8 +671,9 @@ const Reports: React.FC<{ user: User }> = ({ user }) => {
                   <button className="text-[#0f172a] bg-slate-50 p-2 rounded-lg"><MoreHorizontal size={16} strokeWidth={1.75} /></button>
                </div>
 
+               <div className="mobile-report-sort"><label>Sort performance<select aria-label="Sort report performance" value={sortConfig.key} onChange={event => handleSort(event.target.value)}>{[{ id: 'category', label: 'Category' }, { id: 'revenue', label: 'Sales value' }, { id: 'itemsSold', label: 'Items sold' }, { id: 'totalCost', label: 'Estimated cost' }, { id: 'avgPrice', label: 'Average price' }, { id: 'avgCost', label: 'Average cost' }, { id: 'profitPerItem', label: 'Profit per item' }].map(column => <option key={column.id} value={column.id}>{column.label}</option>)}</select></label><button type="button" onClick={() => handleSort(sortConfig.key)} aria-label="Reverse report sort order">{sortConfig.direction === 'asc' ? 'Ascending' : 'Descending'}<ArrowUpDown size={16} /></button></div>
                <div className="overflow-x-auto">
-                  <table className="w-full text-left">
+                  <table className="responsive-record-table w-full text-left">
                      <thead>
                         <tr className="border-b border-slate-100">
                            {[
@@ -700,13 +701,13 @@ const Reports: React.FC<{ user: User }> = ({ user }) => {
                      <tbody className="divide-y divide-slate-50">
                         {sortedTableData.map((row, i) => (
                            <tr key={i} className="hover:bg-slate-50 transition-colors group">
-                              <td className="py-4 text-sm font-bold text-[#0f172a]">{row.category}</td>
-                              <td className="py-4 text-right text-sm font-bold text-slate-900">{row.revenue.toLocaleString()}</td>
-                              <td className="py-4 text-right text-sm font-bold text-slate-600">{row.itemsSold.toLocaleString()}</td>
-                              <td className="py-4 text-right text-sm font-bold text-slate-500">{row.totalCost.toLocaleString()}</td>
-                              <td className="py-4 text-right text-sm font-bold text-slate-900">{Math.round(row.avgPrice).toLocaleString()}</td>
-                              <td className="py-4 text-right text-sm font-bold text-slate-500">{Math.round(row.avgCost).toLocaleString()}</td>
-                              <td className={`py-4 text-right text-sm font-bold ${row.profitPerItem > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                              <td data-label="Category" className="py-4 text-sm font-bold text-[#0f172a]">{row.category}</td>
+                              <td data-label="Sales value (UGX)" className="py-4 text-right text-sm font-bold text-slate-900">{row.revenue.toLocaleString()}</td>
+                              <td data-label="Items sold" className="py-4 text-right text-sm font-bold text-slate-600">{row.itemsSold.toLocaleString()}</td>
+                              <td data-label="Estimated cost (UGX)" className="py-4 text-right text-sm font-bold text-slate-500">{row.totalCost.toLocaleString()}</td>
+                              <td data-label="Average price (UGX)" className="py-4 text-right text-sm font-bold text-slate-900">{Math.round(row.avgPrice).toLocaleString()}</td>
+                              <td data-label="Average cost (UGX)" className="py-4 text-right text-sm font-bold text-slate-500">{Math.round(row.avgCost).toLocaleString()}</td>
+                              <td data-label="Profit / item (UGX)" className={`py-4 text-right text-sm font-bold ${row.profitPerItem > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
                                  {Math.round(row.profitPerItem).toLocaleString()}
                               </td>
                            </tr>

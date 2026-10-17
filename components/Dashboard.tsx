@@ -17,6 +17,7 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    const { showToast } = useToast();
    const [loading, setLoading] = useState(true);
+   const [dataError, setDataError] = useState(false);
    const [greeting, setGreeting] = useState('');
    const [timeRange, setTimeRange] = useState<'Today' | 'This Month' | 'Custom'>('Today');
    const [showLowStockBanner, setShowLowStockBanner] = useState(true);
@@ -281,7 +282,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          setRecentActivity(activities);
 
          setLowStockItems(products.filter(p => p.stockQuantity <= p.reorderLevel).sort((a, b) => a.stockQuantity - b.stockQuantity));
-         } catch (error) { showToast('Could not load dashboard data. Please refresh and retry.', 'error'); }
+         } catch (error) { setDataError(true); showToast('Could not load dashboard data. Please refresh and retry.', 'error'); }
          finally { setLoading(false); }
       };
 
@@ -603,7 +604,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
    };
 
    return (
-      <div className="space-y-6   duration-500 pb-10 font-sans text-slate-800">
+      <div className="dashboard-page space-y-6 pb-10 font-sans text-slate-800">
 
          {/* --- DASHBOARD HEADER --- */}
          {/* --- WELCOME BANNER --- */}
@@ -631,11 +632,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
             {/* Right: Date Filter Widget */}
-            <div className="flex flex-col items-start sm:items-end gap-3 relative z-10">
+            <div className="dashboard-period flex flex-col items-start sm:items-end gap-3 relative z-10">
                <div className="flex bg-slate-900/50 p-1 rounded-xl border border-slate-700/50 backdrop-blur-md">
                   {['Today', 'This Month', 'Custom'].map((range) => (
                      <button
                         key={range}
+                        aria-pressed={timeRange === range}
                         onClick={() => setTimeRange(range as any)}
                         className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${timeRange === range
                            ? 'bg-white text-slate-900  scale-105'
@@ -651,14 +653,14 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                   <div className="flex items-center gap-2   ">
                      <input
                         type="date"
-                        value={customStart}
+                        aria-label="Dashboard start date" value={customStart}
                         onChange={(e) => setCustomStart(e.target.value)}
                         className="bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white font-bold outline-none focus:border-rose-500 transition-colors"
                      />
                      <span className="text-slate-600 font-bold">-</span>
                      <input
                         type="date"
-                        value={customEnd}
+                        aria-label="Dashboard end date" value={customEnd}
                         onChange={(e) => setCustomEnd(e.target.value)}
                         className="bg-slate-900/50 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white font-bold outline-none focus:border-rose-500 transition-colors"
                      />
@@ -835,9 +837,35 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
          )}
 
+         <section className="dashboard-mobile" aria-label="Mobile business overview">
+            {isAdmin && <>
+               <div className="mobile-receipts">
+                  <div className="mobile-receipts-label"><span><Banknote size={18} /> Money received</span><span>{timeRange === 'This Month' ? 'This month' : timeRange}</span></div>
+                  <p className="mobile-receipts-total"><span>UGX</span> {loading ? 'Loading...' : dataError ? 'Unavailable' : stats.revenue.toLocaleString()}</p>
+                  <p className="mobile-receipts-note">Payments collected. Unpaid debt is excluded.</p>
+                  <div className="mobile-payment-methods">{[{ label: 'Cash', value: stats.cashRevenue }, { label: 'Mobile money', value: stats.mmRevenue }, { label: 'Bank', value: stats.bankRevenue }].map(method => <div key={method.label}><span>{method.label}</span><strong>{loading || dataError ? '-' : method.value.toLocaleString()}</strong></div>)}</div>
+               </div>
+               <div className="mobile-dashboard-stats">
+                  <div><Receipt size={18} /><span>Orders</span><strong>{loading || dataError ? '-' : stats.orders.toLocaleString()}</strong></div>
+                  <div><TrendingUp size={18} /><span>Profit</span><strong>{loading || dataError ? '-' : `UGX ${stats.profitToday.toLocaleString()}`}</strong><small>Today</small></div>
+                  <div><Percent size={18} /><span>Profit margin</span><strong>{loading || dataError ? '-' : `${stats.margin.toFixed(1)}%`}</strong></div>
+                  <div><Package size={18} /><span>Stock value</span><strong>{loading || dataError ? '-' : `UGX ${stats.inventoryValue.toLocaleString()}`}</strong><small>Current inventory</small></div>
+               </div>
+               <button className="mobile-debt-summary" onClick={() => onNavigate('customers')}><div><span>Outstanding customer debt</span><strong>{loading || dataError ? '-' : `UGX ${stats.outstanding.toLocaleString()}`}</strong><small>All recorded sales</small></div><ArrowUpRight size={20} /></button>
+            </>}
+            <div className="mobile-quick-actions"><h2>Quick actions</h2><nav aria-label="Dashboard quick actions">
+               {(isAdmin || isManager || isCashier) && <button onClick={() => onNavigate('sales')}><ShoppingBag size={21} /><span>New sale</span></button>}
+               <button onClick={() => onNavigate('inventory')}><Package size={21} /><span>Inventory</span></button>
+               {isAdmin && <button onClick={() => onNavigate('customers')}><Users size={21} /><span>Customers</span></button>}
+               {(isAdmin || isManager || isTechnician || isCashier) && <button onClick={() => onNavigate('repairs')}><Wrench size={21} /><span>Repairs</span></button>}
+               {isAuditor && <button onClick={() => onNavigate('reports')}><Activity size={21} /><span>Reports</span></button>}
+            </nav></div>
+            {showLowStockBanner && lowStockItems.length > 0 && <button className="mobile-stock-alert" onClick={() => onNavigate('inventory')}><AlertTriangle size={20} /><span><strong>{lowStockItems.length} products need attention</strong><small>Review low and out-of-stock items</small></span><ArrowRight size={18} /></button>}
+         </section>
+
          {/* --- LOW STOCK ALERT TICKER --- */}
          {showLowStockBanner && lowStockItems.length > 0 && (
-            <div className="w-full bg-rose-50/20 backdrop-blur-md border border-rose-100/50 border-t-[3px] border-rose-500 rounded-3xl overflow-hidden relative group/ticker mb-4  ">
+            <div className="dashboard-stock-ticker w-full bg-rose-50/20 backdrop-blur-md border border-rose-100/50 border-t-[3px] border-rose-500 rounded-3xl overflow-hidden relative group/ticker mb-4  ">
                {/* Shimmer Effect */}
 
                <div className="flex items-center">
@@ -1003,8 +1031,8 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          )}
 
          {(isAdmin || isManager) && (
-         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-            <div className="col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100  flex flex-col md:flex-row gap-6">
+         <div className="dashboard-section-grid grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <div className="dashboard-collections col-span-1 lg:col-span-8 bg-white rounded-2xl p-4 border border-slate-100  flex flex-col md:flex-row gap-6">
 
                {/* Chart Area */}
                <div className="flex-1 min-w-0 flex flex-col">
@@ -1018,7 +1046,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
                   </div>
 
-                  <div className="flex-1 h-[180px] w-full relative">
+                  <div className="dashboard-receipts-chart flex-1 h-[180px] w-full relative">
                      <ResponsiveContainer width="100%" height="100%">
                         <AreaChart data={salesData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                            <defs>
@@ -1097,12 +1125,12 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
             </div>
 
             {/* CATEGORY DISTRIBUTION (Audience Demographics Style) - Spans 4 Cols */}
-            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl p-4 border border-slate-100  flex flex-col">
+            <div className="dashboard-categories col-span-1 lg:col-span-4 bg-white rounded-2xl p-4 border border-slate-100  flex flex-col">
                <div className="flex items-center gap-3 mb-6">
                   <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
                      <Users size={20} strokeWidth={1.75} />
                   </div>
-                  <h3 className="text-lg font-black text-slate-900">Category Dist.</h3>
+                  <h3 className="text-lg font-black text-slate-900">Sales by category</h3>
                </div>
 
                {/* Chart */}
@@ -1163,11 +1191,11 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
          )}
 
          {/* --- BOTTOM ROW (Activity & Customers) --- */}
-         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+         <div className="dashboard-section-grid grid grid-cols-1 lg:grid-cols-12 gap-6">
 
             {/* RECENT ACTIVITY (Schedule Content Style) - Spans 8 Cols */}
-            <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100  p-3">
-               <div className="flex justify-between items-center mb-5">
+            <div className="dashboard-activity min-w-0 col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100  p-3">
+               <div className="dashboard-activity-heading flex flex-wrap justify-between items-center gap-2 mb-5">
                   <div className="flex items-center gap-2.5">
                      <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center">
                         <Clock size={16} strokeWidth={1.75} />
@@ -1187,34 +1215,32 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                      const isSale = item.type === 'sale';
 
                      return (
-                        <div key={idx} className="flex gap-3 group">
+                        <div key={idx} className="dashboard-activity-row group">
                            {/* Date Column */}
-                           <div className="flex flex-col items-center justify-center w-11 shrink-0 pt-1">
+                           <div className="dashboard-activity-date flex flex-col items-center justify-center shrink-0 pt-1">
                               <span className="text-lg font-bold text-slate-400 group-hover:text-blue-500 transition-colors uppercase">{day}</span>
                               <span className="text-[11px] font-bold text-slate-400 uppercase leading-none">{month}</span>
                            </div>
 
                            {/* Card */}
-                           <div onClick={() => handleActivityClick(item)} className={`flex-1 p-2.5 rounded-xl border border-slate-100 flex items-center gap-3 transition-all ${isSale ? 'bg-blue-50/50 hover:bg-blue-50 border-blue-100/50 hover:border-blue-200 cursor-pointer' : 'bg-slate-50 hover:bg-slate-100'}`}>
-                              <div className={`w-8 h-8 rounded-lg flex items-center justify-center  shrink-0 ${isSale ? 'bg-white text-blue-500' : 'bg-white text-orange-500'}`}>
+                           <div role={isSale ? 'button' : undefined} tabIndex={isSale ? 0 : undefined} onClick={() => handleActivityClick(item)} onKeyDown={event => { if (isSale && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); handleActivityClick(item); } }} className={`dashboard-activity-card p-2.5 rounded-xl border border-slate-100 transition-all ${isSale ? 'bg-blue-50/50 hover:bg-blue-50 border-blue-100/50 hover:border-blue-200 cursor-pointer' : 'bg-slate-50 hover:bg-slate-100'}`}>
+                              <div className={`dashboard-activity-icon w-8 h-8 rounded-lg flex items-center justify-center  shrink-0 ${isSale ? 'bg-white text-blue-500' : 'bg-white text-orange-500'}`}>
                                  {isSale ? <ShoppingBag size={16} strokeWidth={1.75} /> : <Wrench size={16} strokeWidth={1.75} />}
                               </div>
 
-                              <div className="flex-1 min-w-0">
-                                 <h4 className="text-xs font-bold text-slate-900 truncate">{item.title}</h4>
-                                 <p className="text-xs text-slate-500 font-normal truncate leading-tight">{item.desc}</p>
+                              <div className="dashboard-activity-copy min-w-0">
+                                 <h4 className="text-xs font-bold text-slate-900">{item.title}</h4>
+                                 <p className="text-xs text-slate-500 font-normal leading-tight">{item.desc}</p>
                               </div>
 
-                              {item.amount && (
-                                 <div className="text-right shrink-0">
+                              {typeof item.amount === 'number' && (
+                                 <div className="dashboard-activity-amount">
                                     <span className="block text-[11px] font-bold text-slate-400 uppercase leading-none">UGX</span>
                                     <span className="block text-xs font-bold text-slate-700">{item.amount.toLocaleString()}</span>
                                  </div>
                               )}
 
-                              <button className="p-1.5 text-slate-300 hover:text-slate-500">
-                                 <ArrowRight size={14} strokeWidth={1.75} />
-                              </button>
+                              <span className="dashboard-activity-arrow text-slate-400" aria-hidden="true"><ArrowRight size={14} strokeWidth={1.75} /></span>
                            </div>
                         </div>
                      );
@@ -1227,7 +1253,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
 
             {/* TOP SELLING ITEMS (Leaderboard Style) - Spans 4 Cols */}
             <div className="col-span-1 lg:col-span-4 bg-white rounded-2xl border border-slate-100  p-3 flex flex-col">
-               <div className="flex justify-between items-center mb-5">
+               <div className="dashboard-card-heading flex justify-between items-center mb-5">
                   <div className="flex items-center gap-2.5">
                      <div className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center">
                         <TrendingUp size={16} strokeWidth={1.75} />
@@ -1261,7 +1287,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                <div className="space-y-4 flex-1">
                   {topProducts.map((item, idx) => (
                      <div key={idx} className="group cursor-pointer" onClick={() => onNavigate('inventory')}>
-                        <div className="flex justify-between items-start mb-1.5">
+                        <div className="dashboard-ranked-row flex justify-between items-start mb-1.5">
                            <div className="flex items-center gap-3 min-w-0">
                               <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 group-hover:bg-rose-50 group-hover:text-rose-500 transition-all">
                                  {getProductIcon(item.product.type)}
@@ -1324,7 +1350,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
                            sessionStorage.setItem('sna_view_customer_statement', cust.name);
                            onNavigate('customers');
                         }}
-                        className="flex items-center gap-3 group border-b border-slate-50 last:border-0 pb-3 last:pb-0 cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-lg transition-all relative"
+                        className="dashboard-client-row flex items-center gap-3 group border-b border-slate-50 last:border-0 pb-3 last:pb-0 cursor-pointer hover:bg-slate-50 p-2 -mx-2 rounded-lg transition-all relative"
                      >
                         <div className="w-10 h-10 rounded-full overflow-hidden border border-slate-100 group-hover:border-blue-200 transition-colors shrink-0">
                            <img

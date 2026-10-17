@@ -1,7 +1,7 @@
 import { customerStatus, normalizeCustomerPhone, validateCustomerContact, getCustomerSales } from './utils/customers';
 
 import {
-  collection, getDocs, addDoc, updateDoc, deleteDoc, doc, setDoc, runTransaction
+  collection, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, setDoc, runTransaction, onSnapshot, query, limit
 } from 'firebase/firestore';
 import { dbInstance, createSecondaryUser } from './firebaseConfig';
 import { validateRecord } from './utils/validation';
@@ -62,6 +62,12 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
   };
 
   return {
+    subscribe: (onData: (records: T[]) => void, onError: (error: Error) => void) =>
+      onSnapshot(getColRef(), snapshot => onData(snapshot.docs.map(record => ({ ...record.data(), id: record.id })) as T[]), onError),
+    getMany: async (ids: string[]) => {
+      const snapshots = await Promise.all([...new Set(ids)].filter(Boolean).map(id => getDoc(doc(dbInstance, collectionName, id))));
+      return snapshots.filter(snapshot => snapshot.exists()).map(snapshot => ({ ...snapshot.data(), id: snapshot.id })) as T[];
+    },
     toArray: async () => {
       try {
         const snapshot = await getDocs(getColRef());
@@ -101,11 +107,11 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
     toCollection: () => ({
       first: async () => {
         try {
-          const snapshot = await getDocs(getColRef());
+          const snapshot = await getDocs(query(getColRef(), limit(1)));
           return snapshot.empty ? null : { ...snapshot.docs[0].data(), id: snapshot.docs[0].id } as T;
         } catch (e) {
           console.error(`Error fetching first ${collectionName}:`, e);
-          return null;
+          throw e;
         }
       }
     }),
@@ -526,15 +532,15 @@ export const seedInitialData = async () => {
       });
     }
 
-    const cats = await db.expenseCategories.toArray();
-    if (cats.length === 0) {
+    const category = await db.expenseCategories.toCollection().first();
+    if (!category) {
       const defaults = ['Rent', 'Utilities', 'Staff Lunch', 'Transport', 'Supplies', 'Taxes', 'Maintenance', 'Others'];
       for (const name of defaults) await db.expenseCategories.add({ name });
     }
 
     // Ensure Admin
-    const users = await db.users.toArray();
-    if (users.length === 0) {
+    const existingUser = await db.users.toCollection().first();
+    if (!existingUser) {
       // This only creates the Firestore record for initial seed
       // The Auth account must be created via the Auth component logic or manually first time
       await db.users.add({

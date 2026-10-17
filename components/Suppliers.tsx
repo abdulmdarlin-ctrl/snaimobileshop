@@ -1,3 +1,4 @@
+import { createId } from '../utils/id';
 import { confirmAction } from '../utils/dialog';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -18,7 +19,7 @@ interface SuppliersProps { user: User; }
 type ViewMode = 'vendors' | 'orders';
 
 const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
-   const orderId = useRef(crypto.randomUUID());
+   const orderId = useRef(createId());
    const orderSaving = useRef(false);
    const [isOrderSaving, setIsOrderSaving] = useState(false);
    // --- Core Data ---
@@ -191,7 +192,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
    };
 
    const resetOrderForm = () => {
-      orderId.current = crypto.randomUUID();
+      orderId.current = createId();
       setOrderCart([]);
       setOrderSupplierId('');
       setOrderInvoiceRef('');
@@ -286,7 +287,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                {filteredOrders.length > 0 ? (
                   <div className="bg-white rounded-3xl border border-slate-100  overflow-hidden">
                      <div className="overflow-x-auto">
-                        <table className="w-full text-left">
+                        <table className="responsive-record-table w-full text-left">
                            <thead className="bg-slate-50 border-b border-slate-100">
                               <tr>
                                  <th className="pl-6 py-4 text-[9px] font-bold text-slate-400 uppercase">Date</th>
@@ -301,30 +302,30 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                            <tbody className="divide-y divide-slate-50">
                               {filteredOrders.map(order => (
                                  <tr key={order.id} className="hover:bg-slate-50/50 transition-colors group">
-                                    <td className="pl-6 py-4">
+                                    <td data-label="Date / time" className="pl-6 py-4">
                                        <div className="flex flex-col">
                                           <span className="text-xs font-bold text-slate-900">{new Date(order.timestamp).toLocaleDateString()}</span>
                                           <span className="text-[10px] text-slate-400 font-medium">{new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                        </div>
                                     </td>
-                                    <td className="py-4">
+                                    <td data-label="Invoice" className="py-4">
                                        <span className="font-mono text-xs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded">{order.invoiceNo || 'N/A'}</span>
                                     </td>
-                                    <td className="py-4">
+                                    <td data-label="Supplier" className="py-4">
                                        <span className="text-sm font-bold text-slate-900">{order.supplierName}</span>
                                     </td>
-                                    <td className="text-center py-4">
+                                    <td data-label="Items" className="text-center py-4">
                                        <span className="text-xs font-bold text-slate-700">{order.items.length}</span>
                                     </td>
-                                    <td className="text-right py-4">
+                                    <td data-label="Total (UGX)" className="text-right py-4">
                                        <span className="text-sm font-bold text-slate-900">{order.totalAmount.toLocaleString()}</span>
                                     </td>
-                                    <td className="text-center py-4">
+                                    <td data-label="Status" className="text-center py-4">
                                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[9px] font-bold uppercase bg-emerald-50 text-emerald-600 border border-emerald-100">
                                           <Check size={14} strokeWidth={1.75} /> Received
                                        </span>
                                     </td>
-                                    <td className="pr-6 text-right py-4">
+                                    <td data-label="Actions" className="pr-6 text-right py-4">
                                        <button onClick={() => setSelectedOrder(order)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                                           <ArrowRight size={16} strokeWidth={1.75} />
                                        </button>
@@ -360,7 +361,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
 
                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                   {filteredVendors.map(vendor => (
-                     <div key={vendor.id} className="bg-white p-6 rounded-3xl border border-slate-100   transition-all group relative">
+                     <div key={vendor.id} className="supplier-profile-card bg-white p-6 rounded-3xl border border-slate-100 transition-all group relative">
                         <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                            {canEdit && <button onClick={() => { setVendorForm(vendor); setIsEditingVendor(true); setIsVendorModalOpen(true); }} className="p-2 bg-slate-50 text-slate-400 hover:text-blue-600 rounded-lg"><Edit2 size={14} strokeWidth={1.75} /></button>}
                            {canDelete && <button onClick={() => vendor.id && handleDeleteVendor(vendor.id)} className="p-2 bg-slate-50 text-slate-400 hover:text-red-600 rounded-lg"><Trash2 size={14} strokeWidth={1.75} /></button>}
@@ -497,7 +498,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                         </div>
                      ) : (
                         orderCart.map((item, idx) => (
-                           <div key={idx} className="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center group ">
+                           <div key={idx} className="supplier-cart-line bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center group">
                               <div>
                                  <p className="text-xs font-bold text-slate-900 truncate max-w-[180px]">{item.productName}</p>
                                  <p className="text-[10px] text-slate-500 font-medium">

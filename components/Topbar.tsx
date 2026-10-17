@@ -1,9 +1,11 @@
+import { isDatabaseQuotaError } from '../utils/databaseErrors';
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Bell, LogOut, Settings, ChevronDown, Menu, Database, AlertTriangle, PackageX } from 'lucide-react';
 import { User, Product } from '../types';
 import { Page } from '../App';
 import { db } from '../db';
+import brandLogo from '../assets/SNAI-LOGO.png';
 
 interface TopbarProps {
   user: User;
@@ -20,27 +22,21 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
 
+  const [quotaReached, setQuotaReached] = useState(false);
   const [dbStatus, setDbStatus] = useState<'live' | 'mock'>('live');
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
 
-  const fetchMeta = async () => {
-    try {
-      const products = await db.products.toArray();
-      const lowStock = products.filter(p => p.stockQuantity <= p.reorderLevel);
-      setLowStockCount(lowStock.length);
-      setLowStockItems(lowStock);
-      setDbStatus(db.getStatus() as any);
-    } catch (e) {
-      setDbStatus('mock');
-    }
-  };
-
   useEffect(() => {
-    fetchMeta();
-    const interval = setInterval(fetchMeta, 10000);
-    return () => clearInterval(interval);
+    // Firestore sends changed documents; never reload the whole inventory on a timer.
+    return db.products.subscribe(products => {
+      const lowStock = products.filter(product => product.stockQuantity <= product.reorderLevel);
+      setLowStockCount(lowStock.length); setLowStockItems(lowStock);
+      setDbStatus('live'); setQuotaReached(false);
+    }, error => {
+      setDbStatus('mock'); setQuotaReached(isDatabaseQuotaError(error));
+    });
   }, []);
 
   useEffect(() => {
@@ -74,10 +70,10 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
   }, []);
 
   return (
-    <header className="app-topbar h-16 bg-white flex items-center justify-between px-4 lg:px-8 z-40 shrink-0 border-b border-slate-200/60 sticky top-0 w-full transition-all duration-300 ">
+    <header className="app-topbar shop-header z-40 shrink-0 sticky top-0 w-full">
 
       {/* Left Section: Menu Toggle (Mobile Only) */}
-      <div className="flex items-center gap-3 lg:gap-5">
+      <div className="shop-header-hamburger lg:hidden">
         <button
           aria-label="Open navigation" onClick={onMenuToggle}
           className="p-2.5 rounded-xl text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors lg:hidden"
@@ -86,27 +82,27 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
         </button>
       </div>
 
-      <div className="flex-1 min-w-0 px-3 lg:px-4">
-        <h1 className="text-lg font-semibold text-slate-900 truncate">
-          {{ dashboard: 'Dashboard', sales: 'Sales', inventory: 'Inventory', customers: 'Customers', loans: 'Consignment', repairs: 'Repairs', expenses: 'Expenses', reports: 'Reports', settings: 'Settings' }[currentPage] || 'Shop management'}
-        </h1>
-        {dbStatus !== 'live' && <p className="text-xs text-amber-700">Connection unavailable</p>}
+      <button className="shop-mobile-brand" aria-label="Open workspace menu" onClick={onMenuToggle}><img src={brandLogo} alt="" /></button>
+      <div className="shop-header-heading">
+        <div className="shop-header-context">
+          <h1>{{ dashboard: 'Dashboard', sales: 'Sales (POS)', inventory: 'Inventory', customers: 'Customers', loans: 'Consignment', repairs: 'Repairs', expenses: 'Expenses', reports: 'Reports', settings: 'Settings' }[currentPage] || 'Shop management'}</h1>
+          {dbStatus !== 'live' && <span className="shop-header-offline">{quotaReached ? 'Database quota reached' : 'Connection unavailable'}</span>}
+        </div>
+        <p className="shop-header-welcome">Welcome To <strong>Sna! Mobile Shop</strong> Management System</p>
       </div>
 
       {/* Right Section: Actions & Profile */}
-      <div className="flex items-center gap-2 sm:gap-4">
+      <div className="shop-header-actions">
 
-        {/* Clock - Minimal */}
-        <div className="hidden lg:flex flex-col items-end mr-2">
-          <span className="text-xs font-bold text-slate-500">
-            {currentTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
+        <div className="shop-header-clock">
+          <span>{currentTime.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Africa/Kampala' })}</span>
+          <time dateTime={currentTime.toISOString()}>{currentTime.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Africa/Kampala' })}<span className="shop-header-timezone"> EAT</span></time>
         </div>
 
         {/* Notifications */}
         <div className="relative" ref={notifRef}>
           <button
-            aria-label="Notifications" aria-expanded={isNotificationsOpen} onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+            aria-label="Notifications" aria-expanded={isNotificationsOpen} onClick={() => { setIsNotificationsOpen(!isNotificationsOpen); setIsProfileOpen(false); }}
             className={`p-2.5 rounded-xl transition-all relative group ${isNotificationsOpen ? 'bg-slate-100 text-slate-900' : 'text-slate-400 hover:bg-slate-50 hover:text-slate-600'}`}
           >
             <Bell size={20} strokeWidth={1.75} />
@@ -116,7 +112,7 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
           </button>
 
           {isNotificationsOpen && (
-            <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200  overflow-hidden  z-50">
+            <div className="shop-header-notifications absolute right-0 mt-2 w-80 bg-white rounded-2xl border border-slate-200  overflow-hidden  z-50">
               <div className="p-4 border-b border-slate-50 flex items-center justify-between bg-slate-50/50">
                 <span className="text-[10px] text-slate-500 uppercase">Notifications</span>
                 {lowStockCount > 0 && <span className="text-[9px] font-bold text-white bg-orange-600 px-2 py-0.5 rounded-full">{lowStockCount} Alerts</span>}
@@ -161,7 +157,8 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
         {/* Profile Dropdown */}
         <div className="relative" ref={dropdownRef}>
           <button
-            onClick={() => setIsProfileOpen(!isProfileOpen)}
+            aria-label="Account options" aria-expanded={isProfileOpen}
+            onClick={() => { setIsProfileOpen(!isProfileOpen); setIsNotificationsOpen(false); }}
             className="flex items-center gap-3 p-1.5 pr-3 rounded-xl hover:bg-slate-50 transition-all border border-transparent hover:border-slate-100"
           >
             <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center overflow-hidden border border-slate-200 ">
@@ -175,7 +172,7 @@ const Topbar: React.FC<TopbarProps> = ({ user, onLogout, onNavigate, onMenuToggl
           </button>
 
           {isProfileOpen && (
-            <div className="absolute right-0 mt-2 w-48 bg-white rounded-xl border border-slate-200  overflow-hidden py-1  z-50">
+            <div className="shop-header-profile absolute right-0 mt-2 w-48 bg-white rounded-xl border border-slate-200  overflow-hidden py-1  z-50">
               <div className="px-4 py-2 border-b border-slate-50 mb-1">
                 <p className="text-[10px] font-bold text-slate-400 uppercase">Logged as</p>
                 <p className="text-xs font-bold text-slate-900 truncate">{user.fullName || user.username}</p>
