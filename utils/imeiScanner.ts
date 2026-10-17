@@ -33,3 +33,24 @@ export function scanRegion(width: number, height: number) {
     const w = visibleWidth * .9, h = visibleHeight * .22;
     return { x: (width - w) / 2, y: (height - h) / 2, width: w, height: h };
 }
+
+// Confirm the same valid value twice before accepting a live camera reading.
+// A stationary barcode stays latched until a different barcode is confirmed.
+export function createLiveImeiTracker() {
+    let candidate = '', hits = 0, lastRead = 0, latched = '';
+    return {
+        observe(raw: string, now = Date.now()): string | null {
+            let value: string;
+            try { value = scannedImei(raw); }
+            catch (error) { candidate = ''; hits = 0; throw error; }
+            if (value === latched) return null;
+            if (value !== candidate || now - lastRead > 1200) { candidate = value; hits = 1; }
+            else hits++;
+            lastRead = now;
+            if (hits < 2) return null;
+            latched = value; candidate = ''; hits = 0;
+            return value;
+        },
+        reset() { candidate = ''; hits = 0; lastRead = 0; latched = ''; },
+    };
+}

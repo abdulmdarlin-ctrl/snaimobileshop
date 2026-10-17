@@ -2,9 +2,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, X, Trash2, Flashlight, ImagePlus, Check, Pause } from 'lucide-react';
 import type { BrowserMultiFormatReader } from '@zxing/browser';
-import { scannedImei, scanRegion } from '../utils/imeiScanner';
+import { scannedImei, scanRegion, createLiveImeiTracker } from '../utils/imeiScanner';
 import { confirmAction } from '../utils/dialog';
-import { requestBarcodeCamera, barcodeCameraCapabilities, cameraErrorMessage, type BarcodeCameraCapabilities } from '../utils/camera';
+import { requestBarcodeCamera, barcodeCameraCapabilities, enableBarcodeAutofocus, cameraErrorMessage, type BarcodeCameraCapabilities } from '../utils/camera';
 
 interface Props { existing: string[]; onApply: (values: string[]) => void; onClose: () => void; }
 export default function ImeiScanner({ existing, onApply, onClose }: Props) {
@@ -14,12 +14,17 @@ export default function ImeiScanner({ existing, onApply, onClose }: Props) {
     const collected = useRef<string[]>([]), last = useRef({ value: '', time: 0 });
     const [values, setValues] = useState<string[]>([]), [message, setMessage] = useState('Scan one IMEI1 barcode at a time.');
     const [error, setError] = useState(''), [phase, setPhase] = useState<'stopped' | 'starting' | 'running' | 'photo'>('stopped');
-    const [acknowledged, setAcknowledged] = useState(false), [devices, setDevices] = useState<MediaDeviceInfo[]>([]), [device, setDevice] = useState('');
+    const [mode, setMode] = useState<'live' | 'photo'>('live');
+    const [devices, setDevices] = useState<MediaDeviceInfo[]>([]), [device, setDevice] = useState('');
+    const [lastScanned, setLastScanned] = useState('');
+    const tracker = useRef(createLiveImeiTracker());
+    const startRef = useRef<() => void>(() => {});
     const [torch, setTorch] = useState(false), [capabilities, setCapabilities] = useState<BarcodeCameraCapabilities>({}), [zoom, setZoom] = useState(1);
     const liveCameraSupported = window.isSecureContext && !!navigator.mediaDevices?.getUserMedia;
     const closeRef = useRef<() => void>(() => {});
     function stop() {
         generation.current++;
+        tracker.current.reset();
         if (timer.current) clearInterval(timer.current);
         timer.current = null;
         stream.current?.getTracks().forEach(track => track.stop()); stream.current = null;
@@ -47,6 +52,7 @@ export default function ImeiScanner({ existing, onApply, onClose }: Props) {
         };
         const visibility = () => { if (document.hidden) stop(); };
         document.addEventListener('keydown', keyboard, true); document.addEventListener('visibilitychange', visibility);
+        if (liveCameraSupported) startRef.current();
         return () => { alive.current = false; stop(); document.removeEventListener('keydown', keyboard, true); document.removeEventListener('visibilitychange', visibility); if (previous?.isConnected) previous.focus(); };
     }, []);
     function decoder() {
@@ -64,18 +70,18 @@ export default function ImeiScanner({ existing, onApply, onClose }: Props) {
             const value = scannedImei(raw);
             if (existing.some(item => item.trim() === value) || collected.current.includes(value)) { setMessage(`Already entered: ${value}. Move to the next phone.`); setError(''); return; }
             collected.current = [...collected.current, value]; setValues(collected.current);
+            setLastScanned(value);
             setMessage(`Added ${value}. Move to the next IMEI1 barcode.`); setError('');
             try { navigator.vibrate?.(70); } catch { /* Haptic feedback is optional. */ }
         } catch (error) { setError((error as Error).message); }
     }
-    async function start() {
+    async function start(requestedDevice = device) {
         stop(); setError('');
-        if (!acknowledged) return;
         if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) { setError('Live video scanning needs HTTPS. Use Take barcode photo below to open your phone camera on this address.'); return; }
         const run = generation.current; setPhase('starting');
         try {
             // Ask permission from the button action before waiting for decoder downloads.
-            const media = await requestBarcodeCamera(navigator.mediaDevices, device);
+            const media = await requestBarcodeCamera(navigator.mediaDevices, requestedDevice);
             if (!alive.current || run !== generation.current) { media.getTracks().forEach(track => track.stop()); return; }
             stream.current = media;
             const preview = video.current!;
@@ -89,28 +95,36 @@ export default function ImeiScanner({ existing, onApply, onClose }: Props) {
             if (!alive.current || run !== generation.current) return;
             const track = media.getVideoTracks()[0];
             const caps = barcodeCameraCapabilities(track); setCapabilities(caps); setZoom(caps.zoom?.min || 1);
+            void enableBarcodeAutofocus(track, caps);
             track.addEventListener('ended', () => { if (alive.current && run === generation.current) { stop(); setError('The camera stopped. Tap Start camera to reconnect.'); } }, { once: true });
             navigator.mediaDevices.enumerateDevices?.().then(list => { if (alive.current && run === generation.current) setDevices(list.filter(item => item.kind === 'videoinput')); }).catch(() => {});
             const canvas = document.createElement('canvas'), context = canvas.getContext('2d', { willReadFrequently: true });
             if (!context) throw new Error('Camera canvas unavailable.');
             setPhase('running');
+            setMessage('Live scanning. Hold one IMEI1 barcode steady inside the guide.');
             timer.current = setInterval(() => {
                 const source = video.current; if (!source?.videoWidth || source.readyState < 2) return;
                 const crop = scanRegion(source.videoWidth, source.videoHeight);
                 canvas.width = Math.round(crop.width); canvas.height = Math.round(crop.height);
+                let raw: string;
                 try {
                     context.drawImage(source, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
-                    accept(codeReader.decodeFromCanvas(canvas).getText());
-                } catch { /* No readable barcode in this frame. */ }
-            }, 300);
+                    raw = codeReader.decodeFromCanvas(canvas).getText();
+                } catch { return; }
+                try {
+                    const confirmed = tracker.current.observe(raw);
+                    if (confirmed) accept(confirmed);
+                } catch { accept(raw); }
+            }, 200);
         } catch (error) {
             if (!alive.current || run !== generation.current) return;
             stop();
             setError(cameraErrorMessage(error));
         }
     }
+    startRef.current = () => { void start(); };
     async function photo(file?: File) {
-        if (!file || !acknowledged) return;
+        if (!file) return;
         if (file.size > 20 * 1024 * 1024) { setError('Choose a close-up photo smaller than 20 MB.'); return; }
         stop(); const run = generation.current; setPhase('photo'); setError('');
         const url = URL.createObjectURL(file);
@@ -127,15 +141,18 @@ export default function ImeiScanner({ existing, onApply, onClose }: Props) {
     return createPortal(<div className="imei-scanner-layer"><div ref={panel} className="imei-scanner-panel" role="dialog" aria-modal="true" aria-labelledby="imei-scanner-title">
         <header><div><h2 id="imei-scanner-title">Scan phone IMEIs</h2><p>Supplier intake / IMEI1 only</p></div><button type="button" onClick={() => void close()} aria-label="Close IMEI scanner"><X size={22} /></button></header>
         <div className="imei-scanner-body">
-            <label className="imei-scanner-guidance"><input type="checkbox" checked={acknowledged} disabled={phase !== 'stopped'} onChange={event => setAcknowledged(event.target.checked)} /><span>I will scan one primary IMEI (IMEI1) per phone. IMEI2 belongs to the same phone and must not be counted again.</span></label>
-            <div className="imei-camera-preview"><video ref={video} muted playsInline autoPlay /><div className="imei-camera-guide" aria-hidden="true" />{phase !== 'running' && <span>{phase === 'starting' ? 'Opening camera...' : phase === 'photo' ? 'Reading photo...' : 'Position one barcode inside the guide'}</span>}</div>
-            {!liveCameraSupported && <p className="imei-camera-notice">Use <strong>Take barcode photo</strong> to open your phone camera. Live video scanning is available on the secure HTTPS website.</p>}
-            <div className="imei-camera-actions"><button type="button" disabled={!liveCameraSupported || !acknowledged || phase === 'photo'} onClick={() => phase === 'running' || phase === 'starting' ? stop() : void start()}>{phase === 'running' || phase === 'starting' ? <><Pause size={17} /> Pause camera</> : <><Camera size={17} /> Start camera</>}</button>
-                <label className={!acknowledged || phase === 'photo' ? 'disabled' : ''}><Camera size={17} /> Take barcode photo<input aria-label="Take barcode photo with phone camera" type="file" accept="image/*" capture="environment" disabled={!acknowledged || phase === 'photo'} onChange={event => { void photo(event.target.files?.[0]); event.target.value = ''; }} /></label>
-                <label className={!acknowledged || phase === 'photo' ? 'disabled' : ''}><ImagePlus size={17} /> Choose photo<input aria-label="Choose existing barcode photo" type="file" accept="image/*" disabled={!acknowledged || phase === 'photo'} onChange={event => { void photo(event.target.files?.[0]); event.target.value = ''; }} /></label>
+            <div className="imei-scanner-guidance">Scan one primary IMEI (IMEI1) per physical phone. IMEI2 belongs to the same phone.</div>
+            <div className="imei-scan-modes" aria-label="Barcode scanning method"><button type="button" aria-pressed={mode === 'live'} onClick={() => { setMode('live'); if (phase !== 'running' && phase !== 'starting') void start(); }}><Camera size={17} /> Live scanner</button><button type="button" aria-pressed={mode === 'photo'} onClick={() => { stop(); setMode('photo'); }}><ImagePlus size={17} /> Photo</button></div>
+            <div className="imei-camera-preview" data-scanning={phase === 'running'}><video ref={video} muted playsInline autoPlay /><div className="imei-camera-guide" aria-hidden="true" /><span className="imei-live-badge">{phase === 'running' ? 'LIVE' : phase === 'starting' ? 'CONNECTING' : 'PAUSED'}<strong>{values.length} scanned</strong></span><span className="imei-camera-caption">{phase === 'starting' ? 'Opening camera...' : phase === 'photo' ? 'Reading photo...' : phase === 'running' ? 'Align one IMEI1 barcode inside the guide' : 'Tap Start live scanning to continue'}</span></div>
+            {!liveCameraSupported && <p className="imei-camera-notice">Live scanning needs the HTTPS website and camera permission. This browser address cannot provide live video. Open the secure shop address on your phone.</p>}
+            {mode === 'live' ? <div className="imei-camera-actions"><button type="button" disabled={!liveCameraSupported || phase === 'photo'} onClick={() => phase === 'running' || phase === 'starting' ? stop() : void start()}>{phase === 'running' || phase === 'starting' ? <><Pause size={17} /> Pause live scanning</> : <><Camera size={17} /> Start live scanning</>}</button>
                 {phase === 'running' && capabilities.torch && <button type="button" aria-pressed={torch} onClick={() => void cameraSetting({ torch: !torch })}><Flashlight size={17} /> Light {torch ? 'off' : 'on'}</button>}
-            </div>
-            {devices.length > 1 && <label className="imei-camera-select">Camera<select value={device} disabled={phase === 'starting' || phase === 'photo'} onChange={event => { stop(); setDevice(event.target.value); }}><option value="">Automatic rear camera</option>{devices.map((item, index) => <option key={item.deviceId} value={item.deviceId}>{item.label || `Camera ${index + 1}`}</option>)}</select></label>}
+            </div> : <div className="imei-camera-actions">
+                <label className={phase === 'photo' ? 'disabled' : ''}><Camera size={17} /> Take barcode photo<input aria-label="Take barcode photo with phone camera" type="file" accept="image/*" capture="environment" disabled={phase === 'photo'} onChange={event => { void photo(event.target.files?.[0]); event.target.value = ''; }} /></label>
+                <label className={phase === 'photo' ? 'disabled' : ''}><ImagePlus size={17} /> Choose photo<input aria-label="Choose existing barcode photo" type="file" accept="image/*" disabled={phase === 'photo'} onChange={event => { void photo(event.target.files?.[0]); event.target.value = ''; }} /></label>
+            </div>}
+            {lastScanned && <div className="imei-last-scan"><Check size={18} /><span>Last added <strong>{lastScanned}</strong></span></div>}
+            {mode === 'live' && devices.length > 1 && <label className="imei-camera-select">Camera<select value={device} disabled={phase === 'starting' || phase === 'photo'} onChange={event => { setDevice(event.target.value); void start(event.target.value); }}><option value="">Automatic rear camera</option>{devices.map((item, index) => <option key={item.deviceId} value={item.deviceId}>{item.label || `Camera ${index + 1}`}</option>)}</select></label>}
             {phase === 'running' && capabilities.zoom && <label className="imei-camera-select">Zoom<input type="range" min={capabilities.zoom.min} max={capabilities.zoom.max} step={capabilities.zoom.step || .1} value={zoom} onChange={event => void cameraSetting({ zoom: Number(event.target.value) })} /></label>}
             <p className="imei-scan-status" role="status">{message}</p>{error && <p className="imei-scan-error" role="alert">{error}</p>}
             <div className="imei-scan-list"><h3>{values.length} scanned for review</h3><p>Check each number against the sheet. Scan close-up, one row at a time; the sheet total is not an IMEI.</p>{values.map(value => <div key={value}><span>{value}</span><button type="button" aria-label={`Remove IMEI ${value}`} onClick={() => { collected.current = collected.current.filter(item => item !== value); setValues(collected.current); }}><Trash2 size={17} /></button></div>)}</div>

@@ -7,7 +7,7 @@ import zxing from '@zxing/library';
 
 const source = await readFile(new URL('../utils/imeiScanner.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
-const { scannedImei, mergeScannedImeis, scanRegion } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { scannedImei, mergeScannedImeis, scanRegion, createLiveImeiTracker } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const first = '490154203237518';
 function withCheck(prefix) {
     const sum = [...prefix].reduce((total, digit, index) => { const n = +digit * (index % 2 ? 2 : 1); return total + (n > 9 ? n - 9 : n); }, 0);
@@ -54,4 +54,31 @@ test('real Code 128 decoder reads a generated IMEI barcode', () => {
     const decoder = new zxing.MultiFormatReader();
     decoder.setHints(new Map([[zxing.DecodeHintType.POSSIBLE_FORMATS, [zxing.BarcodeFormat.CODE_128]]]));
     assert.equal(scannedImei(decoder.decodeWithState(bitmap).getText()), first);
+});
+
+test('live scanning confirms steady readings and adds different phones without restarting', () => {
+    const tracker = createLiveImeiTracker();
+    assert.equal(tracker.observe(first, 100), null);
+    assert.equal(tracker.observe(first, 300), first);
+    for (let time = 500; time < 3000; time += 200) assert.equal(tracker.observe(first, time), null);
+    assert.equal(tracker.observe(second, 3100), null);
+    assert.equal(tracker.observe(second, 3300), second);
+    assert.equal(tracker.observe(second, 3500), null);
+});
+test('a single noisy or stale reading is never accepted as a phone', () => {
+    const tracker = createLiveImeiTracker();
+    assert.equal(tracker.observe(first, 100), null);
+    assert.equal(tracker.observe(second, 300), null);
+    assert.equal(tracker.observe(first, 500), null);
+    assert.equal(tracker.observe(first, 1801), null);
+    assert.throws(() => tracker.observe('84012509070173', 1900));
+    assert.equal(tracker.observe(first, 2000), null);
+    assert.equal(tracker.observe(first, 2200), first);
+});
+test('pause and restart discard incomplete readings', () => {
+    const tracker = createLiveImeiTracker();
+    assert.equal(tracker.observe(first, 100), null);
+    tracker.reset();
+    assert.equal(tracker.observe(first, 300), null);
+    assert.equal(tracker.observe(first, 500), first);
 });

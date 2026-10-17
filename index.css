@@ -795,3 +795,16 @@
   .document-preview-scroll { overflow: auto; justify-content: flex-start; padding: 12px; }
   .document-preview-scroll > .receipt-a4-mode { min-width: 680px; flex-shrink: 0; }
 }
+
+/* Continuous barcode capture: the preview stays open between phones. */
+.imei-scan-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 12px; padding: 4px; border: 1px solid #e2e8f0; border-radius: 10px; background: #f1f5f9; }
+.imei-scan-modes button { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; color: #64748b; font-size: 13px; border-radius: 7px; }
+.imei-scan-modes button[aria-pressed="true"] { background: #0f172a; color: white; font-weight: 600; }
+.imei-camera-preview > .imei-live-badge { top: 10px; bottom: auto; left: 10px; right: 10px; display: flex; align-items: center; gap: 8px; width: auto; padding: 6px 9px; border-radius: 6px; background: rgb(15 23 42 / 80%); color: white; text-align: left; font-size: 11px; font-weight: 600; }
+.imei-live-badge strong { margin-left: auto; font-size: 11px; font-weight: 500; }
+.imei-camera-preview[data-scanning="true"] > .imei-live-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #4ade80; }
+.imei-camera-preview[data-scanning="true"] .imei-camera-guide { border-color: #86efac; }
+.imei-camera-preview[data-scanning="true"] .imei-camera-guide::after { content: ''; position: absolute; left: 3%; right: 3%; top: 50%; height: 2px; background: #4ade80; animation: imei-guide-sweep 1.8s ease-in-out infinite; }
+.imei-last-scan { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-top: 12px; border: 1px solid #a7f3d0; background: #ecfdf5; color: #065f46; border-radius: 8px; font-size: 12px; }
+.imei-last-scan strong { display: block; font-family: monospace; font-size: 15px; margin-top: 2px; }
+@keyframes imei-guide-sweep { 0%, 100% { top: 20%; } 50% { top: 80%; } }
