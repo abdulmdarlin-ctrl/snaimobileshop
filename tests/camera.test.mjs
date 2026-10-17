@@ -13,6 +13,8 @@ test('requests the rear camera and never requests microphone access', async () =
     assert.equal(calls.length, 1);
     assert.equal(calls[0].audio, false);
     assert.equal(calls[0].video.facingMode.ideal, 'environment');
+    assert.equal(calls[0].video.width.ideal, 1280);
+    assert.equal(calls[0].video.frameRate.max, 30);
 });
 test('retries unsupported constraints and unavailable saved cameras with a rear-camera fallback', async () => {
     for (const name of ['OverconstrainedError', 'ConstraintNotSatisfiedError', 'NotFoundError']) {

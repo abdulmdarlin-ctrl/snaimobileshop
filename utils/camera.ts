@@ -2,7 +2,7 @@ export type BarcodeCameraCapabilities = MediaTrackCapabilities & { torch?: boole
 
 export async function requestBarcodeCamera(media: Pick<MediaDevices, 'getUserMedia'>, deviceId = ''): Promise<MediaStream> {
     const cameras: MediaTrackConstraints[] = [
-        { ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } }), width: { ideal: 1920 }, height: { ideal: 1440 } },
+        { ...(deviceId ? { deviceId: { exact: deviceId } } : { facingMode: { ideal: 'environment' } }), width: { ideal: 1280 }, height: { ideal: 960 }, frameRate: { ideal: 30, max: 30 } },
         { facingMode: { ideal: 'environment' } },
     ];
     for (let index = 0; index < cameras.length; index++) {
