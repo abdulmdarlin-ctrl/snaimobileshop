@@ -7,7 +7,7 @@ import zxing from '@zxing/library';
 
 const source = await readFile(new URL('../utils/imeiScanner.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
-const { scannedImei, mergeScannedImeis, scanRegion, createLiveImeiTracker } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { scannedImei, mergeScannedImeis, scanRegion, createLiveImeiTracker, cameraPreviewRegion, SCAN_GUIDE } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const first = '490154203237518';
 function withCheck(prefix) {
     const sum = [...prefix].reduce((total, digit, index) => { const n = +digit * (index % 2 ? 2 : 1); return total + (n > 9 ? n - 9 : n); }, 0);
@@ -39,8 +39,8 @@ test('scan region stays centered and within portrait and landscape camera frames
     for (const [w, h] of [[1920, 1080], [1080, 1920], [640, 480]]) {
         const crop = scanRegion(w, h);
         assert.ok(crop.x >= 0 && crop.y >= 0 && crop.x + crop.width <= w && crop.y + crop.height <= h);
-        assert.equal(crop.x + crop.width / 2, w / 2);
-        assert.equal(crop.y + crop.height / 2, h / 2);
+        assert.ok(Math.abs(crop.x + crop.width / 2 - w / 2) < 1e-8);
+        assert.ok(Math.abs(crop.y + crop.height / 2 - h / 2) < 1e-8);
     }
 });
 test('real Code 128 decoder reads a generated IMEI barcode', () => {
@@ -81,4 +81,17 @@ test('pause and restart discard incomplete readings', () => {
     tracker.reset();
     assert.equal(tracker.observe(first, 300), null);
     assert.equal(tracker.observe(first, 500), first);
+});
+
+test('the visible guide, preview crop and decoded pixels map to the same sensor area', () => {
+    for (const [width, height] of [[1920, 1080], [1080, 1920], [640, 480], [4032, 3024]]) {
+        const visible = cameraPreviewRegion(width, height);
+        assert.ok(Math.abs(visible.width / visible.height - 4 / 3) < 1e-10);
+        const canvasWidth = Math.max(4, Math.floor(Math.min(960, visible.width) / 4) * 4), canvasHeight = canvasWidth * 3 / 4;
+        const previewCrop = scanRegion(canvasWidth, canvasHeight), sensorCrop = scanRegion(width, height);
+        assert.ok(Math.abs(visible.x + previewCrop.x * visible.width / canvasWidth - sensorCrop.x) < 1e-8);
+        assert.ok(Math.abs(visible.y + previewCrop.y * visible.height / canvasHeight - sensorCrop.y) < 1e-8);
+        assert.ok(Math.abs(previewCrop.width / canvasWidth - SCAN_GUIDE.width) < 1e-10);
+        assert.ok(Math.abs(previewCrop.height / canvasHeight - SCAN_GUIDE.height) < 1e-10);
+    }
 });

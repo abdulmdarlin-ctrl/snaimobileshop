@@ -4,7 +4,7 @@ import test from 'node:test';
 import ts from 'typescript';
 const source = await readFile(new URL('../utils/camera.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
-const { requestBarcodeCamera, barcodeCameraCapabilities, cameraErrorMessage, enableBarcodeAutofocus } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { requestBarcodeCamera, barcodeCameraCapabilities, cameraErrorMessage, enableBarcodeAutofocus, cameraZoom, resetCameraZoom, waitForCameraFrame } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 const failure = name => Object.assign(new Error(name), { name });
 
 test('requests the rear camera and never requests microphone access', async () => {
@@ -48,4 +48,33 @@ test('continuous autofocus is requested only when supported and never prevents s
     await enableBarcodeAutofocus(track, { focusMode: ['manual', 'continuous'] });
     assert.equal(calls[0].advanced[0].focusMode, 'continuous');
     await assert.doesNotReject(enableBarcodeAutofocus({ applyConstraints: async () => { throw new Error('Unsupported'); } }, { focusMode: ['continuous'] }));
+});
+
+test('preview readiness waits for an actual decoded frame instead of trusting play()', async () => {
+    const video = { readyState: 1, videoWidth: 0, videoHeight: 0 };
+    let ready = false;
+    const waiting = waitForCameraFrame(video, 300).then(() => { ready = true; });
+    assert.equal(ready, false);
+    video.readyState = 2; video.videoWidth = 1920; video.videoHeight = 1080;
+    await waiting;
+    assert.equal(ready, true);
+});
+test('empty camera feeds time out with an actionable preview error', async () => {
+    await assert.rejects(waitForCameraFrame({ readyState: 4, videoWidth: 0, videoHeight: 0 }, 10), { name: 'CameraFrameError' });
+    assert.match(cameraErrorMessage({ name: 'CameraFrameError' }), /no picture arrived/);
+});
+test('closing the scanner cancels camera frame readiness without leaving a pending wait', async () => {
+    const controller = new AbortController();
+    const ready = waitForCameraFrame({ readyState: 0, videoWidth: 0, videoHeight: 0 }, 300, controller.signal);
+    controller.abort();
+    await assert.rejects(ready, { name: 'AbortError' });
+});
+test('zoom resets to normal magnification and displays the hardware setting', async () => {
+    let actualZoom = 8;
+    const capabilities = { zoom: { min: 1, max: 10, step: .1 } };
+    const track = { getSettings: () => ({ zoom: actualZoom }), applyConstraints: async value => { actualZoom = value.advanced[0].zoom; } };
+    assert.equal(cameraZoom(track, capabilities), 8);
+    assert.equal(await resetCameraZoom(track, capabilities), 1);
+    const unsupported = { getSettings: () => ({ zoom: 2 }), applyConstraints: async () => { throw new Error('Unsupported'); } };
+    assert.equal(await resetCameraZoom(unsupported, capabilities), 2);
 });

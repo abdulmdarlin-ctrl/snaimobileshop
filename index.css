@@ -804,7 +804,34 @@
 .imei-live-badge strong { margin-left: auto; font-size: 11px; font-weight: 500; }
 .imei-camera-preview[data-scanning="true"] > .imei-live-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #4ade80; }
 .imei-camera-preview[data-scanning="true"] .imei-camera-guide { border-color: #86efac; }
-.imei-camera-preview[data-scanning="true"] .imei-camera-guide::after { content: ''; position: absolute; left: 3%; right: 3%; top: 50%; height: 2px; background: #4ade80; animation: imei-guide-sweep 1.8s ease-in-out infinite; }
 .imei-last-scan { display: flex; align-items: center; gap: 8px; padding: 10px 12px; margin-top: 12px; border: 1px solid #a7f3d0; background: #ecfdf5; color: #065f46; border-radius: 8px; font-size: 12px; }
 .imei-last-scan strong { display: block; font-family: monospace; font-size: 15px; margin-top: 2px; }
-@keyframes imei-guide-sweep { 0%, 100% { top: 20%; } 50% { top: 80%; } }
+
+/* Show the actual decoded camera picture with an unobstructed center window. */
+.imei-camera-preview { isolation: isolate; }
+.imei-camera-preview > video, .imei-camera-preview > .imei-camera-surface { position: absolute; inset: 0; display: block; width: 100%; height: 100%; margin: 0; opacity: 1; object-fit: cover; }
+.imei-camera-preview > video { z-index: 0; }
+.imei-camera-preview > .imei-camera-surface { z-index: 1; }
+.imei-camera-preview[data-picture="false"] > .imei-camera-surface { visibility: hidden; }
+.imei-camera-shade { position: absolute; inset: 0; z-index: 2; pointer-events: none; background: linear-gradient(to bottom, rgb(0 0 0 / 22%) 0%, rgb(0 0 0 / 22%) 39%, transparent 39%, transparent 61%, rgb(0 0 0 / 22%) 61%); }
+.imei-camera-preview .imei-camera-guide { z-index: 3; background: transparent; box-shadow: none; border: 1px solid rgb(255 255 255 / 45%); border-radius: 4px; pointer-events: none; }
+.imei-camera-guide i { position: absolute; width: 16px; height: 16px; border: 3px solid white; }
+.imei-camera-guide i:nth-child(1) { top: -2px; left: -2px; border-right: 0; border-bottom: 0; border-top-left-radius: 4px; }
+.imei-camera-guide i:nth-child(2) { top: -2px; right: -2px; border-left: 0; border-bottom: 0; border-top-right-radius: 4px; }
+.imei-camera-guide i:nth-child(3) { bottom: -2px; left: -2px; border-right: 0; border-top: 0; border-bottom-left-radius: 4px; }
+.imei-camera-guide i:nth-child(4) { bottom: -2px; right: -2px; border-left: 0; border-top: 0; border-bottom-right-radius: 4px; }
+.imei-camera-preview[data-scanning="true"] .imei-camera-guide i { border-color: #86efac; }
+.imei-camera-preview[data-scanning="true"] .imei-camera-guide::after { content: ''; position: absolute; top: 50%; left: 3%; right: 3%; height: 1px; background: rgb(134 239 172 / 70%); }
+.imei-camera-preview > .imei-live-badge, .imei-camera-preview > .imei-camera-caption { z-index: 4; }
+.imei-camera-preview > .imei-camera-caption { padding: 6px 8px; border-radius: 6px; background: rgb(15 23 42 / 65%); font-size: 11px; }
+.imei-preview-placeholder { position: absolute; inset: 0; z-index: 3; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 12px; padding: 42px; color: #cbd5e1; background: #0f172a; text-align: center; font-size: 13px; }
+.imei-crop-inspector { margin-top: 10px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 9px; background: #f8fafc; }
+.imei-crop-inspector[data-ready="false"] { display: none; }
+.imei-crop-inspector > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 7px; font-size: 11px; color: #475569; }
+.imei-crop-inspector small { color: #64748b; font-size: 10px; }
+.imei-crop-inspector canvas { display: block; width: 100%; height: auto; background: #0f172a; border-radius: 4px; }
+.imei-zoom-control { display: flex; align-items: flex-end; gap: 10px; margin-top: 12px; }
+.imei-zoom-control label { display: grid; grid-template-columns: 1fr auto; gap: 6px; flex: 1; min-width: 0; color: #475569; font-size: 12px; }
+.imei-zoom-control output { font-variant-numeric: tabular-nums; font-weight: 600; }
+.imei-zoom-control input { grid-column: 1 / -1; width: 100%; min-width: 0; min-height: 44px; accent-color: #334155; }
+.imei-zoom-control button { min-height: 44px; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 12px; }

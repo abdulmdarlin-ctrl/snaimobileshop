@@ -26,12 +26,17 @@ export function mergeScannedImeis(existing: string[], quantity: number, scanned:
     return { imeis: next, quantity: next.length };
 }
 
-// Match the central guide in the 4:3, object-fit:cover preview.
-export function scanRegion(width: number, height: number) {
+// All preview and decoder coordinates share these guide proportions.
+export const SCAN_GUIDE = { left: .05, top: .39, width: .9, height: .22 };
+export function cameraPreviewRegion(width: number, height: number) {
     const visibleWidth = Math.min(width, height * 4 / 3);
     const visibleHeight = visibleWidth * 3 / 4;
-    const w = visibleWidth * .9, h = visibleHeight * .22;
-    return { x: (width - w) / 2, y: (height - h) / 2, width: w, height: h };
+    return { x: (width - visibleWidth) / 2, y: (height - visibleHeight) / 2, width: visibleWidth, height: visibleHeight };
+}
+export function scanRegion(width: number, height: number) {
+    const visible = cameraPreviewRegion(width, height);
+    return { x: visible.x + visible.width * SCAN_GUIDE.left, y: visible.y + visible.height * SCAN_GUIDE.top,
+        width: visible.width * SCAN_GUIDE.width, height: visible.height * SCAN_GUIDE.height };
 }
 
 // Confirm the same valid value twice before accepting a live camera reading.
