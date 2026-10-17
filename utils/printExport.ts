@@ -33,7 +33,7 @@ export const printSection = (selector: string, callback?: () => void) => {
   }
 
   // Get content
-  const content = element.innerHTML;
+  const content = element.outerHTML;
 
   // Get all stylesheets from the main document to inject them into the iframe
   const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))

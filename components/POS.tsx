@@ -19,8 +19,11 @@ import {
 import { printSection, exportSectionToPDF } from '../utils/printExport';
 import { useToast } from './Toast';
 import Modal from './Modal';
-import QRCode from 'qrcode';
-import SnaiLogo from '../assets/SNAI-LOGO.png';
+import ImeiScanner from './ImeiScanner';
+import { addScannedSaleItem } from '../utils/scanToSell';
+import SaleDocumentDialog from './SaleDocumentDialog';
+import PhoneSaleLookup from './PhoneSaleLookup';
+import { paymentReceipts } from '../utils/saleDocuments';
 
 const calculateWarrantyEndDate = (warrantyString: string): Date | null => {
    const now = new Date();
@@ -55,13 +58,15 @@ interface POSProps {
 const POS: React.FC<POSProps> = ({ user }) => {
    const { showToast } = useToast();
    const [products, setProducts] = useState<Product[]>([]);
+   const [sellScannerOpen, setSellScannerOpen] = useState(false);
+   const liveCart = useRef<SaleItem[]>([]);
    const [imeiLookupOpen, setImeiLookupOpen] = useState(false);
-   const [imeiQuery, setImeiQuery] = useState('');
    const [customers, setCustomers] = useState<any[]>([]);
    const [categories, setCategories] = useState<string[]>(['All']);
    const [salesHistory, setSalesHistory] = useState<Sale[]>([]);
    const [mobilePane, setMobilePane] = useState<'catalog' | 'order'>('catalog');
    const [cart, setCart] = useState<SaleItem[]>([]);
+   liveCart.current = cart;
    const [loading, setLoading] = useState(true);
    const [pricingMode, setPricingMode] = useState<'Retail' | 'Wholesale' | 'Middle Man'>('Retail');
    const [searchTerm, setSearchTerm] = useState('');
@@ -99,7 +104,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [dataError, setDataError] = useState(false);
    const [checkoutError, setCheckoutError] = useState('');
    const skipReprice = useRef(false);
-   const [printConfig, setPrintConfig] = useState({ showLogo: true });
 
    // Admin Actions State
    const [saleToEdit, setSaleToEdit] = useState<Sale | null>(null);
@@ -131,6 +135,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
       customerPhone: '',
       discountPercentage: 0,
    });
+   const [customerKind, setCustomerKind] = useState<'Registered' | 'Walk-in'>('Registered');
+   const [documentMode, setDocumentMode] = useState<'invoice' | 'receipt'>('invoice');
+   const [receiptId, setReceiptId] = useState('initial');
    const [saleType, setSaleType] = useState<SaleType>('Cash sale');
    const [saleTypeFilter, setSaleTypeFilter] = useState('All');
    const [paymentSale, setPaymentSale] = useState<Sale | null>(null);
@@ -150,8 +157,15 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [isConfirmSaleModalOpen, setIsConfirmSaleModalOpen] = useState(false);
    const [stagedPricingMode, setStagedPricingMode] = useState<'Retail' | 'Wholesale' | 'Middle Man'>('Retail');
    const [lastSale, setLastSale] = useState<Sale | null>(null);
-   const [qrCodeDataURL, setQrCodeDataURL] = useState<string | null>(null);
    const searchInputRef = useRef<HTMLInputElement>(null);
+
+   const openSaleDocument = (sale: Sale, mode?: 'invoice' | 'receipt') => {
+      const receipts = paymentReceipts(sale);
+      setLastSale(sale);
+      setDocumentMode(mode === 'invoice' || !receipts.length ? 'invoice' : 'receipt');
+      setReceiptId(receipts[receipts.length - 1]?.id || 'initial');
+      setIsReceiptOpen(true);
+   };
 
    // Held Sales State
    const [heldSales, setHeldSales] = useState<any[]>([]);
@@ -175,27 +189,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
          }
       }
    }, [heldSales]);
-
-   useEffect(() => {
-      if (lastSale) {
-         const verificationText = `SNA-VERIFY|${lastSale.receiptNo}|${lastSale.total}|${lastSale.timestamp}`;
-         QRCode.toDataURL(verificationText, {
-            margin: 2,
-            scale: 4,
-            color: {
-               dark: '#000000',
-               light: '#ffffff'
-            }
-         })
-            .then(url => setQrCodeDataURL(url))
-            .catch(err => {
-               console.error('Failed to generate QR Code', err);
-               setQrCodeDataURL(null);
-            });
-      } else {
-         setQrCodeDataURL(null);
-      }
-   }, [lastSale]);
 
    useEffect(() => {
       const syncHeld = () => {
@@ -227,6 +220,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          items: cart,
          pricingMode,
          checkoutForm,
+         customerKind,
          saleType,
          paymentReference,
          customerName: checkoutForm.customerName || 'Walk-in',
@@ -240,6 +234,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setHeldSales(updated);
       setCart([]);
       setSaleType('Cash sale');
+      setCustomerKind('Registered');
       setActiveHeldSaleId(null);
       saleIdRef.current = createId();
       setPaymentReference('');
@@ -260,10 +255,11 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setCart(heldSale.items);
       setPricingMode(heldSale.pricingMode);
 
+      setCustomerKind(heldSale.customerKind === 'Walk-in' ? 'Walk-in' : 'Registered');
       // Initialize checkout form with held data
       setCheckoutForm({
          amountPaid: heldSale.saleType === 'Partial sale' ? (heldSale.checkoutForm?.amountPaid || 0) : 0,
-         customerName: heldSale.customerName === 'Walk-in' ? '' : heldSale.customerName,
+         customerName: heldSale.checkoutForm?.customerName || (heldSale.customerName === 'Walk-in' ? '' : heldSale.customerName),
          customerPhone: heldSale.checkoutForm?.customerPhone || '',
          discountPercentage: heldSale.checkoutForm?.discountPercentage || 0,
          paymentMethod: heldSale.checkoutForm?.paymentMethod || 'Cash'
@@ -305,14 +301,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
       } catch (error) { setDataError(true); showToast(databaseErrorMessage(error, 'Could not refresh sales and stock. Please retry.'), 'error'); }
       finally { setLoading(false); }
    };
-
-   useEffect(() => {
-      if (isReceiptOpen && settings) {
-         setPrintConfig({
-            showLogo: settings.receiptShowLogo ?? true
-         });
-      }
-   }, [isReceiptOpen, settings]);
 
    // Effect to handle printing the full statement from a paginated view
    useEffect(() => {
@@ -375,7 +363,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             sessionStorage.removeItem('sna_view_receipt_for_id');
             const sale = salesHistory.find(s => s.id === saleIdToView);
             if (sale) {
-               setLastSale(sale);
+               openSaleDocument(sale);
                setIsReceiptOpen(true);
             }
          }
@@ -390,7 +378,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const filteredProducts = useMemo(() => {
       return products.filter(p => {
          const matchesSearch = (p.name || '').toLowerCase().includes(searchTerm.trim().toLowerCase()) ||
-            (p.sku || '').toLowerCase().includes(searchTerm.trim().toLowerCase());
+            (p.imeis || []).some(imei => imei.includes(searchTerm.trim()));
          const matchesCategory = selectedCategory === 'All' || p.category === selectedCategory;
          return matchesSearch && matchesCategory;
       });
@@ -423,6 +411,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          const matchesSearch = historySearchTerm.trim() === '' ||
             s.receiptNo.toLowerCase().includes(lowercasedTerm) ||
             (s.customerName && s.customerName.toLowerCase().includes(lowercasedTerm)) ||
+            (s.walkInName && s.walkInName.toLowerCase().includes(lowercasedTerm)) ||
             s.items.some(item => item.name.toLowerCase().includes(lowercasedTerm));
 
          return (saleTypeFilter === 'All' || getSaleType(s) === saleTypeFilter) && matchesDate && matchesCashier && matchesCategory && matchesPaymentMethod && matchesSearch;
@@ -526,6 +515,13 @@ const POS: React.FC<POSProps> = ({ user }) => {
       }
    };
 
+   const scanToCart = (code: string) => {
+      if (paymentLock.current || processingPayment) throw new Error('Wait for the current payment to finish.');
+      const result = addScannedSaleItem(products, liveCart.current, code, product => calculatePrice(product, pricingMode), !!settings?.enableNegativeStock);
+      liveCart.current = result.cart; setCart(result.cart);
+      return result.label;
+   };
+
    const updateQuantity = (productId: string, delta: number) => {
       setCart(prev => {
          return prev.map(item => {
@@ -553,6 +549,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       if (cart.length && !await confirmAction({ title: 'Clear the cart?', message: 'All items in the current cart will be removed.', confirmLabel: 'Clear cart', tone: 'danger' })) return;
       setCart([]);
       setSaleType('Cash sale');
+      setCustomerKind('Registered');
       setActiveHeldSaleId(null);
       saleIdRef.current = createId();
       setPaymentReference('');
@@ -641,6 +638,11 @@ const POS: React.FC<POSProps> = ({ user }) => {
       }
       validatePayment(total, checkoutForm.amountPaid, checkoutForm.paymentMethod, saleType);
       if (loading || dataError) throw new Error('Refresh the product list before completing this sale.');
+      if (customerKind === 'Walk-in') {
+         if (!checkoutForm.customerName.trim()) throw new Error('Enter the walk-in customer name for the receipt.');
+         if (saleType !== 'Cash sale') throw new Error('Select a registered customer for debt or partial sales.');
+         return;
+      }
       const customer = customers.find(c => c.name === checkoutForm.customerName && c.phone === checkoutForm.customerPhone);
       if (!customer?.id || !customer.phone?.trim()) throw new Error('Select a customer with a phone number before completing the sale.');
       if (customer?.status === CustomerStatus.BLACKLISTED || customer?.status === CustomerStatus.INACTIVE) throw new Error('This customer account is restricted. Select an active customer.');
@@ -663,7 +665,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             reference: collectionForm.reference.trim(), timestamp: Date.now(), user: user.username
          });
          setSalesHistory(previous => previous.map(sale => sale.id === updated.id ? updated : sale));
-         setLastSale(updated);
+         openSaleDocument(updated, 'receipt');
          setPaymentSale(null);
          setIsReceiptOpen(true);
          showToast('Payment recorded successfully.', 'success');
@@ -694,7 +696,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
             receiptNo: `${settings?.invoicePrefix || 'INV'}-${Date.now()}-${saleIdRef.current.slice(0, 8)}`,
             taxPercentage: settings?.taxEnabled ? (settings.taxPercentage ?? 18) : 0,
             paymentReference: checkoutForm.paymentMethod === 'Cash' ? '' : paymentReference.trim(),
-            customerId: customers.find(c => c.name === checkoutForm.customerName && c.phone === checkoutForm.customerPhone)?.id,
+            customerId: customerKind === 'Registered' ? customers.find(c => c.name === checkoutForm.customerName && c.phone === checkoutForm.customerPhone)?.id : undefined,
+            customerKind,
+            ...(customerKind === 'Walk-in' ? { walkInName: checkoutForm.customerName.trim() } : {}),
             saleType,
             items: cartWithWarranty,
             subtotal,
@@ -704,7 +708,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             amountPaid: checkoutForm.amountPaid,
             balance: Math.max(0, total - checkoutForm.amountPaid),
             paymentMethod: checkoutForm.paymentMethod,
-            customerName: checkoutForm.customerName,
+            customerName: customerKind === 'Walk-in' ? 'Walk-in' : checkoutForm.customerName,
             customerPhone: checkoutForm.customerPhone,
             customerType: pricingMode,
             globalDiscountPercentage: checkoutForm.discountPercentage,
@@ -720,7 +724,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             catch { showToast('Sale saved; the local held-sale list could not be cleared.', 'info'); }
             setActiveHeldSaleId(null);
          }
-         setLastSale(result);
+         openSaleDocument(result);
          setSalesHistory(prev => [result, ...prev.filter(s => s.id !== result.id)]);
          saleIdRef.current = createId();
          setPaymentReference('');
@@ -728,6 +732,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          setIsConfirmSaleModalOpen(false);
          setCart([]);
       setSaleType('Cash sale');
+      setCustomerKind('Registered');
          setCheckoutForm({
             amountPaid: 0,
             paymentMethod: 'Cash',
@@ -831,7 +836,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          const originalSale = salesHistory.find(s => s.id === saleToEdit.id);
          if (!originalSale) throw new Error('Original sale is unavailable. Refresh sales history.');
          validateItems(saleToEdit.items);
-         if (!saleToEdit.customerId) throw new Error('Select a customer before saving this sale.');
+         if (saleToEdit.customerKind === 'Walk-in' ? !saleToEdit.walkInName?.trim() : !saleToEdit.customerId) throw new Error('Select a customer or enter the walk-in name before saving this sale.');
          if (!await confirmAction({
             title: 'Save sale changes?',
             message: 'Review the updated sale below. Saving will update the invoice and adjust inventory to match its items.',
@@ -896,7 +901,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
    const downloadCSV = () => {
       if (filteredHistory.length === 0) return showToast("No data to export", 'info');
-      const headers = ['Receipt No', 'Date', 'Time', 'Cashier', 'Customer', 'Items', 'Payment Method', 'Sale Type', 'Paid (UGX)', 'Outstanding (UGX)', 'Total (UGX)'];
+      const headers = ['Invoice No', 'Date', 'Time', 'Cashier', 'Customer', 'Items', 'Payment Method', 'Sale Type', 'Paid (UGX)', 'Outstanding (UGX)', 'Total (UGX)'];
       const rows = filteredHistory.map(s => [
          s.receiptNo,
          new Date(s.timestamp).toLocaleDateString(),
@@ -920,41 +925,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
    };
 
-   const handleEmailReceipt = () => {
-      if (!lastSale) return;
-
-      const customer = customers.find(c => c.name === lastSale.customerName);
-      const email = customer?.email || '';
-
-      const subject = `Receipt #${lastSale.receiptNo} - ${settings?.businessName || 'SNA SHOP'}`;
-      const body = `Here is your receipt from ${settings?.businessName || 'SNA SHOP'}.\n\nReceipt No: ${lastSale.receiptNo}\nDate: ${new Date(lastSale.timestamp).toLocaleDateString()}\nSale type: ${getSaleType(lastSale)}\nTotal: UGX ${lastSale.total.toLocaleString()}\nPaid: UGX ${lastSale.amountPaid.toLocaleString()}\nOutstanding: UGX ${outstandingAmount(lastSale).toLocaleString()}\n\nThank you for your business!`;
-
-      window.location.href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      showToast("Opening email client...", 'info');
-   };
-
-   const handleSendReceiptWhatsApp = () => {
-      if (!lastSale) return;
-      const businessName = settings?.businessName || 'SNA Mobile Shop';
-      const total = lastSale.total.toLocaleString();
-      const receiptNo = lastSale.receiptNo;
-
-      let message = `*Receipt from ${businessName}*\n\n`;
-      message += `*Receipt No:* ${receiptNo}\n`;
-      message += `*Date:* ${new Date(lastSale.timestamp).toLocaleDateString()}\n`;
-      message += `*Total:* ${total} UGX\n\n`;
-      message += `*Sale type:* ${getSaleType(lastSale)}\n*Paid:* ${lastSale.amountPaid.toLocaleString()} UGX\n*Outstanding:* ${outstandingAmount(lastSale).toLocaleString()} UGX\n\n`;
-      message += `*Items:*\n`;
-      lastSale.items.forEach(item => {
-         message += `• ${item.name} (x${item.quantity}) - ${item.total.toLocaleString()} UGX\n`;
-      });
-      message += `\nThank you for shopping with us!`;
-
-      const encodedMessage = encodeURIComponent(message);
-      const phone = lastSale.customerPhone?.replace(/\D/g, '') || '';
-      window.open(`https://wa.me/${phone}?text=${encodedMessage}`, '_blank');
-   };
-
    const getProductIcon = (type: ProductType) => {
       switch (type) {
          case ProductType.PHONE: return <Smartphone size={24} strokeWidth={1.75} />;
@@ -966,9 +936,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
    // --- RENDER HELPERS ---
    const imeiInput = (item: SaleItem, onChange: (imeis: string[]) => void) => products.find(product => product.id === item.productId)?.type === ProductType.PHONE ? (
-      <label className="block text-xs mt-2">Phone IMEI(s) — required
+      <label className="sale-imei-field block text-xs mt-2">Phone IMEI(s) — required
          <textarea aria-label={`IMEIs for ${item.name}`} className="win-input mt-1 text-xs" rows={2} value={(item.imeis || itemImeis(item)).join('\n')} onChange={e => onChange(e.target.value.split('\n'))} placeholder={`Enter ${item.quantity} primary IMEI(s), one per phone`} />
-         <span className="text-slate-500">Use the IMEI printed on each phone. Only registered, available units can be sold.</span>
+         <span className="sale-imei-help text-slate-500">Use the IMEI printed on each phone. Only registered, available units can be sold.</span>
       </label>
    ) : null;
 
@@ -976,7 +946,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       const candidates = customers.filter(customer => sale.customerPhone
          ? normalizeCustomerPhone(customer.phone) === normalizeCustomerPhone(sale.customerPhone)
          : !!sale.customerName && customer.name === sale.customerName);
-      setSaleToEdit({ ...structuredClone(sale), customerId: sale.customerId || (candidates.length === 1 ? candidates[0].id : undefined) });
+      setSaleToEdit({ ...structuredClone(sale), customerId: sale.customerKind === 'Walk-in' ? undefined : sale.customerId || (candidates.length === 1 ? candidates[0].id : undefined) });
       setIsEditModalOpen(true);
    };
 
@@ -986,73 +956,45 @@ const POS: React.FC<POSProps> = ({ user }) => {
             Stock and sales could not be refreshed.
             <button type="button" onClick={fetchData} className="underline font-semibold">Retry</button>
          </div>}
-         {/* Search & Category Header */}
-         <button type="button" className="px-4 py-2 text-sm text-left border-b border-slate-200 font-semibold" onClick={() => { setImeiLookupOpen(true); setImeiQuery(''); void fetchData(); }}>Find sold phone by IMEI</button>
-         <div className="p-4 border-b border-slate-50 space-y-4 bg-white sticky top-0 z-10 ">
-            <div className="flex gap-4">
-               <div className="relative flex-1 group">
-                  <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                     <Search className="text-slate-400 group-focus-within:text-rose-500 transition-colors" size={20} strokeWidth={1.75} />
-                  </div>
+         <div className="pos-catalog-actions">
+            <button type="button" className="pos-scan-sale" disabled={loading || dataError || processingPayment} onClick={() => setSellScannerOpen(true)}><ScanBarcode size={18} /><span>Scan to sell</span></button>
+            <button type="button" className="pos-imei-lookup" aria-label="Find a sold phone by IMEI" onClick={() => { setImeiLookupOpen(true); }}><Smartphone size={17} /><span>IMEI lookup</span></button>
+         </div>
+         <div className="pos-catalog-tools">
+            <div className="pos-search-row">
+               <div className="pos-search-field">
+                  <Search className="pos-search-icon" size={19} aria-hidden="true" />
                   <input
                      ref={searchInputRef}
-                     className="w-full pl-12 pr-12 h-14 bg-slate-50 border-none rounded-2xl text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-rose-500/20 focus:bg-white transition-all  placeholder:text-slate-400"
-                     placeholder="Scan barcode or type item name..."
+                     aria-label="Search products by name or phone IMEI"
+                     placeholder="Search or scan"
                      value={searchTerm}
                      onChange={e => setSearchTerm(e.target.value)}
                      onKeyDown={e => {
                         if (e.key !== 'Enter') return;
                         e.preventDefault();
-                        const matches = products.filter(p => p.sku?.toLowerCase() === searchTerm.trim().toLowerCase());
-                        const product = matches.length === 1 ? matches[0] : filteredProducts.length === 1 ? filteredProducts[0] : null;
-                        if (product) { addToCart(product); setSearchTerm(''); }
-                        else showToast('Scan an exact SKU or select a product from the results.', 'info');
+                        const code = searchTerm.trim();
+                        if (/^\d{15}$/.test(code)) {
+                           try { scanToCart(code); setSearchTerm(''); } catch (error) { showToast((error as Error).message, 'error'); }
+                        } else if (filteredProducts.length === 1) { addToCart(filteredProducts[0]); setSearchTerm(''); }
+                        else showToast('Scan a phone IMEI, or select a product from the results.', 'info');
                      }}
                      autoFocus={window.matchMedia('(min-width: 1024px) and (pointer: fine)').matches}
                   />
-                  {searchTerm && (
-                     <button
-                        onClick={() => { setSearchTerm(''); searchInputRef.current?.focus(); }}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 hover:bg-slate-100 rounded-full"
-                     >
-                        <X size={18} strokeWidth={1.75} />
-                     </button>
-                  )}
+                  {searchTerm && <button type="button" aria-label="Clear product search" className="pos-search-clear" onClick={() => { setSearchTerm(''); searchInputRef.current?.focus(); }}><X size={18} /></button>}
                </div>
-               <button
-                  onClick={() => setIsHeldSalesModalOpen(true)}
-                  className="relative p-4 bg-slate-900 text-white rounded-2xl hover:bg-black transition-all    flex items-center justify-center w-14 h-14"
-                  title="Held Sales"
-               >
-                  <Pause size={24} strokeWidth={1.75} />
-                  {heldSales.length > 0 && (
-                     <span className="absolute -top-2 -right-2 w-6 h-6 bg-rose-500 text-white text-xs font-black flex items-center justify-center rounded-full border-2 border-white ">
-                        {heldSales.length}
-                     </span>
-                  )}
+               <button type="button" onClick={() => setIsHeldSalesModalOpen(true)} className="pos-held-button" title="Held sales" aria-label={`Held sales: ${heldSales.length} orders`}>
+                  <Pause size={20} />
+                  {heldSales.length > 0 && <span>{heldSales.length}</span>}
                </button>
             </div>
-
-            {/* Category Quick Filter */}
-            {/* Category Quick Filter */}
-            <div className="flex items-center gap-3 overflow-x-auto pb-2 pt-1 px-1 no-scrollbar mask-gradient-right">
-               {categories.map(cat => (
-                  <button
-                     key={cat}
-                     onClick={() => setSelectedCategory(cat)}
-                     className={`px-5 py-2.5 rounded-2xl text-xs font-black uppercase tracking-wide whitespace-nowrap transition-all border  ${selectedCategory === cat
-                        ? 'bg-slate-900 text-white border-slate-900  scale-105'
-                        : 'bg-white text-slate-500 border-slate-100 hover:border-slate-300 hover:bg-slate-50'
-                        }`}
-                  >
-                     {cat}
-                  </button>
-               ))}
+            <div className="pos-categories" role="group" aria-label="Product category">
+               {categories.map(cat => <button key={cat} type="button" aria-pressed={selectedCategory === cat} onClick={() => setSelectedCategory(cat)}>{cat}</button>)}
             </div>
          </div>
 
          {/* Product Grid */}
-         <div className="pos-product-scroll flex-1 overflow-y-auto p-6 bg-slate-50/50">
+         <div className="pos-product-scroll">
             {loading ? (
                <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4">
                   <Loader2 className="animate-spin text-rose-500" size={32} strokeWidth={1.75} />
@@ -1067,7 +1009,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   <p className="text-xs font-light text-slate-400 mt-2">Try a different search or category</p>
                </div>
             ) : (
-               <div className="pos-product-grid grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-5">
+               <div className="pos-product-grid">
                   {filteredProducts.map(product => {
                      const isLowStock = product.stockQuantity <= 5;
                      const isOut = product.stockQuantity <= 0;
@@ -1075,47 +1017,23 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      return (
                         <button
                            key={product.id}
+                           type="button"
                            onClick={() => addToCart(product)}
-                           className="pos-product-card bg-white p-4 rounded-2xl border border-slate-100    transition-all text-left group flex flex-col justify-between h-[210px] relative overflow-hidden "
+                           disabled={isOut && !settings?.enableNegativeStock}
+                           className="pos-product-card"
+                           aria-label={`${product.name}, UGX ${calculatePrice(product, pricingMode).toLocaleString()}, ${isOut ? 'out of stock' : `${product.stockQuantity} available`}`}
                         >
-                           {isOut && (
-                              <div className="absolute inset-0 bg-white/80 z-10 flex items-center justify-center backdrop-blur-[2px]">
-                                 <span className="bg-rose-600 text-white text-xs font-black px-3 py-1.5 rounded-full uppercase tracking-widest ">Sold Out</span>
-                              </div>
-                           )}
-
-                           <div>
-                              <div className="flex justify-between items-start mb-3">
-                                 <div className="w-10 h-10 rounded-xl bg-slate-50 text-slate-400 flex items-center justify-center group-hover:bg-slate-900 group-hover:text-white transition-all duration-300 ">
-                                    {getProductIcon(product.type)}
-                                 </div>
-                                 <div className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-tighter border ${isOut ? 'bg-rose-50 text-rose-600 border-rose-100' :
-                                    isLowStock ? 'bg-amber-50 text-amber-600 border-amber-100' :
-                                       'bg-emerald-50 text-emerald-600 border-emerald-100'
-                                    }`}>
-                                    {product.stockQuantity} Left
-                                 </div>
-                              </div>
-                              <h3 className="text-xs font-black text-slate-900 line-clamp-2 leading-snug group-hover:text-rose-600 transition-colors mb-1">{product.name}</h3>
-                              <div className="flex items-center gap-1.5">
-                                 <Tag size={14} className="text-slate-300" strokeWidth={1.75} />
-                                 <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest truncate">
-                                    {product.brand || 'Gen'} • {product.sku ? product.sku.substring(0, 8) : '---'}
-                                 </p>
-                              </div>
+                           <div className="pos-product-card-top">
+                              <span className="pos-product-icon" aria-hidden="true">{getProductIcon(product.type)}</span>
+                              <span className="pos-product-stock" data-stock={isOut ? 'out' : isLowStock ? 'low' : 'available'}>{isOut ? 'Out of stock' : `${product.stockQuantity.toLocaleString()} left`}</span>
                            </div>
-
-                           <div className="mt-3 pt-3 border-t border-slate-50 flex items-center justify-between">
-                              <div>
-                                 <p className="text-[11px] font-black text-slate-300 uppercase tracking-widest leading-none mb-0.5">Price</p>
-                                 <p className="text-base font-black text-slate-900">
-                                    <span className="text-xs text-slate-400 mr-0.5 font-normal">UGX</span>
-                                    {product.selling_price.toLocaleString()}
-                                 </p>
-                              </div>
-                              <div className="w-8 h-8 rounded-xl bg-slate-900 text-white flex items-center justify-center    transition-transform">
-                                 <Plus size={16} strokeWidth={1.75} />
-                              </div>
+                           <div className="pos-product-details">
+                              <h3 title={product.name}>{product.name}</h3>
+                              <p className="pos-product-meta">{[product.brand, product.type].filter(Boolean).join(' / ')}</p>
+                           </div>
+                           <div className="pos-product-card-footer">
+                              <div className="pos-product-price"><span>UGX</span><strong>{calculatePrice(product, pricingMode).toLocaleString()}</strong></div>
+                              <span className="pos-product-add" aria-hidden="true">{isOut && !settings?.enableNegativeStock ? 'Unavailable' : <><Plus size={16} /> Add</>}</span>
                            </div>
                         </button>
                      );
@@ -1132,6 +1050,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
             <button type="button" aria-pressed={mobilePane === 'catalog'} onClick={() => setMobilePane('catalog')}><PackageSearch size={18} /> Products</button>
             <button type="button" aria-pressed={mobilePane === 'order'} onClick={() => setMobilePane('order')}><ShoppingCart size={18} /> Order ({cart.reduce((sum, item) => sum + item.quantity, 0)})<span>UGX {total.toLocaleString()}</span></button>
          </nav>
+
+         {sellScannerOpen && <ImeiScanner purpose="sale" onSaleScan={scanToCart} onClose={() => { setSellScannerOpen(false); setMobilePane('order'); }} />}
 
          {/* LEFT: Product Catalog */}
          {renderCatalog()}
@@ -1326,7 +1246,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      setHasManuallyAdjustedPayment(false);
                      setCheckoutForm(previous => ({ ...previous, amountPaid: selected === 'Cash sale' ? total : 0 }));
                   }}>
-                     <option>Cash sale</option><option>Debt</option><option>Partial sale</option>
+                     <option>Cash sale</option><option disabled={customerKind === 'Walk-in'}>Debt</option><option disabled={customerKind === 'Walk-in'}>Partial sale</option>
                   </select>
                   <p className="text-xs text-slate-500">{saleType === 'Cash sale' ? 'Paid in full using cash, mobile money or bank.' : saleType === 'Debt' ? 'No payment now. The full amount remains due.' : 'Enter the amount received now. The rest remains due.'}</p>
                </section>
@@ -1397,6 +1317,19 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      <UserIcon size={16} className="text-slate-400" strokeWidth={1.75} />
                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Customer Details</h3>
                   </div>
+                  <label className="block text-sm">Customer type
+                     <select className="win-input mt-1" value={customerKind} onChange={event => {
+                        const kind = event.target.value as 'Registered' | 'Walk-in';
+                        setCustomerKind(kind); setCustomerSearch(''); setShowCustomerResults(false); setIsCreatingCustomer(false);
+                        setCheckoutForm(previous => ({ ...previous, customerName: '', customerPhone: '', ...(kind === 'Walk-in' ? { amountPaid: total } : {}) }));
+                        if (kind === 'Walk-in') { setSaleType('Cash sale'); setHasManuallyAdjustedPayment(false); }
+                     }}><option value="Registered">Registered customer</option><option value="Walk-in">Walk-in customer</option></select>
+                  </label>
+                  {customerKind === 'Walk-in' ? <div className="space-y-3">
+                     <p className="text-sm text-slate-500">For a one-time purchase. The name prints on the documents; this sale is recorded as Walk-in without creating a customer profile. Full payment is required.</p>
+                     <label className="block text-sm">Customer name (required)<input required maxLength={100} autoComplete="name" className="win-input mt-1" value={checkoutForm.customerName} onChange={event => setCheckoutForm(previous => ({ ...previous, customerName: event.target.value }))} /></label>
+                     <label className="block text-sm">Phone (optional)<input type="tel" maxLength={30} autoComplete="tel" className="win-input mt-1" value={checkoutForm.customerPhone} onChange={event => setCheckoutForm(previous => ({ ...previous, customerPhone: event.target.value }))} /></label>
+                  </div> : <>
                   <div className="flex justify-between items-center">
                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wide ml-1">Customer Details</label>
                      {!isCreatingCustomer && (
@@ -1519,11 +1452,12 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         </button>
                      </div>
                   )}
+                  </>}
                </section>
 
                <button
                   onClick={handleInitiateConfirm}
-                  disabled={processingPayment || cart.length === 0 || !checkoutForm.customerName || !checkoutForm.customerPhone}
+                  disabled={processingPayment || cart.length === 0 || !checkoutForm.customerName.trim() || (customerKind === 'Registered' && !checkoutForm.customerPhone)}
                   className="w-full py-4 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-[3px]   hover:bg-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 "
                >
                   {processingPayment ? <Loader2 className="animate-spin" strokeWidth={1.75} /> : <Check size={20} strokeWidth={1.75} />}
@@ -1543,6 +1477,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          >
             <div className="p-8 space-y-6">
                {checkoutError && <p role="alert" className="customer-form-error">{checkoutError}</p>}
+               <div className="rounded-xl border border-slate-200 p-4 text-sm"><p className="text-slate-500">{customerKind === 'Walk-in' ? 'Walk-in customer' : 'Registered customer'}</p><p className="font-semibold">{checkoutForm.customerName}</p>{checkoutForm.customerPhone && <p>{checkoutForm.customerPhone}</p>}<p className="mt-2">{saleType} / {checkoutForm.paymentMethod}</p></div>
                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
                   <div className="flex justify-between items-baseline">
                      <span className="text-sm font-bold text-slate-500 uppercase">Total Payable</span>
@@ -1620,151 +1555,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             )
          }
 
-         {/* --- RECEIPT MODAL --- */}
-         {/* --- RECEIPT MODAL --- */}
-         {isReceiptOpen && lastSale && (
-            <Modal
-               isOpen={isReceiptOpen}
-               onClose={() => setIsReceiptOpen(false)}
-               maxWidth="sm"
-               noPadding
-               contentClassName="flex-1 flex flex-col min-h-0"
-            >
-               <div className="p-4 border-b border-slate-100 flex justify-between items-center no-print shrink-0">
-                  <h3 className="text-sm font-bold text-slate-900 uppercase">Receipt Preview</h3>
-                  <div className="flex gap-2 items-center">
-                     <button
-                        onClick={() => setPrintConfig(c => ({ ...c, showLogo: !c.showLogo }))}
-                        className={`px-3 py-1 rounded-lg border text-xs font-bold uppercase transition-all ${printConfig.showLogo ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-400 border-slate-200'}`}
-                     >
-                        Logo {printConfig.showLogo ? 'ON' : 'OFF'}
-                     </button>
-                     <button onClick={() => setIsReceiptOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg"><X size={18} strokeWidth={1.75} /></button>
-                  </div>
-               </div>
-
-               <div className="flex-1 overflow-y-auto p-4 bg-slate-200 flex justify-center custom-scrollbar">
-                  <div
-                     id="pos-receipt"
-                     className={`receipt-mode bg-white p-4  text-black ${settings?.receiptFont === 'sans' ? 'font-sans' :
-                        settings?.receiptFont === 'serif' ? 'font-serif' : 'font-mono'
-                        } w-full max-w-[80mm] min-h-[100mm]`}
-                     style={{
-                        fontSize: `${settings?.receiptFontSize || 11}px`,
-                        lineHeight: settings?.receiptLineHeight || 1.3
-                     }}>
-                     {/* Header Section */}
-                     <div className="text-center mb-4">
-                        {printConfig.showLogo && (
-                           <img src={SnaiLogo} className="h-16 mx-auto mb-2 object-contain" alt="Logo" />
-                        )}
-                        <h2 className="font-bold text-sm uppercase whitespace-pre-wrap">{settings?.receiptHeader || settings?.businessName || 'SNA! MOBILE SHOP'}</h2>
-                        <p className="text-xs font-bold whitespace-pre-wrap">{settings?.address || 'KYAZANGA OPP STABEX PETROL STATION'}</p>
-                        <p className="text-xs font-bold">Tel: {settings?.phone || '+256 756337888 | +256 778413197'}</p>
-                        <div className="flex justify-center gap-4 mt-1 text-[11px] border-t border-b border-black/10 py-1">
-                           <span>Date: {new Date(lastSale.timestamp).toLocaleDateString()}</span>
-                           <span>Time: {new Date(lastSale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                        </div>
-                        <p className="text-[11px] mt-1">Receipt #: {lastSale.receiptNo}</p>
-                        <p className="text-[11px]">Server: {lastSale.cashierName}</p>
-                        <p className="text-xs">Sale type: {getSaleType(lastSale)}</p>
-                        {lastSale.customerName && <p className="text-[11px]">Customer: {lastSale.customerName}</p>}
-                     </div>
-
-                     {/* Items Table */}
-                     <div className="mb-4">
-                        <table className="w-full text-left">
-                           <thead>
-                              <tr className="border-b border-black">
-                                 <th className="py-1 text-[11px] font-bold uppercase w-[45%]">Item</th>
-                                 <th className="py-1 text-[11px] font-bold uppercase text-center w-[15%]">Qty</th>
-                                 <th className="py-1 text-[11px] font-bold uppercase text-right w-[20%]">Price</th>
-                                 <th className="py-1 text-[11px] font-bold uppercase text-right w-[20%]">Total</th>
-                              </tr>
-                           </thead>
-                           <tbody className="divide-y divide-black/10">
-                              {lastSale.items.map((item, idx) => (
-                                 <tr key={idx}>
-                                    <td className="py-1 text-[11px] font-bold leading-tight pr-1">
-                                       {item.name}
-                                       {itemImeis(item).length > 0 && <div className="text-xs break-all">IMEI: {itemImeis(item).join(', ')}</div>}
-                                    </td>
-                                    <td className="py-1 text-[11px] text-center font-bold align-top">
-                                       {item.quantity}
-                                    </td>
-                                    <td className="py-1 text-[11px] text-right align-top">
-                                       {item.price.toLocaleString()}
-                                    </td>
-                                    <td className="py-1 text-[11px] text-right font-bold align-top">
-                                       {item.total.toLocaleString()}
-                                    </td>
-                                 </tr>
-                              ))}
-                           </tbody>
-                        </table>
-                     </div>
-
-                     {/* Totals Section */}
-                     <div className="border-t border-black mb-4 pt-2 space-y-1">
-                        <div className="flex justify-between text-xs">
-                           <span>Subtotal:</span>
-                           <span>{lastSale.subtotal.toLocaleString()}</span>
-                        </div>
-                        {lastSale.discount > 0 && (
-                           <div className="flex justify-between text-xs">
-                              <span>Discount:</span>
-                              <span>-{lastSale.discount.toLocaleString()}</span>
-                           </div>
-                        )}
-                        {!!lastSale.tax && <div className="flex justify-between text-xs"><span>Tax:</span><span>{lastSale.tax.toLocaleString()}</span></div>}
-                        <div className="flex justify-between text-xs font-black border-t border-black pt-1 mt-1 border-dashed">
-                           <span>TOTAL:</span>
-                           <span>UGX {lastSale.total.toLocaleString()}</span>
-                        </div>
-                        {/* Payment Info */}
-                        <div className="flex justify-between text-sm font-semibold"><span>Outstanding:</span><span>UGX {outstandingAmount(lastSale).toLocaleString()}</span></div>
-                        {!!lastSale.payments?.length && <div className="text-xs space-y-1">
-                           <p>Initial payment ({lastSale.paymentMethod}): UGX {money(lastSale.amountPaid - lastSale.payments.reduce((sum, payment) => sum + payment.amount, 0)).toLocaleString()}</p>
-                           <p className="font-semibold">Subsequent payments</p>
-                           {lastSale.payments.map(payment => <p key={payment.id}>{new Date(payment.timestamp).toLocaleDateString()} · {payment.method} · UGX {payment.amount.toLocaleString()}{payment.reference ? ` · ${payment.reference}` : ''}</p>)}
-                        </div>}
-                        {lastSale.paymentReference && <p className="text-xs break-all">Payment reference: {lastSale.paymentReference}</p>}
-                        <div className="pt-2 mt-2 border-t border-black/20 text-[11px] space-y-0.5">
-                           <div className="flex justify-between">
-                              <span>Total paid:</span>
-                              <span>{(lastSale.amountPaid ?? 0).toLocaleString()}</span>
-                           </div>
-                           {(lastSale.amountPaid || 0) > lastSale.total && (
-                              <div className="flex justify-between font-bold">
-                                 <span>Change:</span>
-                                 <span>{((lastSale.amountPaid || 0) - lastSale.total).toLocaleString()}</span>
-                              </div>
-                           )}
-                        </div>
-                     </div>
-
-                     {/* Footer Message */}
-                     <div className="text-center text-[11px] font-bold border-t border-black pt-2">
-                        <p>{settings?.receiptFooter || 'Thank you for shopping with us!'}</p>
-                        <p className="mt-1 font-normal text-[10px] italic">Powered by SNA Mobile Shop</p>
-                        <div className="mt-3 flex justify-center">
-                           {qrCodeDataURL && <img src={qrCodeDataURL} alt="Receipt QR" className="w-16 h-16" />}
-                        </div>
-                     </div>
-                  </div>
-               </div>
-               {/* Footer Actions */}
-               <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-2 justify-end no-print shrink-0">
-                  <button className="flex-1 py-3 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold uppercase hover:bg-slate-50 flex items-center justify-center gap-2">
-                     <Mail size={16} strokeWidth={1.75} /> Email
-                  </button>
-                  <button onClick={() => printSection('#pos-receipt')} className="flex-1 py-3 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase hover:bg-black flex items-center justify-center gap-2">
-                     <Printer size={16} strokeWidth={1.75} /> Print
-                  </button>
-               </div>
-            </Modal>
-         )}
-
+         {isReceiptOpen && lastSale && <SaleDocumentDialog sale={lastSale} settings={settings} onClose={() => setIsReceiptOpen(false)} initialMode={documentMode} initialReceiptId={receiptId} id="pos-receipt" />}
 
          {/* --- SELECT PRICING TYPE MODAL --- */}
          {
@@ -1812,39 +1603,27 @@ const POS: React.FC<POSProps> = ({ user }) => {
             contentClassName="sales-history-dialog flex-1 flex flex-col min-h-0"
          >
             {/* Modal Header */}
-            <div className="sales-history-header px-8 py-6 border-b border-slate-100 flex items-center justify-between no-print bg-white shrink-0 z-20">
-               <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-slate-900 text-white rounded-2xl flex items-center justify-center ">
-                     <History size={24} strokeWidth={1.75} />
-                  </div>
-                  <div>
-                     <h2 className="text-xl font-black text-slate-900 uppercase tracking-tight">Sales & Reports</h2>
-                     <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Transaction History & Analysis</p>
+            <header className="sales-history-header no-print">
+               <div className="sales-history-heading">
+                  <div className="sales-history-heading-icon" aria-hidden="true"><History size={24} strokeWidth={1.75} /></div>
+                  <div className="sales-history-heading-copy">
+                     <h2>Sales & Reports</h2>
+                     <p>Transaction history and analysis</p>
                   </div>
                </div>
-
-               <div className="sales-history-exports flex items-center gap-2">
-                  <button
-                     onClick={() => setIsStatementModalOpen(true)}
-                     className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold uppercase hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2"
-                  >
+               <div className="sales-history-exports" role="group" aria-label="Sales report exports">
+                  <button type="button" onClick={() => setIsStatementModalOpen(true)} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2">
                      <FileText size={14} strokeWidth={1.75} /> Statement
                   </button>
-                  <button
-                     onClick={downloadCSV}
-                     className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold uppercase hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2"
-                  >
+                  <button type="button" onClick={downloadCSV} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2">
                      <FileText size={14} strokeWidth={1.75} /> CSV
                   </button>
-                  <button
-                     onClick={() => exportSectionToPDF('#sales-history-table', 'Sales_Report.pdf')}
-                     className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase hover:bg-black transition-all flex items-center gap-2  "
-                  >
+                  <button type="button" onClick={() => exportSectionToPDF('#sales-history-table', 'Sales_Report.pdf')} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-black transition-all flex items-center gap-2">
                      <Download size={14} strokeWidth={1.75} /> PDF
                   </button>
-                  <button aria-label="Close sales and reports" onClick={() => setIsHistoryModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-100 transition-all ml-2"><X size={20} strokeWidth={1.75} /></button>
                </div>
-            </div>
+               <button type="button" aria-label="Close sales and reports" onClick={() => setIsHistoryModalOpen(false)} className="sales-history-close text-slate-400 hover:text-slate-900 rounded-xl hover:bg-slate-100 transition-colors"><X size={20} strokeWidth={1.75} /></button>
+            </header>
 
             <div className="sales-history-scroll">
             {/* Filters & Summary Section */}
@@ -1989,7 +1768,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   <table className="sales-history-records w-full text-left border-collapse">
                      <thead className="bg-slate-50/80 backdrop-blur-sm sticky top-0 z-10">
                         <tr>
-                           <th className="px-6 py-4 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Receipt #</th>
+                           <th className="px-6 py-4 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Invoice #</th>
                            <th className="px-6 py-4 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Date & Time</th>
                            <th className="px-6 py-4 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100">Customer</th>
                            <th className="px-6 py-4 text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 text-center">Items</th>
@@ -2066,7 +1845,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                                 {expandedSaleId === sale.id ? <ChevronUp size={14} strokeWidth={1.75} /> : <ChevronDown size={14} strokeWidth={1.75} />}
                                              </button>
                                              <button
-                                                onClick={() => { setLastSale(sale); setIsReceiptOpen(true); }}
+                                                onClick={() => { openSaleDocument(sale, 'invoice'); }}
                                                 className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-slate-900 hover:border-slate-400 transition-all "
                                                 title="Reprint Receipt"
                                              >
@@ -2243,7 +2022,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     <thead>
                                        <tr className="border-b border-slate-200">
                                           <th className="py-2 font-bold text-slate-500 uppercase">Date</th>
-                                          <th className="py-2 font-bold text-slate-500 uppercase">Receipt #</th>
+                                          <th className="py-2 font-bold text-slate-500 uppercase">Invoice #</th>
                                           <th className="py-2 font-bold text-slate-500 uppercase">Customer</th>
                                           <th className="py-2 font-bold text-slate-500 uppercase">Cashier</th>
                                           <th className="py-2 font-bold text-slate-500 uppercase text-right">Method</th>
@@ -2413,7 +2192,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                  <thead>
                                     <tr className="border-b border-slate-200">
                                        <th className="py-2 font-bold text-slate-500 uppercase">Date</th>
-                                       <th className="py-2 font-bold text-slate-500 uppercase">Receipt #</th>
+                                       <th className="py-2 font-bold text-slate-500 uppercase">Invoice #</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase">Customer</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase">Cashier</th>
                                        <th className="py-2 font-bold text-slate-500 uppercase text-right">Method</th>
@@ -2642,9 +2421,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     </div>
                                     <div className="flex items-center gap-2">
                                        <button
-                                          onClick={() => { setLastSale(s); setIsReceiptOpen(true); }}
+                                          onClick={() => { openSaleDocument(s, 'invoice'); }}
                                           className="p-2 bg-slate-50 text-slate-400 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-all"
-                                          title="View Receipt"
+                                          title="View invoice and receipts"
                                        >
                                           <Receipt size={16} strokeWidth={1.75} />
                                        </button>
@@ -2675,37 +2454,21 @@ const POS: React.FC<POSProps> = ({ user }) => {
                <button type="submit" disabled={collecting} className="win-button-primary w-full">{collecting ? 'Saving...' : 'Record payment'}</button>
             </form>}
          </Modal>
-         <Modal isOpen={imeiLookupOpen} onClose={() => setImeiLookupOpen(false)} title="Sold phone lookup" maxWidth="2xl">
-            <label className="block text-sm">Enter the phone's primary IMEI
-               <input className="win-input mt-2" inputMode="numeric" maxLength={15} value={imeiQuery} onChange={e => setImeiQuery(e.target.value.replace(/\D/g, ''))} placeholder="15-digit IMEI" />
-            </label>
-            {loading && <p className="text-sm mt-4">Refreshing sales…</p>}
-            {dataError && <p role="alert" className="text-sm text-red-600 mt-4">Lookup data could not be refreshed. Close and retry before relying on these results.</p>}
-            {imeiQuery.length === 15 && !loading && <div className="mt-4 space-y-3">
-               {salesHistory.filter(sale => sale.items.some(item => itemImeis(item).includes(imeiQuery))).map(sale => (
-                  <div key={sale.id} className="border border-slate-200 rounded p-4 text-sm space-y-2">
-                     <p className="font-semibold">{sale.customerName} · {sale.customerPhone}</p>
-                     <p>{sale.receiptNo} · Sold {new Date(sale.timestamp).toLocaleDateString()} · Attendant: {sale.cashierName}</p>
-                     {sale.items.filter(item => itemImeis(item).includes(imeiQuery)).map(item => <p key={item.productId}>{item.name} · IMEI {imeiQuery}<br />{item.warrantyEndDate ? `Warranty ends ${new Date(item.warrantyEndDate).toLocaleDateString()}` : 'No warranty recorded'}</p>)}
-                     <p>{getSaleType(sale)} · Outstanding: UGX {outstandingAmount(sale).toLocaleString()}</p>
-                     <button className="underline" onClick={() => { setLastSale(sale); setImeiLookupOpen(false); setIsReceiptOpen(true); }}>Open original receipt</button>
-                  </div>
-               ))}
-               {!dataError && !salesHistory.some(sale => sale.items.some(item => itemImeis(item).includes(imeiQuery))) && <p>No recorded sale found for this IMEI. Older sales without IMEIs cannot be matched.</p>}
-            </div>}
-         </Modal>
+         <PhoneSaleLookup isOpen={imeiLookupOpen} onClose={() => setImeiLookupOpen(false)} history={salesHistory} onDocument={(sale, mode) => { setImeiLookupOpen(false); openSaleDocument(sale, mode); }} />
          {/* --- EDIT SALE MODAL --- */}
          {
             isEditModalOpen && saleToEdit && (
                <Modal
                   isOpen={isEditModalOpen}
                   onClose={() => setIsEditModalOpen(false)}
-                  title={`Edit Invoice #${saleToEdit.receiptNo}`}
+                  title={<div className="invoice-editor-heading"><h2>Edit invoice</h2><p>{saleToEdit.receiptNo}</p></div>}
+                  ariaLabel={`Edit invoice ${saleToEdit.receiptNo}`}
                   maxWidth="2xl"
                   noPadding
-                  contentClassName="flex-1 flex flex-col min-h-0"
+                  contentClassName="invoice-editor"
                >
-                  <form onSubmit={handleUpdateSale} className="flex-1 overflow-y-auto p-6 space-y-4">
+                  <form id="edit-sale-form" onSubmit={handleUpdateSale} className="invoice-editor-form space-y-4">
+                     {saleToEdit.customerKind === 'Walk-in' ? <div className="space-y-2"><p className="text-sm text-slate-500">Walk-in sale. No customer profile is linked.</p><label className="block text-sm">Name on documents<input required maxLength={100} className="win-input mt-1" value={saleToEdit.walkInName || ''} onChange={event => setSaleToEdit({ ...saleToEdit, walkInName: event.target.value })} /></label><label className="block text-sm">Phone (optional)<input type="tel" className="win-input mt-1" value={saleToEdit.customerPhone || ''} onChange={event => setSaleToEdit({ ...saleToEdit, customerPhone: event.target.value })} /></label></div> : <>
                      <label className="block text-sm">Customer (required)
                         <select required className="win-input mt-1" value={saleToEdit.customerId || ''} onChange={e => {
                            const customer = customers.find(c => c.id === e.target.value);
@@ -2715,6 +2478,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                            {customers.filter(c => c.status !== CustomerStatus.BLACKLISTED).map(c => <option key={c.id} value={c.id}>{c.name} · {c.phone}</option>)}
                         </select>
                      </label>
+                     </>}
                      <label className="block text-sm">Add product
                         <select className="win-input mt-1" value="" onChange={e => {
                            const product = products.find(p => p.id === e.target.value);
@@ -2724,19 +2488,18 @@ const POS: React.FC<POSProps> = ({ user }) => {
                            recalculateEditedSale(existing ? saleToEdit.items.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1, total: money((item.quantity + 1) * item.price) } : item) : [...saleToEdit.items, { productId: product.id, name: product.name, price, originalPrice: price, costPrice: product.costPrice, quantity: 1, total: price }]);
                         }}>
                            <option value="">Select a product to add</option>
-                           {products.map(product => <option key={product.id} value={product.id}>{product.name} · {product.sku} · Stock: {product.stockQuantity}</option>)}
+                           {products.map(product => <option key={product.id} value={product.id}>{product.name} · Stock: {product.stockQuantity}</option>)}
                         </select>
                      </label>
                      {saleToEdit.items.length === 0 && <p role="alert" className="text-sm text-red-600">Add at least one item before saving.</p>}
-                     <div className="space-y-4">
+                     <div className="invoice-editor-items">
                         {saleToEdit.items.map((item, idx) => (
-                           <div key={idx} className="sale-edit-line flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                              <div className="flex-1">
-                                 <p className="text-xs font-bold text-slate-900">{item.name}</p>
+                           <div key={idx} className="sale-edit-line">
+                              <div className="sale-edit-product">
+                                 <p className="sale-edit-product-name">{item.name}</p>
                                  {imeiInput(item, imeis => setSaleToEdit({ ...saleToEdit, items: saleToEdit.items.map((entry, index) => index === idx ? { ...entry, imeis } : entry) }))}
                               </div>
-                              <div className="w-24">
-                                 <label className="text-[11px] font-bold text-slate-400 uppercase">Qty</label>
+                              <label className="sale-edit-quantity">Quantity
                                  <input
                                     type="number"
                                     min="1"
@@ -2744,9 +2507,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     value={item.quantity}
                                     onChange={e => updateEditItem(idx, 'quantity', Number(e.target.value))}
                                  />
-                              </div>
-                              <div className="w-32">
-                                 <label className="text-[11px] font-bold text-slate-400 uppercase">Price</label>
+                              </label>
+                              <label className="sale-edit-price">Unit price
                                  <input
                                     type="number"
                                     min="0"
@@ -2754,30 +2516,30 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                     value={item.price}
                                     onChange={e => updateEditItem(idx, 'price', Number(e.target.value))}
                                  />
-                              </div>
-                              <button type="button" aria-label={`Remove ${item.name}`} className="p-2 text-red-600" onClick={async () => {
+                              </label>
+                              <button type="button" aria-label={`Remove ${item.name}`} className="sale-edit-remove" onClick={async () => {
                                  if (await confirmAction({ title: 'Remove sale item?', message: `Remove ${item.name} from this invoice? Stock changes apply only when you save the sale.`, confirmLabel: 'Remove item', tone: 'danger' })) recalculateEditedSale(saleToEdit.items.filter((_, index) => index !== idx));
                               }}><Trash2 size={16} /></button>
-                              <div className="w-24 text-right">
-                                 <label className="text-[11px] font-bold text-slate-400 uppercase block">Total</label>
-                                 <span className="text-xs font-black text-slate-900">{item.total.toLocaleString()}</span>
+                              <div className="sale-edit-total">
+                                 <span>Line total</span>
+                                 <strong>UGX {item.total.toLocaleString()}</strong>
                               </div>
                            </div>
                         ))}
                      </div>
-                     <div className="flex justify-end pt-4 border-t border-slate-100">
+                     <div className="invoice-editor-total">
                         <div className="text-right">
                            <p className="text-xs font-bold text-slate-500 uppercase">New Total</p>
                            <p className="text-2xl font-black text-slate-900">UGX {saleToEdit.total.toLocaleString()}</p>
                         </div>
                      </div>
-                     <div className="pt-2">
-                        <button type="submit" disabled={isUpdating || saleToEdit.items.length === 0 || !saleToEdit.customerId} className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-sm  hover:bg-black transition-all flex items-center justify-center gap-2 disabled:opacity-50">
+                  </form>
+                  <div className="invoice-editor-footer">
+                        <button type="submit" form="edit-sale-form" disabled={isUpdating || saleToEdit.items.length === 0 || (saleToEdit.customerKind === 'Walk-in' ? !saleToEdit.walkInName?.trim() : !saleToEdit.customerId)} className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-sm  hover:bg-black transition-all flex items-center justify-center gap-2 disabled:opacity-50">
                            {isUpdating && <Loader2 className="animate-spin" size={14} strokeWidth={1.75} />}
                            {isUpdating ? 'Updating...' : 'Save Changes & Update Stock'}
                         </button>
-                     </div>
-                  </form>
+                  </div>
                </Modal>
             )
          }

@@ -310,7 +310,7 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate, user }) => {
       const limit = searchFilter === 'All' ? 5 : 10;
 
       return {
-         products: showProducts ? rawProducts.filter(p => p.name.toLowerCase().includes(term) || p.sku.toLowerCase().includes(term)).slice(0, limit) : [],
+         products: showProducts ? rawProducts.filter(p => p.name.toLowerCase().includes(term)).slice(0, limit) : [],
          sales: showSales ? allSales.filter(s => s.receiptNo.toLowerCase().includes(term) || (s.customerName && s.customerName.toLowerCase().includes(term))).slice(0, limit) : [],
          repairs: showRepairs ? rawRepairs.filter(r => r.jobCardNo.toLowerCase().includes(term) || r.customerName.toLowerCase().includes(term) || r.deviceModel.toLowerCase().includes(term)).slice(0, limit) : []
       };

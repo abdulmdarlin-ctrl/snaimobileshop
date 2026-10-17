@@ -8,14 +8,11 @@ import { Product, User, UserRole, ProductType, AppSettings } from '../types';
 import {
    Plus, Search, Edit2, Trash2, X, Package,
    Filter, ChevronDown, Check, XCircle, AlertCircle,
-   Barcode, Printer,
    Box, Smartphone, Headphones, Battery, DollarSign, TrendingDown,
    Loader2, ArrowRight, MapPin, Tag, RefreshCw, Layers, AlertTriangle, AlertOctagon, MoreHorizontal
 } from 'lucide-react';
 import { useToast } from './Toast';
 import Modal from './Modal';
-import { printSection } from '../utils/printExport';
-import JsBarcode from 'jsbarcode';
 import { validateImeis } from '../utils/imei';
 
 interface InventoryProps { user: User; }
@@ -46,15 +43,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
    const [productToDelete, setProductToDelete] = useState<Product | null>(null);
    const [isDeleting, setIsDeleting] = useState(false);
 
-   // Barcode Print State
-   const [isBarcodeModalOpen, setIsBarcodeModalOpen] = useState(false);
-   const [productForBarcode, setProductForBarcode] = useState<Product | null>(null);
-   const [barcodeLabelCount, setBarcodeLabelCount] = useState(1);
-   const [labelSize, setLabelSize] = useState<'50x30' | '40x20'>('50x30');
-   const [showPrice, setShowPrice] = useState(true);
-   const [showLogo, setShowLogo] = useState(true);
-   const [showDate, setShowDate] = useState(true);
-
    // RBAC Permissions
    const canEdit = [UserRole.ADMIN, UserRole.MANAGER].includes(user.role);
    const canDelete = user.role === UserRole.ADMIN;
@@ -62,7 +50,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
    const initialForm: Partial<Product> = {
       name: '',
-      sku: '',
       brand: '',
       type: ProductType.OTHERS,
       category: '',
@@ -103,13 +90,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
       setIsSaving(true);
       try {
          if (!formData.name) throw new Error("Product Name Required");
-         if (!formData.sku) throw new Error("SKU Required");
-
-         // Auto-generate SKU if empty (though handled by validation above, good to have logic)
-         if (!formData.sku) {
-            formData.sku = `SKU-${Date.now()}`;
-         }
-
          // Default category if missing (since field is hidden)
          const dataToSave = {
             ...formData,
@@ -205,7 +185,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
             ...initialForm,
             reorderLevel: settings?.globalLowStockThreshold || 5,
             brand: '',
-            sku: `SKU-${Math.floor(Math.random() * 100000)}` // Auto-gen suggestion
          });
       }
       setIsModalOpen(true);
@@ -222,44 +201,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
       setIsStockAdjustModalOpen(true);
    };
 
-   const openBarcodeModal = (product: Product) => {
-      setProductForBarcode(product);
-      setBarcodeLabelCount(product.stockQuantity > 0 ? product.stockQuantity : 1);
-      setIsBarcodeModalOpen(true);
-   };
-
-   const handlePrintBarcodes = () => {
-      if (!productForBarcode) return;
-      // Use a timeout to ensure the DOM is updated with all SVGs before printing
-      setTimeout(() => {
-         printSection('#barcode-print-area', () => { });
-      }, 100);
-   };
-
-   // Generate Barcodes when modal opens or count changes
-   useEffect(() => {
-      if (isBarcodeModalOpen && productForBarcode) {
-         // Tiny timeout to allow DOM to render SVGs first
-         const timer = setTimeout(() => {
-            try {
-               const height = labelSize === '50x30' ? 35 : 25;
-               JsBarcode(".barcode-sku", productForBarcode.sku, {
-                  format: "CODE128",
-                  width: labelSize === '50x30' ? 1.8 : 1.4, // Adjust density
-                  height: height,
-                  displayValue: false, // We display standard text below instead for better styling
-                  margin: 0,
-                  lineColor: "#000000"
-               });
-            } catch (e) {
-               console.error("Barcode generation failed", e);
-            }
-         }, 100); // Increased timeout slightly to ensure DOM is ready after re-renders
-         return () => clearTimeout(timer);
-      }
-   }, [isBarcodeModalOpen, productForBarcode, barcodeLabelCount, labelSize, showPrice, showLogo, showDate]);
-
-
    const lowStockCount = useMemo(() =>
       products.filter(p => p.stockQuantity <= p.reorderLevel).length
       , [products]);
@@ -269,12 +210,12 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
       , [products]);
 
    const inventoryStats = useMemo(() => {
-      const totalSKUs = products.length;
+      const totalProducts = products.length;
       const totalUnits = products.reduce((sum, p) => sum + p.stockQuantity, 0);
       const totalValue = products.reduce((sum, p) => sum + (p.stockQuantity * (p.costPrice || 0)), 0);
 
       return {
-         totalSKUs,
+         totalProducts,
          totalUnits,
          totalValue,
          lowStockItems: lowStockCount,
@@ -286,7 +227,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
       return products.filter(p => {
          const matchesSearch =
             p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            p.sku.toLowerCase().includes(searchTerm.toLowerCase()) || (p.imeis || []).some(imei => imei.includes(searchTerm.trim()));
+            (p.imeis || []).some(imei => imei.includes(searchTerm.trim()));
 
          let matchesType = true;
          if (filterType === 'Low Stock') {
@@ -329,7 +270,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                </div>
                <input
                   type="text"
-                  placeholder="Search products by name or SKU..."
+                  placeholder="Search products by name or IMEI..."
                   className="w-full bg-slate-50 border-none rounded-xl py-2.5 pl-10 pr-4 text-sm font-normal text-slate-900 placeholder:text-slate-400 focus:ring-2 focus:ring-rose-500/20 focus:bg-white transition-all "
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
@@ -379,7 +320,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
             <div className="bg-white p-5 rounded-2xl  border border-slate-100 flex items-center justify-between  transition-shadow">
                <div>
                   <p className="text-sm text-slate-500 font-normal mb-1">Total Products</p>
-                  <h3 className="text-2xl font-bold text-slate-800">{inventoryStats.totalSKUs}</h3>
+                  <h3 className="text-2xl font-bold text-slate-800">{inventoryStats.totalProducts}</h3>
                   <p className="text-xs text-slate-400 mt-1 font-normal">
                      {inventoryStats.totalUnits.toLocaleString()} Units in Stock
                   </p>
@@ -481,7 +422,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                           <p className="text-sm font-bold text-slate-900 truncate max-w-[200px]">{product.name}</p>
                                           <p className="text-xs text-slate-400">
                                              {product.brand && <span className="font-bold uppercase">{product.brand}</span>}
-                                             <span className="font-mono">{product.brand && ' • '}{product.sku}</span>
                                              {product.warrantyPeriod && (
                                                 <span className="font-bold text-slate-500"> • {product.warrantyPeriod}</span>
                                              )}
@@ -540,13 +480,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                                              >
                                                 <Edit2 size={16} strokeWidth={1.75} />
                                              </button>
-                                             <button
-                                                onClick={() => openBarcodeModal(product)}
-                                                className="p-1.5 text-slate-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
-                                                title="Print Barcodes"
-                                             >
-                                                <Barcode size={16} strokeWidth={1.75} />
-                                             </button>
+
                                           </>
                                        )}
                                        {canDelete && (
@@ -595,10 +529,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                               <label className="win-label">Product Name</label>
                               <input required className="win-input h-10 font-bold" placeholder="e.g. iPhone 13" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} />
                            </div>
-                           <div className="space-y-1.5">
-                              <label className="win-label">SKU / Barcode</label>
-                              <input required className="win-input h-10 font-mono" placeholder="SKU-..." value={formData.sku} onChange={e => setFormData({ ...formData, sku: e.target.value })} />
-                           </div>
+
                            <div className="space-y-1.5">
                               <label className="win-label">Brand (Optional)</label>
                               <input className="win-input h-10" placeholder="e.g. Apple, Samsung" value={formData.brand || ''} onChange={e => setFormData({ ...formData, brand: e.target.value })} />
@@ -709,7 +640,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
                            <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-4">
                               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Product</p>
                               <p className="font-bold text-slate-900 text-sm">{stockAdjustProduct.name}</p>
-                              <p className="text-xs text-slate-400 font-mono mt-0.5">{stockAdjustProduct.sku}</p>
                            </div>
 
                            <div className="grid grid-cols-2 gap-4">
@@ -859,96 +789,6 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
             )}
          </Modal>
 
-         {/* --- BARCODE PRINT MODAL --- */}
-         <Modal
-            isOpen={isBarcodeModalOpen}
-            onClose={() => setIsBarcodeModalOpen(false)}
-            title={productForBarcode ? 'Print Barcode Labels' : 'Print Labels'}
-            maxWidth="2xl"
-         >
-            {productForBarcode && (
-               <>
-                  <div className="space-y-6">
-                     <div className="space-y-1.5 no-print">
-                        <label className="win-label">Number of Labels</label>
-                        <div className="flex items-center gap-4">
-                           <input
-                              type="number"
-                              min="1"
-                              max="100" // Limit to prevent excessive rendering
-                              className="win-input h-10 w-32 font-bold text-center"
-                              value={barcodeLabelCount}
-                              onChange={e => setBarcodeLabelCount(Number(e.target.value))}
-                           />
-                           <p className="text-xs text-slate-400">Standard 50x30mm Label Format</p>
-                        </div>
-                     </div>
-
-                     {/* PRINT AREA */}
-                     <div id="barcode-print-area" className="grid grid-cols-2 gap-4 p-4 border border-dashed border-slate-200 rounded-xl bg-slate-50 print:block print:p-0 print:bg-white print:border-none">
-                        {Array.from({ length: barcodeLabelCount || 1 }).map((_, index) => (
-                           <div key={index} className="bg-white p-2 rounded-lg  border border-slate-100 flex flex-col items-center justify-center text-center  print:border-none print:p-1 print:page-break-after-avoid print:break-inside-avoid print:inline-block print:m-1" style={{ width: '50mm', height: '30mm', overflow: 'hidden' }}>
-
-                              {/* Header: Business Name */}
-                              {(settings?.businessName || 'SNA Mobile') && (
-                                 <p className="text-[10px] font-black text-slate-900 uppercase leading-none mb-0.5 tracking-wider truncate w-full">
-                                    {settings?.businessName || 'SNA Mobile'}
-                                 </p>
-                              )}
-
-                              {/* Product Name */}
-                              <p className="text-xs font-bold text-slate-700 leading-tight truncate w-full px-1 mb-0.5">
-                                 {productForBarcode.name}
-                              </p>
-
-                              {/* Barcode SVG */}
-                              <div className="h-[35px] flex items-center justify-center w-full overflow-hidden my-0.5">
-                                 <svg className="barcode-sku w-full h-full"></svg>
-                              </div>
-
-                              {/* Footer: SKU & Price */}
-                              <div className="flex items-end justify-between w-full px-1 mt-0.5">
-                                 <p className="text-[10px] font-mono text-slate-500">{productForBarcode.sku}</p>
-                                 <p className="text-[12px] font-black text-slate-900 leading-none">
-                                    <span className="text-[10px] align-top mr-0.5">UGX</span>
-                                    {productForBarcode.selling_price.toLocaleString()}
-                                 </p>
-                              </div>
-                           </div>
-                        ))}
-                     </div>
-                  </div>
-
-                  <div className="pt-6 border-t border-slate-100 mt-6 flex gap-3 justify-end no-print">
-                     <button onClick={() => setIsBarcodeModalOpen(false)} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-slate-100 transition-all">Cancel</button>
-                     <button onClick={handlePrintBarcodes} className="px-6 py-2.5 bg-purple-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide  hover:bg-purple-700 transition-all flex items-center gap-2">
-                        <Printer size={14} strokeWidth={1.75} /> Print Labels
-                     </button>
-                  </div>
-               </>
-            )}
-         </Modal>
-
-         {/* Barcode Generation Effect */}
-         {isBarcodeModalOpen && productForBarcode && (
-            <style>{`
-               @media print {
-                  body > #root > div { display: none; }
-                  #barcode-print-area {
-                     display: grid !important;
-                     grid-template-columns: repeat(3, 1fr) !important;
-                     gap: 8px !important;
-                     padding: 8px !important;
-                     width: 100% !important;
-                     height: auto !important;
-                     position: absolute !important;
-                     top: 0 !important;
-                     left: 0 !important;
-                     background: white !important;
-                  }
-               }
-            `}</style>
-         )}
       </div>
    );
 };

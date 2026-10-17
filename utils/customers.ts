@@ -17,6 +17,7 @@ export const getCustomerSales = (sales: Sale[], customer: Customer, customers: C
     const uniquePhone = !!phone && customers.filter(c => normalizeCustomerPhone(c.phone) === phone).length === 1;
     const uniqueName = !!name && customers.filter(c => (c.name || '').trim().toLowerCase() === name).length === 1;
     return sales.filter(sale => {
+        if (sale.customerKind === 'Walk-in') return false;
         if (sale.customerId) return sale.customerId === customer.id;
         const salePhone = normalizeCustomerPhone(sale.customerPhone);
         if (phone && salePhone) {

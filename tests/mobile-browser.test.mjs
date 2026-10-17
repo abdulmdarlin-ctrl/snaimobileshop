@@ -26,16 +26,17 @@ function load(relative, dependencies = {}, crypto = localCrypto) {
 test('phone sales renders on local HTTP without crypto.randomUUID', () => {
     const ids = load('../utils/id.ts');
     const pos = load('../components/POS.tsx', {
-        '../utils/id': ids, '../utils/databaseErrors': load('../utils/databaseErrors.ts'),
+        '../utils/id': ids, '../utils/scanToSell': {}, './ImeiScanner': { default: () => null, __esModule: true }, '../utils/databaseErrors': load('../utils/databaseErrors.ts'),
         '../utils/dialog': {}, '../db': {}, '../utils/imei': load('../utils/imei.ts'),
         '../utils/pos': load('../utils/pos.ts'), '../utils/customers': load('../utils/customers.ts'),
         '../types': load('../types.ts'), '../utils/printExport': {},
         './Toast': { useToast: () => ({ showToast() {} }) }, './Modal': { default: () => null, __esModule: true },
-        'qrcode': {}, '../assets/SNAI-LOGO.png': 'logo.png',
+        './SaleDocumentDialog': { default: () => null, __esModule: true }, './PhoneSaleLookup': { default: () => null, __esModule: true }, '../utils/saleDocuments': {}, '../assets/SNAI-LOGO.png': 'logo.png',
     });
     const html = renderToString(React.createElement(pos.default, { user: { id: 'attendant', username: 'Attendant', role: 'Admin' } }));
     assert.match(html, /Products/);
     assert.match(html, /Order/);
+    assert.match(html, /Scan to sell/);
 });
 
 test('UUID fallback preserves v4 format and generates distinct transaction IDs', () => {
@@ -43,4 +44,17 @@ test('UUID fallback preserves v4 format and generates distinct transaction IDs',
     const ids = Array.from({ length: 200 }, () => createId());
     assert.equal(new Set(ids).size, ids.length);
     for (const id of ids) assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});
+
+test('documents distinguish goods invoiced from individual payments and print the walk-in name without a QR', () => {
+    const posTools = load('../utils/pos.ts');
+    const docs = load('../utils/saleDocuments.ts', { './pos': posTools });
+    const Document = load('../components/SaleDocument.tsx', { '../utils/pos': posTools, '../utils/imei': load('../utils/imei.ts'), '../utils/saleDocuments': docs, '../assets/SNAI-LOGO.png': 'logo.png' }).default;
+    const sale = { id: 's1', receiptNo: 'INV-1', customerKind: 'Walk-in', walkInName: 'Visitor Name', customerName: 'Walk-in', items: [{ productId: 'p1', name: 'Phone', quantity: 1, price: 100, total: 100, imeis: ['490154203237518'] }], subtotal: 100, discount: 0, total: 100, amountPaid: 40, paymentMethod: 'Cash', timestamp: 10, cashierName: 'Cashier' };
+    const render = (mode, value = sale) => renderToString(React.createElement(Document, { sale: value, settings: null, mode }));
+    const invoice = render('invoice');
+    assert.match(invoice, /SALES INVOICE/); assert.match(invoice, /Visitor Name/); assert.match(invoice, /490154203237518/); assert.match(invoice, /Invoice total/); assert.match(invoice, /UGX 100/); assert.match(invoice, /UGX 60/);
+    const receipt = render('receipt');
+    assert.match(receipt, /PAYMENT RECEIPT/); assert.match(receipt, /RCT-s1-initial/); assert.match(receipt, /UGX 40/); assert.doesNotMatch(receipt, /Invoice total|QR|SNA-VERIFY|data:image/);
+    assert.match(render('receipt', { ...sale, amountPaid: 0 }), /No payment has been received/);
 });

@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import ts from 'typescript';
 import JsBarcode from 'jsbarcode';
+import QRCode from 'qrcode';
 
 const source = await readFile(new URL('../utils/barcodeWorkerClient.ts', import.meta.url), 'utf8');
 const transpile = (source, module = ts.ModuleKind.ESNext) => ts.transpileModule(source, { compilerOptions: { module, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -114,6 +115,16 @@ test('production worker reads real barcode crops off the main thread and continu
         for (let i = 0; i < 5; i++) assert.equal(await client.decode(edgeFrame()), null);
         assert.equal(await client.decode(edgeFrame()), '490154203237518');
         assert.equal(await client.decode(edgeFrame()), '490154203237518', 'thorough reads receive an immediate confirmation sample');
+        assert.equal(await client.decode(barcodeImage('490154203237518'), 'sale'), '490154203237518');
+        assert.equal(await client.decode(barcodeImage('5901234123457', 'EAN13'), 'sale'), null);
+        const payload = JSON.stringify({ imei1: ['490154203237518', '354910793340623'] });
+        const qr = QRCode.create(payload), size = qr.modules.size, width = (size + 8) * 4;
+        const data = new Uint8ClampedArray(width * width * 4).fill(255);
+        for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (qr.modules.get(y, x)) for (let dy = 0; dy < 4; dy++) for (let dx = 0; dx < 4; dx++) {
+            const offset = (((y + 4) * 4 + dy) * width + (x + 4) * 4 + dx) * 4;
+            data[offset] = data[offset + 1] = data[offset + 2] = 0;
+        }
+        assert.equal(await client.decode({ width, height: width, data }, 'sheet'), payload, '2D supplier codes preserve the encoded IMEI list');
     } finally { client.dispose(); }
 });
 

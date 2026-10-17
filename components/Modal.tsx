@@ -7,13 +7,14 @@ interface ModalProps {
     isOpen: boolean;
     onClose: () => void;
     title?: React.ReactNode;
+    ariaLabel?: string;
     children: React.ReactNode;
     maxWidth?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl' | '7xl' | 'full';
     noPadding?: boolean;
     contentClassName?: string;
 }
 
-const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidth = 'md', noPadding = false, contentClassName = 'overflow-y-auto custom-scrollbar' }) => {
+const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, ariaLabel, children, maxWidth = 'md', noPadding = false, contentClassName = 'overflow-y-auto custom-scrollbar' }) => {
     const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
@@ -62,7 +63,7 @@ const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, maxWidt
             <div className="absolute inset-0" onClick={onClose} aria-hidden="true" />
 
             {/* Modal Content */}
-            <div role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : 'Dialog'} className={`app-modal-panel relative w-full ${maxWidthClasses[maxWidth]} bg-white rounded-xl flex flex-col max-h-[90vh] border border-slate-200 overflow-hidden`}>
+            <div role="dialog" aria-modal="true" aria-label={ariaLabel || (typeof title === 'string' ? title : 'Dialog')} className={`app-modal-panel relative w-full ${maxWidthClasses[maxWidth]} bg-white rounded-xl flex flex-col max-h-[90vh] border border-slate-200 overflow-hidden`}>
                 {title && (
                     <div className="app-modal-heading flex items-center justify-between gap-3 p-6 border-b border-slate-100 bg-slate-50/50 shrink-0">
                         {typeof title === 'string' ? (

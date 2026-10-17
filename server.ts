@@ -40,7 +40,6 @@ const initDb = async () => {
     await client.query(`
       CREATE TABLE IF NOT EXISTS products (
         id SERIAL PRIMARY KEY,
-        sku VARCHAR(50) UNIQUE NOT NULL,
         name VARCHAR(255) NOT NULL,
         type VARCHAR(50) NOT NULL,
         brand VARCHAR(100),
@@ -56,6 +55,13 @@ const initDb = async () => {
         warranty_period VARCHAR(50)
       )
     `);
+
+    // Accept products without codes while retaining historical data on older SQL installations.
+    await client.query(`DO $$ BEGIN
+      IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'products' AND column_name = 'sku') THEN
+        ALTER TABLE products ALTER COLUMN sku DROP NOT NULL;
+      END IF;
+    END $$`);
 
     // Stock Logs Table
     await client.query(`
@@ -193,8 +199,8 @@ app.use(express.json() as any);
 app.get('/api/v1/products', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, sku, name, type, brand, category, cost_price as "costPrice", middle_man_price as "middleManPrice",
-      selling_price, min_selling_price as "minSellingPrice", stock_quantity as "stockQuantity", 
+      SELECT id, name, type, brand, category, cost_price as "costPrice", middle_man_price as "middleManPrice",
+      selling_price, min_selling_price as "minSellingPrice", stock_quantity as "stockQuantity",
       reorder_level as "reorderLevel", supplier_id as "supplierId", location, warranty_period as "warrantyPeriod"
       FROM products ORDER BY id ASC
     `);
@@ -204,12 +210,12 @@ app.get('/api/v1/products', async (req, res) => {
 });
 
 app.post('/api/v1/products', async (req, res) => {
-  const { sku, name, type, brand, category, costPrice, middleManPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
+  const { name, type, brand, category, costPrice, middleManPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
   try {
     const result = await pool.query(
-      `INSERT INTO products (sku, name, type, brand, category, cost_price, middle_man_price, selling_price, min_selling_price, stock_quantity, reorder_level, supplier_id, location, warranty_period) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id`,
-      [sku, name, type, brand, category, costPrice, middleManPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod]
+      `INSERT INTO products (name, type, brand, category, cost_price, middle_man_price, selling_price, min_selling_price, stock_quantity, reorder_level, supplier_id, location, warranty_period)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id`,
+      [name, type, brand, category, costPrice, middleManPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod]
     );
     res.json({ id: result.rows[0].id.toString(), ...req.body });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -217,13 +223,12 @@ app.post('/api/v1/products', async (req, res) => {
 
 app.put('/api/v1/products/:id', async (req, res) => {
   const { id } = req.params;
-  const { sku, name, type, brand, category, costPrice, middleManPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
+  const { name, type, brand, category, costPrice, middleManPrice, selling_price, minSellingPrice, stockQuantity, reorderLevel, supplierId, location, warrantyPeriod } = req.body;
   try {
     // Build dynamic query
     const fields = [];
     const values = [];
     let idx = 1;
-    if (sku !== undefined) { fields.push(`sku=$${idx++}`); values.push(sku); }
     if (name !== undefined) { fields.push(`name=$${idx++}`); values.push(name); }
     if (type !== undefined) { fields.push(`type=$${idx++}`); values.push(type); }
     if (brand !== undefined) { fields.push(`brand=$${idx++}`); values.push(brand); }
@@ -255,10 +260,10 @@ app.delete('/api/v1/products/:id', async (req, res) => {
 app.get('/api/v1/sales', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT id, receipt_no as "receiptNo", items, subtotal, discount, tax, total, 
+      SELECT id, receipt_no as "receiptNo", items, subtotal, discount, tax, total,
       amount_paid as "amountPaid", balance, payment_method as "paymentMethod",
       cashier_name as "cashierName", customer_name as "customerName", customer_type as "customerType",
-      customer_phone as "customerPhone", timestamp 
+      customer_phone as "customerPhone", timestamp
       FROM sales ORDER BY timestamp DESC
     `);
     const sales = result.rows.map(s => ({ ...s, id: s.id.toString(), subtotal: Number(s.subtotal), total: Number(s.total) }));
@@ -271,7 +276,7 @@ app.post('/api/v1/sales', async (req, res) => {
   try {
     const result = await pool.query(`
       INSERT INTO sales (receipt_no, items, subtotal, discount, tax, total, amount_paid, balance, payment_method, cashier_name, customer_name, customer_phone, customer_type, timestamp)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING id
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id
     `, [s.receiptNo, JSON.stringify(s.items), s.subtotal, s.discount, s.tax, s.total, s.amountPaid, s.balance, s.paymentMethod, s.cashierName, s.customerName, s.customerPhone, s.customerType, s.timestamp]);
     res.json({ id: result.rows[0].id.toString(), ...s });
   } catch (err) { res.status(500).json({ error: err.message }); }

@@ -52,7 +52,6 @@ export interface User {
 export interface Product {
   imeis?: string[]; // Available units: one primary IMEI per physical phone.
   id?: string;
-  sku: string;
   name: string;
   type: ProductType;
   brand?: string;
@@ -176,10 +175,15 @@ export interface SaleItem {
 export type SaleType = 'Cash sale' | 'Debt' | 'Partial sale';
 
 export interface Sale {
+  customerKind?: 'Registered' | 'Walk-in';
+  walkInName?: string;
+  invoiceNo?: string;
+  initialReceiptNo?: string;
+  initialBalanceAfter?: number;
   saleType?: SaleType;
   amountDue?: number;
   changeDue?: number;
-  payments?: { id: string; amount: number; method: string; reference: string; timestamp: number; user: string }[];
+  payments?: { id: string; receiptNo?: string; balanceAfter?: number; amount: number; method: string; reference: string; timestamp: number; user: string }[];
   id?: string;
   customerId?: string;
   taxPercentage?: number;
@@ -285,7 +289,6 @@ export interface AppSettings {
   receiptShowLogo?: boolean;
   receiptShowTaxDetail?: boolean;
   receiptShowCashier?: boolean;
-  receiptShowQRCode?: boolean;
   receiptFont?: 'monospace' | 'sans' | 'serif';
   receiptFontSize?: number;
   receiptLineHeight?: number;

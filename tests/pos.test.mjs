@@ -83,7 +83,7 @@ function database() {
             return result;
         }
     };
-    const { db, safeStringify } = load('../db.ts', { 'firebase/firestore': firestore, './firebaseConfig': { dbInstance: {} }, './types': {}, './utils/pos': pos, './utils/validation': validation, './utils/imei': imeiTools, './utils/customers': customerTools });
+    const { db, safeStringify } = load('../db.ts', { 'firebase/firestore': firestore, './firebaseConfig': { dbInstance: {} }, './types': {}, './utils/pos': pos, './utils/saleDocuments': load('../utils/saleDocuments.ts', { './pos': pos }), './utils/validation': validation, './utils/imei': imeiTools, './utils/customers': customerTools });
     const sale = { id: 's1', receiptNo: 'INV-1', items: [item()], amountPaid: 100, paymentMethod: 'Cash', cashierName: 'cashier', timestamp: 1, customerId: 'c1', customerName: 'Alice', customerPhone: '0700123456' };
     return { db, safeStringify, records, sale, reads, subscriptions, setReadError: error => { readError = error; }, setCommitError: error => { commitError = error; }, fail: () => { failCommit = true; } };
 }
@@ -112,7 +112,7 @@ test('failed commit leaves sale and stock unchanged', async () => {
 test('editing uses stock delta and rejects stale revisions', async () => {
     const { db, records, sale } = database();
     const original = await db.commitSale(sale);
-    await db.commitSale({ ...original, items: [item(2)], amountPaid: 200 }, false, 'edit');
+    await db.commitSale({ ...original, items: [item(2)], saleType: 'Partial sale' }, false, 'edit');
     assert.equal(records.get('products/p1').stockQuantity, 1);
     await assert.rejects(db.commitSale(original, false, 'edit'), /changed elsewhere/);
     assert.equal(records.get('products/p1').stockQuantity, 1);
@@ -186,7 +186,7 @@ test('sale editing can replace items and adjusts stock for both products', async
     await assert.rejects(db.commitSale({ ...saved, items: [] }, false, 'edit'), /at least one/);
 });
 test('shared validation rejects blank required fields and invalid amounts', () => {
-    assert.throws(() => validation.validateRecord('products', { name: ' ', sku: 'A' }), /required/);
+    assert.throws(() => validation.validateRecord('products', { name: ' ' }), /required/);
     assert.throws(() => validation.validateRecord('customers', { name: 'Alice', phone: '' }), /required/);
     assert.throws(() => validation.validateRecord('expenses', { description: 'Fuel', category: 'Travel', amount: NaN }), /valid number/);
     assert.throws(() => validation.validateRecord('products', { stockQuantity: 1.5 }, true), /whole number/);
@@ -222,12 +222,12 @@ test('phone sale rejects missing/unregistered IMEIs; edit swaps units and deleti
 
 test('inventory requires registered IMEIs and rejects cross-product duplicates and sold units', async () => {
     const { db, records } = database();
-    records.set('products/p1', { name: 'Phone', sku: 'PHONE', type: 'Phone', stockQuantity: 0, imeis: [] });
+    records.set('products/p1', { name: 'Phone', type: 'Phone', stockQuantity: 0, imeis: [] });
     await assert.rejects(db.products.update('p1', { stockQuantity: 1 }), /IMEI/);
     const imei = '490154203237518';
     await db.products.update('p1', { stockQuantity: 1, imeis: [imei] });
     assert.equal(records.get(`phoneImeis/${imei}`).productId, 'p1');
-    records.set('products/p2', { name: 'Other phone', sku: 'OTHER', type: 'Phone', stockQuantity: 0, imeis: [] });
+    records.set('products/p2', { name: 'Other phone', type: 'Phone', stockQuantity: 0, imeis: [] });
     await assert.rejects(db.products.update('p2', { stockQuantity: 1, imeis: [imei] }), /already registered/);
     records.get(`phoneImeis/${imei}`).saleId = 'sold';
     await assert.rejects(db.products.update('p1', { stockQuantity: 1, imeis: [imei] }), /sold/);
@@ -462,4 +462,114 @@ test('checkout refresh reads only distinct sold products', async () => {
     const products = await db.products.getMany(['p1', 'p1']);
     assert.equal(products.length, 1);
     assert.deepEqual(reads, ['products/p1']);
+});
+
+const documents = load('../utils/saleDocuments.ts', { './pos': pos });
+test('walk-in cash sales store the entered name separately without a customer profile', async () => {
+    const { db, sale, records } = database();
+    const saved = await db.commitSale({ ...sale, customerKind: 'Walk-in', customerId: undefined, customerName: '', customerPhone: '', walkInName: '  Visiting Customer  ', amountPaid: 150 });
+    assert.equal(saved.customerName, 'Walk-in');
+    assert.equal(saved.walkInName, 'Visiting Customer');
+    assert.equal(saved.customerId, null);
+    assert.equal(saved.amountPaid, 100);
+    assert.equal(saved.changeDue, 50);
+    assert.equal(documents.customerDisplayName(saved), 'Visiting Customer');
+    assert.equal([...records.keys()].filter(key => key.startsWith('customers/')).length, 1);
+    assert.equal(documents.invoiceNumber(saved), 'INV-1');
+    assert.equal(documents.paymentReceipts(saved)[0].receiptNo, 'RCT-s1-initial');
+    assert.equal(documents.paymentReceipts(saved)[0].amount, 100);
+});
+test('walk-in customers require a name and cannot owe money', async () => {
+    const { db, sale, records } = database();
+    const walkIn = { ...sale, customerId: undefined, customerKind: 'Walk-in', walkInName: 'Visitor' };
+    await assert.rejects(db.commitSale({ ...walkIn, walkInName: ' ' }), /name/);
+    await assert.rejects(db.commitSale({ ...walkIn, amountPaid: 0, saleType: 'Debt' }), /paid in full/);
+    await assert.rejects(db.commitSale({ ...walkIn, amountPaid: 20, saleType: 'Partial sale' }), /paid in full/);
+    assert.equal(records.has('sales/s1'), false);
+});
+test('walk-in sales never collide with registered customer account matching', () => {
+    const customer = { id: 'c1', name: 'Visitor', phone: '0700123456' };
+    const sales = [{ customerKind: 'Walk-in', walkInName: 'Visitor', customerName: 'Visitor', customerPhone: customer.phone, customerId: 'c1' }];
+    assert.equal(customerTools.getCustomerSales(sales, customer, [customer]).length, 0);
+});
+test('debt has no receipt; each actual collection gets a distinct stable payment receipt', async () => {
+    const { db, sale } = database();
+    const debt = await db.commitSale({ ...sale, amountPaid: 0, saleType: 'Debt' });
+    assert.equal(documents.paymentReceipts(debt).length, 0);
+    const paid = await db.recordSalePayment(sale.id, { id: 'pay-1', amount: 40, method: 'Cash', reference: '', timestamp: 20, user: 'cashier' });
+    const again = await db.recordSalePayment(sale.id, { id: 'pay-1', amount: 40, method: 'Cash', reference: '', timestamp: 20, user: 'cashier' });
+    assert.equal(again.amountPaid, 40);
+    assert.equal(documents.paymentReceipts(paid)[0].receiptNo, 'RCT-s1-pay-1');
+    assert.equal(documents.paymentReceipts(paid)[0].balanceAfter, 60);
+    const updated = await db.recordSalePayment(sale.id, { id: 'pay-2', amount: 25, method: 'Bank', reference: 'BANK-123', timestamp: 30, user: 'manager' });
+    const receipts = documents.paymentReceipts(updated);
+    assert.equal(receipts.length, 2);
+    assert.equal(receipts[0].amount, 40);
+    assert.equal(receipts[1].amount, 25);
+    assert.equal(receipts[1].balanceAfter, 35);
+    assert.notEqual(receipts[0].receiptNo, receipts[1].receiptNo);
+    assert.notEqual(receipts[0].receiptNo, documents.invoiceNumber(updated));
+});
+test('invoice edits preserve receipts and reject silent payment rewriting or unrecorded refunds', async () => {
+    const { db, sale } = database();
+    const saved = await db.commitSale(sale);
+    await assert.rejects(db.commitSale({ ...saved, items: [item(2)], amountPaid: 200 }, false, 'edit'), /payment history/);
+    await assert.rejects(db.commitSale({ ...saved, items: [item(1, 90)] }, false, 'edit'), /less than payments/);
+    const updated = await db.commitSale({ ...saved, items: [item(2)], saleType: 'Partial sale' }, false, 'edit');
+    assert.equal(updated.amountPaid, 100);
+    assert.equal(updated.balance, 100);
+    assert.equal(documents.paymentReceipts(updated)[0].receiptNo, documents.paymentReceipts(saved)[0].receiptNo);
+    assert.equal(documents.paymentReceipts(updated)[0].amount, 100);
+    assert.equal(documents.paymentReceipts(updated)[0].balanceAfter, 0, 'original receipt keeps the balance recorded when payment was made');
+});
+test('legacy cash change cannot become a payment after an invoice total increases', async () => {
+    const { db, sale, records } = database();
+    const saved = await db.commitSale(sale);
+    records.set('sales/s1', { ...saved, amountPaid: 150, total: 100 });
+    const original = records.get('sales/s1');
+    const updated = await db.commitSale({ ...original, items: [item(2)], saleType: 'Partial sale' }, false, 'edit');
+    assert.equal(updated.amountPaid, 100);
+    assert.equal(updated.balance, 100);
+});
+test('IMEI lookup follows the authoritative sold unit to its original sale', async () => {
+    const { db, sale, records } = database();
+    const imei = '490154203237518';
+    records.set('phoneImeis/' + imei, { status: 'Sold', productId: 'p1', saleId: 's1' });
+    records.set('sales/s1', { ...sale, items: [{ ...item(), imeis: [imei] }] });
+    const result = await db.lookupPhoneImei(imei);
+    assert.equal(result.status, 'Sold');
+    assert.equal(result.sale.id, 's1');
+    assert.equal(result.sale.customerName, 'Alice');
+    records.set('phoneImeis/' + imei, { status: 'Available', productId: 'p1' });
+    records.get('products/p1').imeis = [imei];
+    assert.equal((await db.lookupPhoneImei(imei)).status, 'Available');
+    records.delete('phoneImeis/' + imei);
+    assert.equal((await db.lookupPhoneImei(imei)).status, 'Not found');
+});
+test('IMEI lookup rejects corrupt links rather than displaying a different phone sale', async () => {
+    const { db, sale, records } = database();
+    const imei = '490154203237518';
+    records.set('phoneImeis/' + imei, { status: 'Sold', productId: 'p1', saleId: 'missing' });
+    await assert.rejects(db.lookupPhoneImei(imei), /linked sale/);
+    records.set('sales/missing', sale);
+    await assert.rejects(db.lookupPhoneImei(imei), /does not match/);
+    await assert.rejects(db.lookupPhoneImei('123'), /15/);
+});
+
+test('later receipt keeps its payment-time balance after invoice correction', async () => {
+    const { db, sale } = database();
+    await db.commitSale({ ...sale, amountPaid: 0, saleType: 'Debt' });
+    const paid = await db.recordSalePayment(sale.id, { id: 'pay', amount: 40, method: 'Cash', reference: '', timestamp: 20, user: 'cashier' });
+    const amended = await db.commitSale({ ...paid, items: [item(2)] }, false, 'edit');
+    assert.equal(amended.balance, 160);
+    assert.equal(documents.paymentReceipts(amended)[0].amount, 40);
+    assert.equal(documents.paymentReceipts(amended)[0].balanceAfter, 60);
+});
+test('IMEI lookup reports broken stock ownership and unlinked sold phones', async () => {
+    const { db, records } = database();
+    const imei = '490154203237518';
+    records.set('phoneImeis/' + imei, { status: 'Available', productId: 'p1' });
+    await assert.rejects(db.lookupPhoneImei(imei), /does not match available/);
+    records.set('phoneImeis/' + imei, { status: 'Sold', productId: 'p1' });
+    await assert.rejects(db.lookupPhoneImei(imei), /no linked invoice/);
 });

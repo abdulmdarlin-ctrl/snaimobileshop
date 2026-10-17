@@ -212,8 +212,7 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
    );
 
    const filteredProducts = products.filter(p =>
-      p.name.toLowerCase().includes(itemSearch.toLowerCase()) ||
-      p.sku.toLowerCase().includes(itemSearch.toLowerCase())
+      p.name.toLowerCase().includes(itemSearch.toLowerCase())
    ).slice(0, 5); // Limit suggestions
 
    return (
@@ -454,7 +453,6 @@ const Suppliers: React.FC<SuppliersProps> = ({ user }) => {
                                     >
                                        <div className="flex justify-between">
                                           <span>{p.name}</span>
-                                          <span className="text-slate-400 font-normal text-[10px]">{p.sku}</span>
                                        </div>
                                     </button>
                                  ))}

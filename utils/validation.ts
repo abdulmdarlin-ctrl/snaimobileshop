@@ -1,5 +1,5 @@
 const requiredFields: Record<string, string[]> = {
-    products: ['name', 'sku'], customers: ['name', 'phone'], suppliers: ['name'],
+    products: ['name'], customers: ['name', 'phone'], suppliers: ['name'],
     expenses: ['description', 'category'], expenseCategories: ['name'],
     repairs: ['customerName', 'customerPhone', 'deviceModel', 'issue'],
     agents: ['name', 'phone'], loans: ['customerName', 'customerPhone', 'deviceModel', 'imei'],
@@ -10,7 +10,8 @@ const nonnegative = new Set(['costPrice', 'selling_price', 'minSellingPrice', 'm
 /** Validate before JSON serialization, which would otherwise turn NaN/Infinity into null. */
 export function validateRecord(collection: string, data: Record<string, any>, partial = false) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid record.');
-    for (const field of requiredFields[collection] || []) {
+    const fields = collection === 'sales' && data.customerKind === 'Walk-in' ? ['walkInName'] : requiredFields[collection] || [];
+    for (const field of fields) {
         if ((!partial || field in data) && (typeof data[field] !== 'string' || !data[field].trim()))
             throw new Error(`${field.replace(/([A-Z])/g, ' $1')} is required.`);
     }

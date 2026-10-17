@@ -5,6 +5,7 @@ import {
 } from 'firebase/firestore';
 import { dbInstance, createSecondaryUser } from './firebaseConfig';
 import { validateRecord } from './utils/validation';
+import { receiptNumber } from './utils/saleDocuments';
 import { validateImeis, itemImeis } from './utils/imei';
 import { calculateSaleTotals, money, stockChanges, validateItems, validatePayment, getSaleType, outstandingAmount } from './utils/pos';
 import { Customer, Product, Sale, SaleItem, Repair, Supplier, User, AppSettings, UserRole, Expense, ExpenseCategory, StockLog, AuditLog, Purchase, Loan, Agent } from './types';
@@ -314,6 +315,24 @@ export const db = {
       return loan;
     });
   },
+  lookupPhoneImei: async (imei: string): Promise<{ status: string; sale?: Sale; productName?: string }> => {
+    validateImeis([imei], 1);
+    if (!dbInstance) throw new Error('Database is unavailable.');
+    const registration = await getDoc(doc(dbInstance, 'phoneImeis', imei));
+    if (!registration.exists()) return { status: 'Not found' };
+    const entry = registration.data();
+    if (entry.saleId) {
+      const snapshot = await getDoc(doc(dbInstance, COLLECTIONS.sales, entry.saleId));
+      if (!snapshot.exists()) throw new Error('The linked sale could not be found. Review this IMEI registration.');
+      const sale = { ...snapshot.data(), id: snapshot.id } as Sale;
+      if (!sale.items.some(item => item.productId === entry.productId && itemImeis(item).includes(imei))) throw new Error('The IMEI registration does not match the linked invoice. Review the inventory record.');
+      return { status: 'Sold', sale };
+    }
+    if (entry.status === 'Sold') throw new Error('This sold IMEI has no linked invoice. Review its inventory registration.');
+    const product = entry.productId ? await getDoc(doc(dbInstance, COLLECTIONS.products, entry.productId)) : null;
+    if (entry.status === 'Available' && (!product?.exists() || !product.data().imeis?.includes(imei))) throw new Error('The IMEI registration does not match available inventory. Refresh or review this phone record.');
+    return { status: entry.status || 'Not found', ...(product?.exists() ? { productName: product.data().name } : {}) };
+  },
   // Sale and inventory writes commit together, using fresh stock inside the transaction.
   commitSale: async (sale: Sale, allowNegativeStock = false, mode: 'create' | 'edit' = 'create', actor = sale.cashierName) => {
     if (!sale.id || !dbInstance) throw new Error('Sale reference or database is unavailable.');
@@ -321,22 +340,53 @@ export const db = {
     const totals = calculateSaleTotals(sale.items, sale.globalDiscountPercentage ?? 0, sale.taxPercentage ?? 0);
     const saleType = sale.saleType || getSaleType({ total: totals.total, amountPaid: sale.amountPaid });
     validatePayment(totals.total, sale.amountPaid, sale.paymentMethod, saleType);
-    if (!sale.customerId || !sale.customerName?.trim() || !sale.customerPhone?.trim()) throw new Error('Select a customer with a name and phone number before saving any sale.');
+    const walkIn = sale.customerKind === 'Walk-in';
+    if (walkIn) {
+      if (!sale.walkInName?.trim()) throw new Error('Enter the walk-in customer name for the receipt.');
+      if (sale.walkInName.trim().length > 100) throw new Error('Enter a customer name of up to 100 characters.');
+      if (sale.customerPhone?.trim()) validateCustomerContact(sale.walkInName, sale.customerPhone);
+      if (saleType !== 'Cash sale') throw new Error('Walk-in sales must be paid in full. Select a registered customer for debt or partial sales.');
+    } else if (!sale.customerId || !sale.customerName?.trim() || !sale.customerPhone?.trim()) throw new Error('Select a customer with a name and phone number before saving any sale.');
     const amountDue = outstandingAmount({ total: totals.total, amountPaid: sale.amountPaid });
-    const cleanSale = sanitizeData({ ...sale, ...totals, saleType, amountDue, balance: amountDue, changeDue: money(Math.max(0, sale.amountPaid - totals.total)),
+    const cleanSale = sanitizeData({ ...sale, ...totals, saleType, customerKind: walkIn ? 'Walk-in' : 'Registered', invoiceNo: sale.invoiceNo || sale.receiptNo,
+      ...(walkIn ? { customerId: null, customerName: 'Walk-in', walkInName: sale.walkInName!.trim() } : { walkInName: null }),
+      ...(sale.amountPaid > 0 ? { initialReceiptNo: receiptNumber(sale.id), initialBalanceAfter: amountDue } : {}),
+      amountPaid: money(Math.min(sale.amountPaid, totals.total)), amountDue, balance: amountDue, changeDue: money(Math.max(0, sale.amountPaid - totals.total)),
       items: sale.items.map(item => ({ ...item, ...(item.imeis ? { imeis: itemImeis(item) } : {}), total: money(item.price * item.quantity) })) });
     const saleRef = doc(dbInstance, COLLECTIONS.sales, sale.id);
     return runTransaction(dbInstance, async transaction => {
       const existing = await transaction.get(saleRef);
       if (mode === 'create' && existing.exists()) return { ...existing.data(), id: existing.id } as Sale;
-      const customer = await transaction.get(doc(dbInstance, COLLECTIONS.customers, sale.customerId));
-      if (!customer.exists() || customer.data().status === 'Blacklisted') throw new Error('Select an existing customer who is not blacklisted.');
-      if (mode === 'create' && customer.data().status === 'Inactive') throw new Error('This customer is inactive. Reactivate the account before creating a new sale.');
-      if (!customer.data().name?.trim() || !customer.data().phone?.trim()) throw new Error('Update the customer name and phone before completing the sale.');
-      cleanSale.customerName = customer.data().name;
-      cleanSale.customerPhone = customer.data().phone;
+      if (!walkIn) {
+        const customer = await transaction.get(doc(dbInstance, COLLECTIONS.customers, sale.customerId!));
+        if (!customer.exists() || customer.data().status === 'Blacklisted') throw new Error('Select an existing customer who is not blacklisted.');
+        if (mode === 'create' && customer.data().status === 'Inactive') throw new Error('This customer is inactive. Reactivate the account before creating a new sale.');
+        if (!customer.data().name?.trim() || !customer.data().phone?.trim()) throw new Error('Update the customer name and phone before completing the sale.');
+        cleanSale.customerName = customer.data().name;
+        cleanSale.customerPhone = customer.data().phone;
+      }
       if (mode === 'edit' && !existing.exists()) throw new Error('This sale no longer exists. Refresh sales history.');
       if (mode === 'edit' && (existing.data()?.revision || 0) !== (sale.revision || 0)) throw new Error('This sale was changed elsewhere. Refresh history before editing.');
+      if (mode === 'edit') {
+        const previous = existing.data() as Sale;
+        const received = money(Math.min(previous.total, previous.amountPaid));
+        if (totals.total < received) throw new Error('The revised total is less than payments already received. Refunds must be recorded separately before reducing this invoice.');
+        if (sale.amountPaid !== previous.amountPaid || JSON.stringify(sale.payments || []) !== JSON.stringify(previous.payments || [])) throw new Error('Use Record payment to change payments. Editing an invoice cannot rewrite payment history.');
+        cleanSale.receiptNo = previous.receiptNo;
+        cleanSale.invoiceNo = previous.invoiceNo || previous.receiptNo;
+        if (previous.initialReceiptNo) cleanSale.initialReceiptNo = previous.initialReceiptNo;
+        cleanSale.initialBalanceAfter = previous.initialBalanceAfter ?? money(Math.max(0, previous.total - Math.max(0, received - (previous.payments || []).reduce((sum, payment) => sum + payment.amount, 0))));
+        if (walkIn !== (previous.customerKind === 'Walk-in')) throw new Error('The customer type of a completed sale cannot be changed.');
+        cleanSale.amountPaid = received;
+        cleanSale.amountDue = cleanSale.balance = outstandingAmount({ total: totals.total, amountPaid: received });
+        cleanSale.saleType = getSaleType({ total: totals.total, amountPaid: received });
+        cleanSale.changeDue = previous.changeDue ?? Math.max(0, previous.amountPaid - previous.total);
+        cleanSale.paymentMethod = previous.paymentMethod;
+        cleanSale.paymentReference = previous.paymentReference || '';
+        cleanSale.timestamp = previous.timestamp;
+        cleanSale.cashierName = previous.cashierName;
+        if (walkIn && cleanSale.amountDue > 0) throw new Error('A walk-in invoice must remain paid in full. Register the customer before creating a credit sale.');
+      }
       cleanSale.revision = (existing.data()?.revision || 0) + 1;
       const changes = stockChanges(existing.exists() ? (existing.data() as Sale).items : [], cleanSale.items);
       const stockUpdates = [];
@@ -403,9 +453,9 @@ export const db = {
       if (amount > outstandingAmount(sale)) throw new Error('Payment exceeds the current outstanding balance. Refresh and try again.');
       const amountPaid = money(sale.amountPaid + amount);
       const amountDue = outstandingAmount({ ...sale, amountPaid });
-      const updated = { ...sale, amountPaid, amountDue, balance: amountDue, changeDue: 0,
+      const updated = { ...sale, amountPaid, amountDue, balance: amountDue, changeDue: sale.changeDue || 0,
         saleType: getSaleType({ ...sale, amountPaid }), revision: (sale.revision || 0) + 1,
-        payments: [...(sale.payments || []), { ...payment, amount }] };
+        payments: [...(sale.payments || []), { ...payment, receiptNo: receiptNumber(id, payment.id), balanceAfter: amountDue, amount }] };
       transaction.set(ref, sanitizeData(updated));
       transaction.set(doc(collection(dbInstance, COLLECTIONS.auditLogs)), {
         action: 'Sale payment received', entityType: 'Sale', entityId: id, user: payment.user,

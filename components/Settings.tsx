@@ -1,3 +1,4 @@
+import SaleDocument from './SaleDocument';
 import { confirmAction, notifyDialog } from '../utils/dialog';
 ﻿
 import React, { useState, useEffect, useMemo } from 'react';
@@ -45,7 +46,7 @@ const safeStringify = (obj: any, indent = 0) => {
 // Mock data for receipt preview
 const mockSaleForPreview: Sale = {
    id: 'preview-123',
-   receiptNo: 'PREVIEW-001',
+   receiptNo: 'INV-PREVIEW-001', initialReceiptNo: 'RCT-PREVIEW-001',
    items: [
       { productId: 'p1', name: 'Sample Smartphone', quantity: 1, price: 1200000, originalPrice: 1200000, total: 1200000 },
       { productId: 'p2', name: 'Protective Case', quantity: 1, price: 50000, originalPrice: 60000, total: 50000 },
@@ -55,7 +56,7 @@ const mockSaleForPreview: Sale = {
    tax: 225000,
    total: 1475000,
    amountPaid: 1500000,
-   balance: 25000,
+   balance: 0,
    paymentMethod: 'Cash',
    cashierName: 'Admin',
    customerName: 'Preview Customer',
@@ -65,169 +66,7 @@ const mockSaleForPreview: Sale = {
    timestamp: Date.now(),
 };
 
-const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale: Sale }) => {
-   if (!settings || !sale) return null;
-
-   const [qrCodeDataURL, setQrCodeDataURL] = useState<string>('');
-
-   useEffect(() => {
-      const generateMockQR = async () => {
-         try {
-            const QRCode = (window as any).QRCode;
-            if (QRCode) {
-               const data = await QRCode.toDataURL(`SNA-VERIFY|${sale.receiptNo}|${sale.total}|${Date.now()}`);
-               setQrCodeDataURL(data);
-            }
-         } catch (err) {
-            console.error('Failed to generate mock QR', err);
-         }
-      };
-      generateMockQR();
-   }, [sale.receiptNo, sale.total, settings?.receiptShowQRCode]);
-
-   return (
-      <div
-         id="receipt-preview"
-         className={`${settings?.receiptFormat === 'a4' ? 'receipt-a4-mode' : 'receipt-mode'} bg-white p-4  text-black ${settings?.receiptFont === 'sans' ? 'font-sans' :
-            settings?.receiptFont === 'serif' ? 'font-serif' : 'font-mono'
-            } w-full`}
-         style={{
-            fontSize: `${settings?.receiptFontSize || 11}px`,
-            lineHeight: settings?.receiptLineHeight || 1.3
-         }}>
-         {/* Header from POS */}
-         <div className="text-center mb-4">
-            {settings.receiptShowLogo && (
-               <img src={SnaiLogo} className="h-16 mx-auto mb-2 object-contain" alt="Logo" />
-            )}
-            <h2 className="font-bold text-sm uppercase whitespace-pre-wrap">{settings?.receiptHeader || settings?.businessName || 'SNA! SHOP'}</h2>
-            {settings?.tagline && <div className="text-[10px] italic">"{settings.tagline}"</div>}
-            <div className="text-[10px] whitespace-pre-wrap">{settings?.address}</div>
-            <div className="text-[10px]">Tel: {settings?.phone}</div>
-            {settings?.tin && <div className="text-[10px]">TIN: {settings.tin}</div>}
-         </div>
-
-         <div className="border-b border-black border-dashed mb-2"></div>
-
-         {/* Meta info from POS */}
-         <div className="flex justify-between mb-1">
-            <span>Date: {new Date(sale.timestamp).toLocaleDateString()}</span>
-            <span>Time: {new Date(sale.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-         </div>
-         <div className="mb-2">
-            <div>Receipt #: {sale.receiptNo}</div>
-            {settings?.receiptShowCashier !== false && <div>Cashier: {sale.cashierName}</div>}
-            {sale.customerName && sale.customerName.trim() !== '' && sale.customerName !== 'Walk-in' && (
-               <div>Cust: {sale.customerName}</div>
-            )}
-         </div>
-
-         <div className="border-b border-black border-dashed mb-2"></div>
-
-         {/* Items Section */}
-         <div className="mb-2">
-            {sale.items.map((item, i) => {
-               const itemPrice = item.price;
-               const originalItemPrice = item.originalPrice || item.price;
-               const discount = (originalItemPrice - itemPrice) * item.quantity;
-               const itemTotal = item.total;
-               return (
-                  <div key={i} className="mb-2">
-                     <div className="font-medium">{item.name}</div>
-                     <div className="flex justify-between pl-1">
-                        <span>{item.quantity} x {itemPrice.toLocaleString()}</span>
-                        <span>{itemTotal.toLocaleString()}</span>
-                     </div>
-                     {sale.customerType === 'Retail' && discount > 0 && (
-                        <div className="flex justify-between pl-1 text-[9px] text-slate-500 italic">
-                           <span>(was {originalItemPrice.toLocaleString()} each)</span>
-                           <span>Discount: -{discount.toLocaleString()}</span>
-                        </div>
-                     )}
-                     {item.warrantyEndDate && (
-                        <div className="pl-1 text-[9px] text-slate-500">
-                           Warranty valid until: {new Date(item.warrantyEndDate).toLocaleDateString()}
-                        </div>
-                     )}
-                  </div>
-               );
-            })}
-         </div>
-
-         <div className="border-b border-black border-dashed mb-2"></div>
-
-         {/* Totals Section */}
-         <div className="space-y-1 mb-2">
-            {(() => {
-               const grossSubtotalBeforeAnyDiscounts = sale.items.reduce((acc, item) => acc + ((item.originalPrice || item.price) * item.quantity), 0);
-               const itemLevelDiscountAmount = sale.items.reduce((acc, item) => acc + ((item.originalPrice || item.price) - item.price) * item.quantity, 0);
-               const globalDiscountAmountInReceipt = (sale.subtotal * (sale.globalDiscountPercentage || 0)) / 100;
-               const netSubtotalAfterAllDiscounts = sale.subtotal - globalDiscountAmountInReceipt;
-
-               return (
-                  <>
-                     <div className="flex justify-between">
-                        <span>Original Subtotal</span>
-                        <span>{grossSubtotalBeforeAnyDiscounts.toLocaleString()}</span>
-                     </div>
-                     {itemLevelDiscountAmount > 0 && (
-                        <div className="flex justify-between">
-                           <span>Item Discount</span>
-                           <span>-{itemLevelDiscountAmount.toLocaleString()}</span>
-                        </div>
-                     )}
-                     {sale.customerType === 'Retail' && globalDiscountAmountInReceipt > 0 && (
-                        <div className="flex justify-between">
-                           <span>Global Discount ({sale.globalDiscountPercentage}%)</span>
-                           <span>-{globalDiscountAmountInReceipt.toLocaleString()}</span>
-                        </div>
-                     )}
-                     <div className="border-b border-black border-dashed my-1"></div>
-                     <div className="flex justify-between font-bold uppercase">
-                        <span>NET SUBTOTAL</span>
-                        <span>{netSubtotalAfterAllDiscounts.toLocaleString()}</span>
-                     </div>
-                  </>
-               );
-            })()}
-            {settings?.receiptShowTaxDetail !== false && sale.tax > 0 && (
-               <div className="flex justify-between">
-                  <span>TAX ({settings?.taxPercentage || 18}%)</span>
-                  <span>{sale.tax.toLocaleString()}</span>
-               </div>
-            )}
-
-            <div className="border-t-2 border-black pt-1 mt-1">
-               <div className="flex justify-between font-black text-lg">
-                  <span>TOTAL</span>
-                  <span>{sale.total.toLocaleString()}</span>
-               </div>
-            </div>
-
-         </div>
-
-         {settings?.receiptShowQRCode && qrCodeDataURL && (
-            <div className="flex flex-col items-center py-4 border-t border-black border-dashed mt-2">
-               <img src={qrCodeDataURL} alt="Verification QR" className="w-24 h-24 mb-1" />
-               <p className="text-[8px] font-bold text-slate-400 uppercase tracking-tighter">Scan to Verify Transaction</p>
-            </div>
-         )}
-
-         {/* Footer from POS */}
-         <div
-            className="whitespace-pre-wrap"
-            style={{
-               fontSize: `${settings?.receiptFooterFontSize || 10}px`,
-               fontWeight: settings?.receiptFooterBold ? 'bold' : 'normal',
-               fontStyle: settings?.receiptFooterItalic ? 'italic' : 'normal',
-               textAlign: settings?.receiptFooterAlign || 'center'
-            }}
-         >
-            {settings?.receiptFooter || 'Thank you for shopping with us!'}
-         </div>
-      </div>
-   );
-};
+const ReceiptPreview = ({ settings, sale }: { settings: AppSettings | null, sale: Sale }) => <SaleDocument settings={settings} sale={sale} mode="receipt" />;
 
 const ToggleSwitch = ({ checked, onChange }: { checked: boolean; onChange: (val: boolean) => void }) => (
    <button
@@ -334,7 +173,6 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
             receiptShowLogo: true,
             receiptShowCashier: true,
             receiptShowTaxDetail: true,
-            receiptShowQRCode: true,
             receiptFooterBold: false,
             receiptFooterItalic: false,
             receiptFont: 'monospace',
@@ -458,20 +296,20 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
       if (!importText.trim()) return;
       setImporting(true);
       try {
-         const lines = importText.trim().split('\n');
+         const lines = importText.trim().split('\n').filter(line => line.trim());
+         if (lines.some(line => line.split(',').length !== 5)) throw new Error('Use five CSV columns: Name, Category, Cost, Price, Stock.');
          let count = 0;
          for (const line of lines) {
             const parts = line.split(',');
-            if (parts.length >= 2) {
-               const [name, sku, category, cost, price, stock] = parts.map(p => p.trim());
+            if (parts.length === 5) {
+               const [name, category, cost, price, stock] = parts.map(p => p.trim());
                await db.products.add({
                   name: name,
-                  sku: sku || `SKU-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
                   category: category || 'General',
                   type: ProductType.SPARE_PART,
-                  costPrice: Number(cost) || 0,
-                  selling_price: Number(price) || 0,
-                  stockQuantity: Number(stock) || 0,
+                  costPrice: Number(cost),
+                  selling_price: Number(price),
+                  stockQuantity: Number(stock),
                   reorderLevel: settings?.globalLowStockThreshold || 5
                } as any);
                count++;
@@ -482,7 +320,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
          setImportText('');
          setIsImportModalOpen(false);
       } catch (e) {
-         showToast("Import failed. Please check CSV format.", 'error');
+         showToast(e instanceof Error ? e.message : 'Import failed. Please check CSV format.', 'error');
       } finally {
          setImporting(false);
       }
@@ -1557,7 +1395,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
             noPadding
          >
             <div className="p-8 space-y-6">
-               <p className="text-sm text-slate-500">Paste CSV data (Name, SKU, Category, Cost, Price, Stock)</p>
+               <p className="text-sm text-slate-500">Paste CSV data (Name, Category, Cost, Price, Stock)</p>
                <textarea
                   className="w-full h-64 p-4 bg-slate-50 rounded-2xl border border-slate-200 font-mono text-xs focus:ring-2 focus:ring-blue-500/20 outline-none resize-none"
                   placeholder="iPhone 13, IPH13, Phones, 2000000, 2500000, 10..."

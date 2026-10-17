@@ -1,4 +1,5 @@
-export type BarcodeDecodeRequest = { type: 'decode'; id: number; width: number; height: number; pixels: ArrayBuffer } | { type: 'bitmap'; id: number; bitmap: ImageBitmap };
+export type BarcodeScanMode = 'unit' | 'sheet' | 'sale';
+export type BarcodeDecodeRequest = ({ type: 'decode'; id: number; width: number; height: number; pixels: ArrayBuffer } | { type: 'bitmap'; id: number; bitmap: ImageBitmap }) & { mode?: BarcodeScanMode };
 export type BarcodeDecodeResponse = { type: 'ready'; bitmaps?: boolean } | { type: 'result'; id: number; text: string | null };
 type Channel = Pick<Worker, 'onmessage' | 'onerror' | 'onmessageerror' | 'postMessage' | 'terminate'>;
 
@@ -30,12 +31,12 @@ export class BarcodeWorkerClient {
         worker.onmessageerror = () => this.fail(new Error('The barcode image could not be read. Restart the scanner.'));
     }
     get busy() { return this.pending !== null; }
-    decode(frame: ImageData): Promise<string | null> {
+    decode(frame: ImageData, mode: BarcodeScanMode = 'unit'): Promise<string | null> {
         const pixels = frame.data.buffer as ArrayBuffer;
-        return this.submit(id => ({ type: 'decode', id, width: frame.width, height: frame.height, pixels }), [pixels]);
+        return this.submit(id => ({ type: 'decode', id, mode, width: frame.width, height: frame.height, pixels }), [pixels]);
     }
-    decodeBitmap(bitmap: ImageBitmap): Promise<string | null> {
-        return this.submit(id => ({ type: 'bitmap', id, bitmap }), [bitmap], () => bitmap.close());
+    decodeBitmap(bitmap: ImageBitmap, mode: BarcodeScanMode = 'unit'): Promise<string | null> {
+        return this.submit(id => ({ type: 'bitmap', id, bitmap, mode }), [bitmap], () => bitmap.close());
     }
     private submit(request: (id: number) => BarcodeDecodeRequest, transfer: Transferable[], release = () => {}) {
         if (this.closed || !this.initialized) { release(); return Promise.reject(new Error('The barcode reader is not ready. Restart the scanner.')); }
