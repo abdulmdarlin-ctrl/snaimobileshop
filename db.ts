@@ -1,10 +1,11 @@
 import { customerStatus, normalizeCustomerPhone, validateCustomerContact, getCustomerSales } from './utils/customers';
 
 import {
-  collection, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, setDoc, runTransaction, onSnapshot, query, limit
+  collection, getDocs, getDoc, addDoc, updateDoc, deleteDoc, doc, setDoc, runTransaction as firestoreTransaction, onSnapshot, query, limit
 } from 'firebase/firestore';
 import { dbInstance, createSecondaryUser } from './firebaseConfig';
 import { validateRecord } from './utils/validation';
+import { createDatabaseReadCache, ReadOptions } from './utils/databaseReadCache';
 import { receiptNumber } from './utils/saleDocuments';
 import { validateImeis, itemImeis } from './utils/imei';
 import { calculateSaleTotals, money, stockChanges, validateItems, validatePayment, getSaleType, outstandingAmount } from './utils/pos';
@@ -54,6 +55,14 @@ const sanitizeData = (data: any) => {
   return JSON.parse(safeStringify(data));
 };
 
+const displayReads = createDatabaseReadCache();
+// Invalidate only after a successful commit; failed writes never change display data.
+const runTransaction: typeof firestoreTransaction = async (...args) => {
+  const result = await firestoreTransaction(...args);
+  displayReads.invalidate();
+  return result;
+};
+
 // --- FIRESTORE ADAPTER ---
 function createCollectionHelper<T extends { id?: string }>(collectionName: string) {
 
@@ -64,12 +73,19 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
 
   return {
     subscribe: (onData: (records: T[]) => void, onError: (error: Error) => void) =>
-      onSnapshot(getColRef(), snapshot => onData(snapshot.docs.map(record => ({ ...record.data(), id: record.id })) as T[]), onError),
-    getMany: async (ids: string[]) => {
-      const snapshots = await Promise.all([...new Set(ids)].filter(Boolean).map(id => getDoc(doc(dbInstance, collectionName, id))));
-      return snapshots.filter(snapshot => snapshot.exists()).map(snapshot => ({ ...snapshot.data(), id: snapshot.id })) as T[];
+      onSnapshot(getColRef(), snapshot => {
+        const records = snapshot.docs.map(record => ({ ...record.data(), id: record.id })) as T[];
+        if (!snapshot.metadata?.fromCache) displayReads.seed(`${collectionName}:all`, records);
+        onData(records);
+      }, error => { displayReads.invalidate(`${collectionName}:`); onError(error); }),
+    getMany: async (ids: string[], options: ReadOptions = {}) => {
+      const records = await Promise.all([...new Set(ids)].filter(Boolean).map(id => displayReads.read(`${collectionName}:doc:${id}`, async () => {
+        const snapshot = await getDoc(doc(dbInstance, collectionName, id));
+        return snapshot.exists() ? { ...snapshot.data(), id: snapshot.id } as T : null;
+      }, options)));
+      return records.filter(record => record !== null) as T[];
     },
-    toArray: async () => {
+    toArray: async (options: ReadOptions = {}) => displayReads.read(`${collectionName}:all`, async () => {
       try {
         const snapshot = await getDocs(getColRef());
         return snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as T[];
@@ -77,7 +93,7 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
         console.error(`Error fetching ${collectionName}:`, e);
         throw e;
       }
-    },
+    }, options),
 
     add: async (data: T) => {
       if (collectionName === 'products') return saveInventoryProduct(data as unknown as Product) as Promise<any>;
@@ -85,6 +101,7 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
       validateRecord(collectionName, data);
       const cleanData = sanitizeData(data);
       const docRef = await addDoc(getColRef(), cleanData);
+      displayReads.invalidate(`${collectionName}:`);
       return { ...data, id: docRef.id };
     },
 
@@ -96,17 +113,19 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
       const cleanData = sanitizeData(data);
       const docRef = doc(dbInstance!, collectionName, id);
       await updateDoc(docRef, cleanData);
+      displayReads.invalidate(`${collectionName}:`);
     },
 
     delete: async (id: string) => {
       if (!id) throw new Error('Select a record to delete.');
       const docRef = doc(dbInstance!, collectionName, id);
       await deleteDoc(docRef);
+      displayReads.invalidate(`${collectionName}:`);
     },
 
     // For Dexie-like API compatibility in App.tsx
     toCollection: () => ({
-      first: async () => {
+      first: async (options: ReadOptions = {}) => displayReads.read(`${collectionName}:first`, async () => {
         try {
           const snapshot = await getDocs(query(getColRef(), limit(1)));
           return snapshot.empty ? null : { ...snapshot.docs[0].data(), id: snapshot.docs[0].id } as T;
@@ -114,19 +133,21 @@ function createCollectionHelper<T extends { id?: string }>(collectionName: strin
           console.error(`Error fetching first ${collectionName}:`, e);
           throw e;
         }
-      }
+      }, options)
     }),
 
     // For Settings upsert
     put: async (data: T) => {
       validateRecord(collectionName, data);
-      const snapshot = await getDocs(getColRef());
+      const snapshot = await getDocs(query(getColRef(), limit(1)));
       if (!snapshot.empty) {
         const id = snapshot.docs[0].id;
         await updateDoc(doc(dbInstance!, collectionName, id), sanitizeData(data));
+        displayReads.invalidate(`${collectionName}:`);
         return id;
       } else {
         const docRef = await addDoc(getColRef(), sanitizeData(data));
+        displayReads.invalidate(`${collectionName}:`);
         return docRef.id;
       }
     }
@@ -151,7 +172,9 @@ async function saveInventoryProduct(data: Partial<Product>, id?: string) {
         const registration = await transaction.get(imeiRef);
         if (registration.exists() && (registration.data().productId !== product.id || registration.data().saleId))
           throw new Error(`IMEI ${imei} is already registered to another product or has been sold.`);
-        writes.push({ ref: imeiRef, data: { productId: product.id, status: product.imeis?.includes(imei) ? 'Available' : 'Removed', saleId: null } });
+        const next = { productId: product.id, status: product.imeis?.includes(imei) ? 'Available' : 'Removed', saleId: null };
+        const current = registration.data();
+        if (!registration.exists() || current.productId !== next.productId || current.status !== next.status || current.saleId != null) writes.push({ ref: imeiRef, data: next });
       }
     }
     for (const write of writes) transaction.set(write.ref, write.data);
@@ -161,6 +184,7 @@ async function saveInventoryProduct(data: Partial<Product>, id?: string) {
 }
 
 export const db = {
+  clearReadCache: () => displayReads.invalidate(),
   saveCustomerProfile: async (data: Partial<Customer>, id: string | undefined, actor: string, expectedUpdatedAt?: number) => {
     const ref = id ? doc(dbInstance, 'customers', id) : doc(collection(dbInstance, 'customers'));
     const customerId = id || ref.id;
@@ -354,7 +378,9 @@ export const db = {
       amountPaid: money(Math.min(sale.amountPaid, totals.total)), amountDue, balance: amountDue, changeDue: money(Math.max(0, sale.amountPaid - totals.total)),
       items: sale.items.map(item => ({ ...item, ...(item.imeis ? { imeis: itemImeis(item) } : {}), total: money(item.price * item.quantity) })) });
     const saleRef = doc(dbInstance, COLLECTIONS.sales, sale.id);
+    let committedStock: Product[] = [];
     return runTransaction(dbInstance, async transaction => {
+      committedStock = [];
       const existing = await transaction.get(saleRef);
       if (mode === 'create' && existing.exists()) return { ...existing.data(), id: existing.id } as Sale;
       if (!walkIn) {
@@ -426,10 +452,11 @@ export const db = {
         const quantity = product.stockQuantity + delta;
         if (!Number.isFinite(quantity)) throw new Error(`Invalid stock for ${product.name}.`);
         if (!allowNegativeStock && quantity < 0) throw new Error(`Insufficient stock for ${product.name}. Available: ${product.stockQuantity}.`);
-        stockUpdates.push({ ref, quantity, ...(availableImeis ? { imeis: availableImeis } : {}) });
+        stockUpdates.push({ ref, quantity, product: { ...product, id, stockQuantity: quantity, ...(availableImeis ? { imeis: availableImeis } : {}) }, ...(availableImeis ? { imeis: availableImeis } : {}) });
       }
       for (const { ref, quantity, imeis } of stockUpdates) transaction.update(ref, { stockQuantity: quantity, ...(imeis ? { imeis } : {}) });
       for (const write of imeiWrites) transaction.set(write.ref, write.data);
+      committedStock = stockUpdates.map(update => update.product);
       transaction.set(saleRef, cleanSale);
       transaction.set(doc(collection(dbInstance, COLLECTIONS.auditLogs)), {
         action: mode === 'edit' ? 'Sale updated' : 'Sale created', entityType: 'Sale', entityId: sale.id,
@@ -437,6 +464,11 @@ export const db = {
         ...(existing.exists() ? { previousSale: existing.data() } : {})
       });
       return cleanSale as Sale;
+    }).then(result => {
+      // Checkout already read these exact products in its successful transaction.
+      // Reuse that result for the immediate UI refresh instead of charging more reads.
+      for (const product of committedStock) displayReads.seed(`products:doc:${product.id}`, product);
+      return result;
     });
   },
   recordSalePayment: async (id: string, payment: { id: string; amount: number; method: string; reference: string; timestamp: number; user: string }) => {

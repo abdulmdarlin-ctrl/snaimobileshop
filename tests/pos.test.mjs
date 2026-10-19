@@ -50,7 +50,7 @@ function database() {
     let sequence = 0;
     const records = new Map([['products/p1', { name: 'Phone', stockQuantity: 3 }], ['customers/c1', { name: 'Alice', phone: '0700123456', status: 'Active' }]]);
     let failCommit = false, commitError = null, readError = null;
-    const reads = [], subscriptions = [];
+    const reads = [], subscriptions = [], transactionReads = [], commits = [];
     const firestore = {
         collection: (_, name) => name,
         query: (name, count) => ({ name, count }), limit: count => count,
@@ -65,27 +65,29 @@ function database() {
         onSnapshot: (ref, next, error) => { const listener = { ref, next, error, stopped: false }; subscriptions.push(listener); return () => { listener.stopped = true; }; },
         doc: (...args) => args.length === 1 ? (args[0] === 'customers' ? { id: `new-${++sequence}`, toString() { return `customers/${this.id}`; } } : `${args[0]}/audit-${++sequence}`) : `${args[1]}/${args[2]}`,
         runTransaction: async (_, callback) => {
-            const writes = [];
+            const writes = [], writtenRefs = [];
             const transaction = {
                 get: async ref => {
                     ref = String(ref);
+                    transactionReads.push(ref);
                     assert.equal(writes.length, 0, 'All reads must precede writes');
                     return { exists: () => records.has(ref), data: () => records.get(ref), id: ref.split('/')[1] };
                 },
-                update: (ref, data) => writes.push(() => records.set(String(ref), { ...records.get(String(ref)), ...data })),
-                set: (ref, data) => writes.push(() => records.set(String(ref), data)),
-                delete: ref => writes.push(() => records.delete(String(ref)))
+                update: (ref, data) => { writtenRefs.push(String(ref)); writes.push(() => records.set(String(ref), { ...records.get(String(ref)), ...data })); },
+                set: (ref, data) => { writtenRefs.push(String(ref)); writes.push(() => records.set(String(ref), data)); },
+                delete: ref => { writtenRefs.push(String(ref)); writes.push(() => records.delete(String(ref))); }
             };
             const result = await callback(transaction);
             if (commitError) throw commitError;
             if (failCommit) throw new Error('Simulated commit failure');
             writes.forEach(write => write());
+            commits.push(writtenRefs);
             return result;
         }
     };
-    const { db, safeStringify } = load('../db.ts', { 'firebase/firestore': firestore, './firebaseConfig': { dbInstance: {} }, './types': {}, './utils/pos': pos, './utils/saleDocuments': load('../utils/saleDocuments.ts', { './pos': pos }), './utils/validation': validation, './utils/imei': imeiTools, './utils/customers': customerTools });
+    const { db, safeStringify } = load('../db.ts', { 'firebase/firestore': firestore, './firebaseConfig': { dbInstance: {} }, './types': {}, './utils/pos': pos, './utils/saleDocuments': load('../utils/saleDocuments.ts', { './pos': pos }), './utils/validation': validation, './utils/databaseReadCache': load('../utils/databaseReadCache.ts'), './utils/imei': imeiTools, './utils/customers': customerTools });
     const sale = { id: 's1', receiptNo: 'INV-1', items: [item()], amountPaid: 100, paymentMethod: 'Cash', cashierName: 'cashier', timestamp: 1, customerId: 'c1', customerName: 'Alice', customerPhone: '0700123456' };
-    return { db, safeStringify, records, sale, reads, subscriptions, setReadError: error => { readError = error; }, setCommitError: error => { commitError = error; }, fail: () => { failCommit = true; } };
+    return { db, safeStringify, records, sale, reads, subscriptions, transactionReads, commits, setReadError: error => { readError = error; }, setCommitError: error => { commitError = error; }, fail: () => { failCommit = true; } };
 }
 test('checkout and retries deduct stock exactly once', async () => {
     const { db, records, sale } = database();
@@ -440,7 +442,7 @@ test('first-record reads request one document and propagate quota failures', asy
     assert.equal(reads[0].count, 1);
     const quota = Object.assign(new Error('Quota exceeded.'), { code: 'resource-exhausted' });
     setReadError(quota);
-    await assert.rejects(db.settings.toCollection().first(), { code: 'resource-exhausted' });
+    await assert.rejects(db.settings.toCollection().first({ fresh: true }), { code: 'resource-exhausted' });
 });
 
 test('stock notifications subscribe once and expose listener cleanup without full reads', () => {
@@ -572,4 +574,61 @@ test('IMEI lookup reports broken stock ownership and unlinked sold phones', asyn
     await assert.rejects(db.lookupPhoneImei(imei), /does not match available/);
     records.set('phoneImeis/' + imei, { status: 'Sold', productId: 'p1' });
     await assert.rejects(db.lookupPhoneImei(imei), /no linked invoice/);
+});
+
+test('page navigation shares full-collection reads and callers cannot mutate cached inventory', async () => {
+    const { db, reads } = database();
+    const [first, concurrent] = await Promise.all([db.products.toArray(), db.products.toArray()]);
+    assert.equal(reads.length, 1);
+    first[0].stockQuantity = 999;
+    assert.equal(concurrent[0].stockQuantity, 3);
+    assert.equal((await db.products.toArray())[0].stockQuantity, 3);
+    assert.equal(reads.length, 1);
+});
+test('explicit refresh bypasses display cache and successful writes invalidate it', async () => {
+    const { db, reads, records } = database();
+    await db.products.toArray();
+    records.get('products/p1').stockQuantity = 2;
+    assert.equal((await db.products.toArray({ fresh: true }))[0].stockQuantity, 2);
+    await db.products.update('p1', { stockQuantity: 1 });
+    assert.equal((await db.products.toArray())[0].stockQuantity, 1);
+    assert.equal(reads.length, 3);
+});
+test('logout clears display cache and cannot leak a prior session query', async () => {
+    const { db, reads, records } = database();
+    await db.customers.toArray();
+    db.clearReadCache();
+    records.delete('customers/c1');
+    assert.equal((await db.customers.toArray()).length, 0);
+    assert.equal(reads.length, 2);
+});
+test('display caching never allows checkout to use old inventory or bypass quota rejection', async () => {
+    const { db, records, sale, setCommitError } = database();
+    await db.products.toArray();
+    records.get('products/p1').stockQuantity = 0;
+    await assert.rejects(db.commitSale(sale), /Insufficient stock/);
+    records.get('products/p1').stockQuantity = 3;
+    setCommitError(Object.assign(new Error('Quota exceeded.'), { code: 'resource-exhausted' }));
+    await assert.rejects(db.commitSale(sale), { code: 'resource-exhausted' });
+    assert.equal(records.has('sales/s1'), false);
+    assert.equal(records.get('products/p1').stockQuantity, 3);
+});
+test('checkout UI refresh reuses product snapshots from the committed transaction without another cloud read', async () => {
+    const { db, sale, reads } = database();
+    await db.commitSale(sale);
+    const updated = await db.products.getMany(['p1', 'p1']);
+    assert.equal(updated[0].stockQuantity, 2);
+    assert.equal(reads.length, 0);
+});
+test('phone inventory edits validate ownership but do not rewrite unchanged IMEI registrations', async () => {
+    const { db, records, commits, transactionReads } = database();
+    const imei = '490154203237518';
+    records.set('products/p1', { name: 'Phone', type: 'Phone', stockQuantity: 1, imeis: [imei], costPrice: 50 });
+    records.set('phoneImeis/' + imei, { productId: 'p1', status: 'Available', saleId: null });
+    await db.products.update('p1', { costPrice: 60 });
+    assert.equal(transactionReads.includes('phoneImeis/' + imei), true);
+    assert.deepEqual(commits[0], ['products/p1']);
+    records.get('phoneImeis/' + imei).saleId = 'already-sold';
+    await assert.rejects(db.products.update('p1', { costPrice: 70 }), /sold/);
+    assert.equal(records.get('products/p1').costPrice, 60);
 });

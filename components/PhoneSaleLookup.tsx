@@ -6,7 +6,7 @@ import { receivedAmount, outstandingAmount } from '../utils/pos';
 import { customerDisplayName, invoiceNumber, paymentReceipts } from '../utils/saleDocuments';
 import Modal from './Modal';
 
-export default function PhoneSaleLookup({ isOpen, onClose, history, onDocument }: { isOpen: boolean; onClose: () => void; history: Sale[]; onDocument: (sale: Sale, mode: 'invoice' | 'receipt') => void }) {
+export default function PhoneSaleLookup({ isOpen, onClose, onDocument }: { isOpen: boolean; onClose: () => void; onDocument: (sale: Sale, mode: 'invoice' | 'receipt') => void }) {
     const [query, setQuery] = useState('');
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
@@ -22,7 +22,8 @@ export default function PhoneSaleLookup({ isOpen, onClose, history, onDocument }
             const imei = query.trim();
             validateImeis([imei], 1);
             const found = await db.lookupPhoneImei(imei);
-            const legacy = found.status === 'Not found' ? history.filter(sale => sale.items.some(item => itemImeis(item).includes(imei))) : [];
+            // Load older sales only when an explicit lookup needs the legacy fallback.
+            const legacy = found.status === 'Not found' ? (await db.sales.toArray()).filter(sale => sale.items.some(item => itemImeis(item).includes(imei))) : [];
             if (legacy.length > 1) throw new Error('Multiple historical sales contain this IMEI. Review the records before relying on this result.');
             if (token === request.current) setResult({ ...found, imei, ...(legacy.length === 1 ? { sale: legacy[0], status: 'Sold' } : {}) });
         } catch (failure) { if (token === request.current) setError(failure instanceof Error ? failure.message : 'Could not retrieve this phone. Try again.'); }

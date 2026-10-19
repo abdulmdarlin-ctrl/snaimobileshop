@@ -75,7 +75,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
       try {
          const data = await db.products.toArray();
          setProducts(data.sort((a, b) => a.name.localeCompare(b.name)));
-      } catch (error) { showToast('Could not load inventory. Please refresh and retry.', 'error'); }
+      } catch (error) { showToast(databaseErrorMessage(error, 'Could not load inventory. Please refresh and retry.'), 'error'); }
       finally { setLoading(false); }
    };
 

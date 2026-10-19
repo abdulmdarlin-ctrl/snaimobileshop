@@ -33,6 +33,7 @@ const App: React.FC = () => {
   useEffect(() => {
     let active = true;
     const unsubscribe = onAuthStateChanged(auth, async identity => {
+      db.clearReadCache();
       try {
         let profile: User | null = null;
         if (identity) {
@@ -132,6 +133,7 @@ const App: React.FC = () => {
   };
 
   const handleLogout = () => {
+    db.clearReadCache();
     void signOut(auth).catch(error => console.error("Sign out failed", error));
     setUser(null);
     localStorage.removeItem('sna_user');

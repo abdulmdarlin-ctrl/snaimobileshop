@@ -1,3 +1,4 @@
+import { databaseErrorMessage } from '../utils/databaseErrors';
 import { createId } from '../utils/id';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowUpRight, Search, Users, UserPlus, Edit2, Download, Printer, RefreshCw, ChevronLeft, ChevronRight, ReceiptText, Wallet, ShieldCheck, FileText, AlertCircle } from 'lucide-react';
@@ -48,14 +49,14 @@ export default function Customers({ user }: { user: User }) {
     const [paymentSale, setPaymentSale] = useState<Sale | null>(null), [paymentError, setPaymentError] = useState('');
     const [documentSale, setDocumentSale] = useState<Sale | null>(null), [documentMode, setDocumentMode] = useState<'invoice' | 'receipt'>('invoice'), [documentReceiptId, setDocumentReceiptId] = useState<string | undefined>();
     const [payment, setPayment] = useState({ amount: '', method: 'Cash', reference: '' });
-    async function refresh() {
+    async function refresh(fresh = true) {
         if (!canView) { setLoading(false); return; }
         const id = ++request.current; setLoading(true); setLoadError('');
-        try { const [records, transactions] = await Promise.all([db.customers.toArray(), db.sales.toArray()]); if (id === request.current) { setCustomers(records.map(c => ({ ...c, status: customerStatus(c.status) }))); setSales(transactions); } }
+        try { const [records, transactions] = await Promise.all([db.customers.toArray({ fresh }), db.sales.toArray({ fresh })]); if (id === request.current) { setCustomers(records.map(c => ({ ...c, status: customerStatus(c.status) }))); setSales(transactions); } }
         catch { if (id === request.current) setLoadError('Could not load customer records. Check your connection and retry.'); }
         finally { if (id === request.current) setLoading(false); }
     }
-    useEffect(() => { void refresh(); if (canView) void db.settings.toCollection().first().then(s => setSettings(s || null)).catch(() => {}); return () => { request.current++; }; }, [user.id, canView]);
+    useEffect(() => { void refresh(false); if (canView) void db.settings.toCollection().first().then(s => setSettings(s || null)).catch(() => {}); return () => { request.current++; }; }, [user.id, canView]);
     const accounts = useMemo(() => customers.map(customer => { const purchases = getCustomerSales(sales, customer, customers).sort((a, b) => b.timestamp - a.timestamp); return { customer, purchases, ...customerAccountSummary(purchases) }; }), [customers, sales]);
     const filtered = useMemo(() => {
         const term = query.trim().toLowerCase(), phone = normalizeCustomerPhone(query);
@@ -114,7 +115,7 @@ export default function Customers({ user }: { user: User }) {
             if (!await confirmAction({ title: 'Record customer payment?', message: 'Confirm that this money has been received.', confirmLabel: 'Record payment', details: [{ label: 'Invoice', value: paymentSale.receiptNo }, { label: 'Received', value: currency(amount) }, { label: 'Method', value: payment.method }] })) return;
             const saved = await db.recordSalePayment(paymentSale.id, { id: paymentId.current, amount, method: payment.method, reference: payment.reference.trim(), timestamp: Date.now(), user: user.username });
             setSales(s => s.map(record => record.id === saved.id ? saved : record)); setPaymentSale(null); setDocumentSale(saved); setDocumentMode('receipt'); setDocumentReceiptId(paymentId.current); showToast('Payment recorded. Balance updated.', 'success');
-        } catch (error) { setPaymentError(error instanceof Error ? error.message : 'Payment failed. Please retry.'); }
+        } catch (error) { setPaymentError(databaseErrorMessage(error, 'Payment failed. Please retry.')); }
         finally { lock.current = false; setBusy(false); }
     }
     const purchaseTable = (rows: Sale[], actions = true) => <div className="customer-table-scroll"><table className={actions ? 'responsive-record-table customer-table' : 'customer-table'}><thead><tr><th>Invoice / date</th><th>Items</th><th>Sale type</th><th className="numeric">Total</th><th className="numeric">Received</th><th className="numeric">Outstanding</th>{actions && <th><span className="sr-only">Actions</span></th>}</tr></thead><tbody>{rows.map(s => <tr key={s.id || s.receiptNo}><td data-label="Invoice / date">{actions ? <button className="customer-link" onClick={() => setInvoice(s)}>{s.receiptNo}</button> : s.receiptNo}<small>{date(s.timestamp)}</small></td><td data-label="Items">{s.items.map(i => `${i.name} × ${i.quantity}`).join(', ')}</td><td data-label="Sale type"><Status value={getSaleType(s)} /></td><td data-label="Total" className="numeric">{currency(s.total)}</td><td data-label="Received" className="numeric">{currency(receivedAmount(s))}</td><td data-label="Outstanding" className="numeric">{currency(outstandingAmount(s))}</td>{actions && <td data-label="Actions">{outstandingAmount(s) > 0 && canCollect && <button className="customer-button compact" onClick={() => openPayment(s)}>Record payment</button>}</td>}</tr>)}</tbody></table>{!rows.length && <div className="customer-empty"><ReceiptText size={26} /><h3>No invoices found</h3><p>Purchases linked to this customer appear here.</p></div>}</div>;

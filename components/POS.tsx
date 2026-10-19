@@ -102,6 +102,11 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const customerLock = useRef(false);
    const [paymentReference, setPaymentReference] = useState('');
    const [dataError, setDataError] = useState(false);
+   const [checkoutQuotaError, setCheckoutQuotaError] = useState(false);
+   const [historyLoading, setHistoryLoading] = useState(false);
+   const [historyError, setHistoryError] = useState('');
+   const [historyLoaded, setHistoryLoaded] = useState(false);
+   const historyRequest = useRef(0);
    const [checkoutError, setCheckoutError] = useState('');
    const skipReprice = useRef(false);
 
@@ -175,7 +180,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [heldSalesView, setHeldSalesView] = useState<'pending' | 'completed'>('pending');
 
    useEffect(() => {
-      fetchData();
+      fetchData(false);
       readHeldSales();
    }, []);
 
@@ -218,6 +223,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       const newHeldSale = {
          id: activeHeldSaleId || createId(),
          items: cart,
+         saleId: saleIdRef.current,
          pricingMode,
          checkoutForm,
          customerKind,
@@ -230,7 +236,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       };
       const updated = [newHeldSale, ...heldSales.filter(s => s.id !== activeHeldSaleId)];
       try { localStorage.setItem('sna_held_sales', JSON.stringify(updated)); }
-      catch { showToast('Could not hold this sale. The cart has been kept.', 'error'); return; }
+      catch { showToast('Could not hold this sale. The cart has been kept.', 'error'); return false; }
       setHeldSales(updated);
       setCart([]);
       setSaleType('Cash sale');
@@ -242,6 +248,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setIsHoldModalOpen(false);
       showToast("Sale put on hold", 'info');
       window.dispatchEvent(new Event('storage'));
+      return true;
    };
 
    const handleResumeSale = async (heldSale: any) => {
@@ -249,7 +256,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       catch { showToast('This held sale contains invalid items. It has not been changed.', 'error'); return; }
       if (cart.length > 0 && !await confirmAction({ title: 'Resume held sale?', message: 'This replaces the items currently in your cart with the held sale.', confirmLabel: 'Resume sale', tone: 'danger' })) return;
       skipReprice.current = heldSale.pricingMode !== pricingMode;
-      saleIdRef.current = `held-${heldSale.id}`;
+      saleIdRef.current = heldSale.saleId || `held-${heldSale.id}`;
       setPaymentReference(heldSale.paymentReference || '');
       setSaleType(heldSale.saleType || 'Cash sale');
       setCart(heldSale.items);
@@ -281,15 +288,14 @@ const POS: React.FC<POSProps> = ({ user }) => {
       window.dispatchEvent(new Event('storage'));
    };
 
-   const fetchData = async () => {
+   const fetchData = async (fresh = true) => {
       setLoading(true);
       setDataError(false);
       try {
-      const [p, s, sets, cust] = await Promise.all([
-         db.products.toArray(),
-         db.sales.toArray(),
-         db.settings.toCollection().first(),
-         db.customers.toArray()
+      const [p, sets, cust] = await Promise.all([
+         db.products.toArray({ fresh }),
+         db.settings.toCollection().first({ fresh }),
+         db.customers.toArray({ fresh })
       ]);
 
       const cats = new Set(p.map(prod => prod.category || 'General'));
@@ -297,10 +303,23 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setProducts(p);
       setCustomers(cust);
       setSettings(sets || null);
-      setSalesHistory(s.sort((a, b) => b.timestamp - a.timestamp));
       } catch (error) { setDataError(true); showToast(databaseErrorMessage(error, 'Could not refresh sales and stock. Please retry.'), 'error'); }
       finally { setLoading(false); }
    };
+
+   const fetchHistory = async (fresh = false) => {
+      const request = ++historyRequest.current;
+      setHistoryLoading(true); setHistoryError('');
+      try {
+         const rows = await db.sales.toArray({ fresh });
+         if (request === historyRequest.current) { setSalesHistory(rows.sort((a, b) => b.timestamp - a.timestamp)); setHistoryLoaded(true); }
+      } catch (error) { if (request === historyRequest.current) setHistoryError(databaseErrorMessage(error, 'Sales history could not be loaded.')); }
+      finally { if (request === historyRequest.current) setHistoryLoading(false); }
+   };
+   useEffect(() => {
+      if (isHistoryModalOpen || isStatementModalOpen || (isHeldSalesModalOpen && heldSalesView === 'completed')) void fetchHistory();
+   }, [isHistoryModalOpen, isStatementModalOpen, isHeldSalesModalOpen, heldSalesView]);
+   useEffect(() => () => { historyRequest.current++; }, []);
 
    // Effect to handle printing the full statement from a paginated view
    useEffect(() => {
@@ -357,18 +376,16 @@ const POS: React.FC<POSProps> = ({ user }) => {
    }, [pricingMode]);
 
    useEffect(() => {
-      if (salesHistory.length > 0) {
-         const saleIdToView = sessionStorage.getItem('sna_view_receipt_for_id');
-         if (saleIdToView) {
-            sessionStorage.removeItem('sna_view_receipt_for_id');
-            const sale = salesHistory.find(s => s.id === saleIdToView);
-            if (sale) {
-               openSaleDocument(sale);
-               setIsReceiptOpen(true);
-            }
-         }
-      }
-   }, [salesHistory]);
+      const id = sessionStorage.getItem('sna_view_receipt_for_id');
+      if (!id) return;
+      let active = true;
+      void db.sales.getMany([id]).then(rows => {
+         if (!active) return;
+         if (rows[0]) { sessionStorage.removeItem('sna_view_receipt_for_id'); openSaleDocument(rows[0]); }
+         else showToast('The requested sale was not found.', 'error');
+      }).catch(error => { if (active) showToast(databaseErrorMessage(error, 'Could not open this sale.'), 'error'); });
+      return () => { active = false; };
+   }, []);
 
    const cashiers = useMemo(() => {
       const list = new Set(salesHistory.map(s => s.cashierName));
@@ -669,7 +686,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          setPaymentSale(null);
          setIsReceiptOpen(true);
          showToast('Payment recorded successfully.', 'success');
-      } catch (error) { showToast(error instanceof Error ? error.message : 'Could not record payment.', 'error'); }
+      } catch (error) { showToast(databaseErrorMessage(error, 'Could not record payment.'), 'error'); }
       finally { collectionLock.current = false; setCollecting(false); }
    };
 
@@ -680,6 +697,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       paymentLock.current = true;
       setProcessingPayment(true);
       setCheckoutError('');
+      setCheckoutQuotaError(false);
       try {
          const cartWithWarranty = cart.map(item => {
             const product = products.find(p => p.id === item.productId);
@@ -692,7 +710,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             return item;
          });
          const sale: Sale = {
-            id: activeHeldSaleId ? `held-${activeHeldSaleId}` : saleIdRef.current,
+            id: saleIdRef.current,
             receiptNo: `${settings?.invoicePrefix || 'INV'}-${Date.now()}-${saleIdRef.current.slice(0, 8)}`,
             taxPercentage: settings?.taxEnabled ? (settings.taxPercentage ?? 18) : 0,
             paymentReference: checkoutForm.paymentMethod === 'Cash' ? '' : paymentReference.trim(),
@@ -754,6 +772,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          console.error(e);
          const message = databaseErrorMessage(e, 'Transaction failed. Please retry.');
          const explanation = isDatabaseQuotaError(e) ? `${message} This sale was not completed. Your order is still here; retry the same order once database access is restored.` : message;
+         setCheckoutQuotaError(isDatabaseQuotaError(e));
          setCheckoutError(explanation);
          showToast(message, 'error');
       } finally {
@@ -816,6 +835,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
          // Refresh products to show restored stock
          void fetchData();
+         void fetchHistory(true);
          showToast("Sale record deleted", 'success');
       } catch (e) {
          console.error("Delete Error:", e);
@@ -859,6 +879,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
          // Refresh products
          void fetchData();
+         void fetchHistory(true);
          showToast("Sale updated successfully", 'success');
 
       } catch (e) {
@@ -953,8 +974,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const renderCatalog = () => (
       <div className="pos-catalog flex-1 flex flex-col min-w-0 bg-white rounded-3xl border border-slate-100  overflow-hidden h-full">
          {dataError && <div role="alert" className="p-3 bg-amber-50 text-amber-800 text-sm flex items-center justify-between gap-3">
-            Stock and sales could not be refreshed.
-            <button type="button" onClick={fetchData} className="underline font-semibold">Retry</button>
+            Stock and customer details could not be refreshed.
+            <button type="button" onClick={() => { void fetchData(true); }} className="underline font-semibold">Retry</button>
          </div>}
          <div className="pos-catalog-actions">
             <button type="button" className="pos-scan-sale" disabled={loading || dataError || processingPayment} onClick={() => setSellScannerOpen(true)}><ScanBarcode size={18} /><span>Scan to sell</span></button>
@@ -1476,7 +1497,11 @@ const POS: React.FC<POSProps> = ({ user }) => {
             noPadding
          >
             <div className="p-8 space-y-6">
-               {checkoutError && <p role="alert" className="customer-form-error">{checkoutError}</p>}
+               {checkoutError && <div role="alert" className="customer-form-error space-y-3"><p>{checkoutError}</p>{checkoutQuotaError && <>
+                  <p>No receipt has been issued for this attempt. Keep the order on hold and retry it after database access is restored.</p>
+                  <button type="button" className="win-button-primary w-full" onClick={() => { if (confirmHoldSale()) { setIsConfirmSaleModalOpen(false); setIsCheckoutOpen(false); setCheckoutError(''); setCheckoutQuotaError(false); } }}>Keep order on hold</button>
+                  {user.role === UserRole.ADMIN && <a className="block underline" href="https://console.firebase.google.com/project/snai-inventory-system/firestore/usage" target="_blank" rel="noopener noreferrer">Open Firebase usage and billing</a>}
+               </>}</div>}
                <div className="rounded-xl border border-slate-200 p-4 text-sm"><p className="text-slate-500">{customerKind === 'Walk-in' ? 'Walk-in customer' : 'Registered customer'}</p><p className="font-semibold">{checkoutForm.customerName}</p>{checkoutForm.customerPhone && <p>{checkoutForm.customerPhone}</p>}<p className="mt-2">{saleType} / {checkoutForm.paymentMethod}</p></div>
                <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100 space-y-4">
                   <div className="flex justify-between items-baseline">
@@ -1612,13 +1637,13 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </div>
                </div>
                <div className="sales-history-exports" role="group" aria-label="Sales report exports">
-                  <button type="button" onClick={() => setIsStatementModalOpen(true)} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2">
+                  <button type="button" disabled={historyLoading || !!historyError || !historyLoaded} onClick={() => setIsStatementModalOpen(true)} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2">
                      <FileText size={14} strokeWidth={1.75} /> Statement
                   </button>
-                  <button type="button" onClick={downloadCSV} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2">
+                  <button type="button" disabled={historyLoading || !!historyError || !historyLoaded} onClick={downloadCSV} className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 hover:border-slate-300 transition-all flex items-center gap-2">
                      <FileText size={14} strokeWidth={1.75} /> CSV
                   </button>
-                  <button type="button" onClick={() => exportSectionToPDF('#sales-history-table', 'Sales_Report.pdf')} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-black transition-all flex items-center gap-2">
+                  <button type="button" disabled={historyLoading || !!historyError || !historyLoaded} onClick={() => exportSectionToPDF('#sales-history-table', 'Sales_Report.pdf')} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold hover:bg-black transition-all flex items-center gap-2">
                      <Download size={14} strokeWidth={1.75} /> PDF
                   </button>
                </div>
@@ -1626,6 +1651,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             </header>
 
             <div className="sales-history-scroll">
+            <div className="p-4 border-b border-slate-200 flex flex-wrap items-center gap-3 no-print"><p role={historyError ? 'alert' : 'status'} className="flex-1 text-sm">{historyLoading ? 'Loading sales history...' : historyError || 'Sales history is loaded when you open reports.'}</p><button type="button" className="win-button-primary" disabled={historyLoading} onClick={() => { void fetchHistory(true); }}>Refresh history</button></div>
             {/* Filters & Summary Section */}
             <div className="sales-history-summary shrink-0 bg-slate-50/50 border-b border-slate-100 no-print">
                {/* Summary Cards - Restructured */}
@@ -2396,6 +2422,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      ) : (
                         // COMPLETED VIEW
                         (() => {
+                           if (historyLoading || historyError) return <div className="p-4 space-y-3"><p role={historyError ? 'alert' : 'status'}>{historyLoading ? 'Loading completed sales...' : historyError}</p>{historyError && <button type="button" className="win-button-primary" onClick={() => { void fetchHistory(true); }}>Retry history</button>}</div>;
                            const completedHeldSales = salesHistory.filter(s => s.wasHeld);
                            return completedHeldSales.length === 0 ? (
                               <div className="h-40 flex flex-col items-center justify-center text-slate-300">
@@ -2454,7 +2481,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                <button type="submit" disabled={collecting} className="win-button-primary w-full">{collecting ? 'Saving...' : 'Record payment'}</button>
             </form>}
          </Modal>
-         <PhoneSaleLookup isOpen={imeiLookupOpen} onClose={() => setImeiLookupOpen(false)} history={salesHistory} onDocument={(sale, mode) => { setImeiLookupOpen(false); openSaleDocument(sale, mode); }} />
+         <PhoneSaleLookup isOpen={imeiLookupOpen} onClose={() => setImeiLookupOpen(false)} onDocument={(sale, mode) => { setImeiLookupOpen(false); openSaleDocument(sale, mode); }} />
          {/* --- EDIT SALE MODAL --- */}
          {
             isEditModalOpen && saleToEdit && (

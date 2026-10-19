@@ -7,6 +7,6 @@ export function isDatabaseQuotaError(error: unknown): boolean {
 }
 
 export function databaseErrorMessage(error: unknown, fallback: string): string {
-    if (isDatabaseQuotaError(error)) return 'Cloud database quota reached. Ask an administrator to check Firebase usage and billing, or wait for the quota to reset.';
+    if (isDatabaseQuotaError(error)) return 'Cloud database quota reached. Firebase is refusing requests. Ask an administrator to check Firebase usage and billing. If a daily limit is exhausted, enable billing or wait for its reset.';
     return error instanceof Error ? error.message : fallback;
 }
