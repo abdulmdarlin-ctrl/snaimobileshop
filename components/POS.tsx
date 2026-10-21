@@ -20,6 +20,8 @@ import { printSection, exportSectionToPDF } from '../utils/printExport';
 import { useToast } from './Toast';
 import Modal from './Modal';
 import ImeiScanner from './ImeiScanner';
+import CheckoutCustomerPicker from './CheckoutCustomerPicker';
+import InvoiceProductPicker from './InvoiceProductPicker';
 import { addScannedSaleItem } from '../utils/scanToSell';
 import SaleDocumentDialog from './SaleDocumentDialog';
 import PhoneSaleLookup from './PhoneSaleLookup';
@@ -153,8 +155,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [hasManuallyAdjustedPayment, setHasManuallyAdjustedPayment] = useState(false);
 
    // Customer Search State in POS
-   const [customerSearch, setCustomerSearch] = useState('');
-   const [showCustomerResults, setShowCustomerResults] = useState(false);
    const [newCustomerForm, setNewCustomerForm] = useState({ name: '', phone: '', email: '', address: '' });
    const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
 
@@ -483,17 +483,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
       statementPageRefs.current = statementPageRefs.current.slice(0, statementPages.length);
    }, [statementPages]);
 
-   const filteredCustomers = useMemo(() => {
-      if (!customerSearch) return [];
-      const term = customerSearch.toLowerCase();
-      return customers.filter(c =>
-         (c.name || '').toLowerCase().includes(term) ||
-         (c.phone && c.phone.includes(term)) ||
-         (c.email && c.email.toLowerCase().includes(term)) ||
-         (c.address && c.address.toLowerCase().includes(term))
-      ).slice(0, 5);
-   }, [customers, customerSearch]);
-
    // --- CART ACTIONS ---
 
    const addToCart = (product: Product) => {
@@ -636,7 +625,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setIsSelectPricingModalOpen(false); // Close first modal
 
       setHasManuallyAdjustedPayment(false);
-      setShowCustomerResults(false);
       setIsCreatingCustomer(false);
       setIsCheckoutOpen(true);
    }; // Open second modal
@@ -788,11 +776,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
          customerName: c.name,
          customerPhone: c.phone || ''
       }));
-      setCustomerSearch(c.name);
-      setShowCustomerResults(false);
    };
 
-   const customerMatches = findCustomerMatches(customers, newCustomerForm);
+   const customerMatches = useMemo(() => isCreatingCustomer ? findCustomerMatches(customers, newCustomerForm) : [], [customers, newCustomerForm, isCreatingCustomer]);
    const handleCreateCustomer = async () => {
       if (customerLock.current) return;
       if (!newCustomerForm.name.trim() || !normalizeCustomerPhone(newCustomerForm.phone)) return showToast('Enter a customer name and phone number.', 'error');
@@ -971,7 +957,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setIsEditModalOpen(true);
    };
 
-   const renderCatalog = () => (
+   const catalog = useMemo(() => (
       <div className="pos-catalog flex-1 flex flex-col min-w-0 bg-white rounded-3xl border border-slate-100  overflow-hidden h-full">
          {dataError && <div role="alert" className="p-3 bg-amber-50 text-amber-800 text-sm flex items-center justify-between gap-3">
             Stock and customer details could not be refreshed.
@@ -1063,7 +1049,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             )}
          </div>
       </div>
-   );
+   ), [dataError, loading, processingPayment, searchTerm, filteredProducts, selectedCategory, categories, heldSales, products, cart, settings, pricingMode]);
 
    return (
       <div className="pos-workspace flex flex-col lg:flex-row h-full gap-6 font-sans" data-mobile-pane={mobilePane}>
@@ -1075,7 +1061,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          {sellScannerOpen && <ImeiScanner purpose="sale" onSaleScan={scanToCart} onClose={() => { setSellScannerOpen(false); setMobilePane('order'); }} />}
 
          {/* LEFT: Product Catalog */}
-         {renderCatalog()}
+         {catalog}
 
          {/* RIGHT: Cart & Checkout */}
          <div className="pos-order w-full lg:w-[400px] xl:w-[450px] bg-white rounded-3xl border border-slate-100  flex flex-col overflow-hidden shrink-0 h-full">
@@ -1341,7 +1327,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   <label className="block text-sm">Customer type
                      <select className="win-input mt-1" value={customerKind} onChange={event => {
                         const kind = event.target.value as 'Registered' | 'Walk-in';
-                        setCustomerKind(kind); setCustomerSearch(''); setShowCustomerResults(false); setIsCreatingCustomer(false);
+                        setCustomerKind(kind); setIsCreatingCustomer(false);
                         setCheckoutForm(previous => ({ ...previous, customerName: '', customerPhone: '', ...(kind === 'Walk-in' ? { amountPaid: total } : {}) }));
                         if (kind === 'Walk-in') { setSaleType('Cash sale'); setHasManuallyAdjustedPayment(false); }
                      }}><option value="Registered">Registered customer</option><option value="Walk-in">Walk-in customer</option></select>
@@ -1361,45 +1347,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </div>
 
                   {!isCreatingCustomer ? (
-                     <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} strokeWidth={1.75} />
-                        <input
-                           className="w-full h-10 bg-slate-50 rounded-xl pl-9 pr-4 text-xs font-bold outline-none focus:ring-2 focus:ring-slate-200"
-                           placeholder="Search Name, Phone, Email or Address..."
-                           value={customerSearch}
-                           onChange={e => {
-                              setCustomerSearch(e.target.value);
-                              setShowCustomerResults(true);
-                              if (checkoutForm.customerName && e.target.value !== checkoutForm.customerName) {
-                                 setCheckoutForm(prev => ({ ...prev, customerName: '', customerPhone: '' }));
-                              }
-                           }}
-                           onFocus={() => setShowCustomerResults(true)}
-                        />
-                        {showCustomerResults && customerSearch && (
-                           <div className="absolute top-full left-0 right-0 bg-white border border-slate-100  rounded-xl mt-1 z-20 max-h-48 overflow-y-auto">
-                              {filteredCustomers.map(c => (
-                                 <button
-                                    key={c.id}
-                                    onClick={() => handleSelectCustomer(c)}
-                                    className="w-full text-left px-4 py-2 hover:bg-slate-50 border-b border-slate-50 last:border-0"
-                                 >
-                                    <p className="text-xs font-bold text-slate-800">{c.name}</p>
-                                    <div className="flex gap-2 text-xs text-slate-400">
-                                       {c.phone && <span>{c.phone}</span>}
-                                       {c.address && <span>• {c.address}</span>}
-                                    </div>
-                                 </button>
-                              ))}
-                              {filteredCustomers.length === 0 && (
-                                 <div className="p-3 text-center">
-                                    <p className="text-xs text-slate-400 mb-2">No customer found</p>
-                                    <button onClick={() => setIsCreatingCustomer(true)} className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold uppercase">Create New</button>
-                                 </div>
-                              )}
-                           </div>
-                        )}
-                     </div>
+                     <CheckoutCustomerPicker customers={customers} selectedName={checkoutForm.customerName} selectedPhone={checkoutForm.customerPhone} onSelect={handleSelectCustomer} onClear={() => setCheckoutForm(previous => ({ ...previous, customerName: '', customerPhone: '' }))} onCreate={() => setIsCreatingCustomer(true)} />
                   ) : (
                      <div className="bg-slate-50 p-4 rounded-2xl space-y-4   border border-slate-100">
                         <div className="flex justify-between items-center mb-1">
@@ -1460,19 +1408,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      </div>
                   )}
 
-                  {/* Selected Customer Display */}
-                  {checkoutForm.customerName && !isCreatingCustomer && (
-                     <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 text-blue-700 rounded-lg border border-blue-100">
-                        <UserIcon size={14} strokeWidth={1.75} />
-                        <div className="flex-1 min-w-0">
-                           <p className="text-xs font-bold truncate">{checkoutForm.customerName}</p>
-                           {checkoutForm.customerPhone && <p className="text-xs opacity-80">{checkoutForm.customerPhone}</p>}
-                        </div>
-                        <button onClick={() => { setCheckoutForm(prev => ({ ...prev, customerName: '', customerPhone: '' })); setCustomerSearch(''); }} className="p-1 hover:bg-blue-100 rounded">
-                           <X size={14} strokeWidth={1.75} />
-                        </button>
-                     </div>
-                  )}
                   </>}
                </section>
 
@@ -2506,18 +2441,11 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         </select>
                      </label>
                      </>}
-                     <label className="block text-sm">Add product
-                        <select className="win-input mt-1" value="" onChange={e => {
-                           const product = products.find(p => p.id === e.target.value);
-                           if (!product?.id) return;
+                     <InvoiceProductPicker products={products} items={saleToEdit.items} disabled={isUpdating} priceFor={product => calculatePrice(product, saleToEdit.customerType || 'Retail')} onAdd={product => {
                            const existing = saleToEdit.items.find(item => item.productId === product.id);
                            const price = calculatePrice(product, saleToEdit.customerType || 'Retail');
                            recalculateEditedSale(existing ? saleToEdit.items.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1, total: money((item.quantity + 1) * item.price) } : item) : [...saleToEdit.items, { productId: product.id, name: product.name, price, originalPrice: price, costPrice: product.costPrice, quantity: 1, total: price }]);
-                        }}>
-                           <option value="">Select a product to add</option>
-                           {products.map(product => <option key={product.id} value={product.id}>{product.name} · Stock: {product.stockQuantity}</option>)}
-                        </select>
-                     </label>
+                     }} />
                      {saleToEdit.items.length === 0 && <p role="alert" className="text-sm text-red-600">Add at least one item before saving.</p>}
                      <div className="invoice-editor-items">
                         {saleToEdit.items.map((item, idx) => (

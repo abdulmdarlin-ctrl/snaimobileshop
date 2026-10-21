@@ -26,7 +26,7 @@ function load(relative, dependencies = {}, crypto = localCrypto) {
 test('phone sales renders on local HTTP without crypto.randomUUID', () => {
     const ids = load('../utils/id.ts');
     const pos = load('../components/POS.tsx', {
-        '../utils/id': ids, '../utils/scanToSell': {}, './ImeiScanner': { default: () => null, __esModule: true }, '../utils/databaseErrors': load('../utils/databaseErrors.ts'),
+        './InvoiceProductPicker': { default: () => null, __esModule: true }, './CheckoutCustomerPicker': { default: () => null, __esModule: true }, '../utils/id': ids, '../utils/scanToSell': {}, './ImeiScanner': { default: () => null, __esModule: true }, '../utils/databaseErrors': load('../utils/databaseErrors.ts'),
         '../utils/dialog': {}, '../db': {}, '../utils/imei': load('../utils/imei.ts'),
         '../utils/pos': load('../utils/pos.ts'), '../utils/customers': load('../utils/customers.ts'),
         '../types': load('../types.ts'), '../utils/printExport': {},
@@ -57,4 +57,27 @@ test('documents distinguish goods invoiced from individual payments and print th
     const receipt = render('receipt');
     assert.match(receipt, /PAYMENT RECEIPT/); assert.match(receipt, /RCT-s1-initial/); assert.match(receipt, /UGX 40/); assert.doesNotMatch(receipt, /Invoice total|QR|SNA-VERIFY|data:image/);
     assert.match(render('receipt', { ...sale, amountPaid: 0 }), /No payment has been received/);
+});
+
+test('checkout picker shows the selected customer and a dedicated keyboard-friendly search input', () => {
+    const customers = load('../utils/customers.ts');
+    const search = load('../utils/customerSearch.ts', { './customers': customers });
+    const Picker = load('../components/CheckoutCustomerPicker.tsx', { '../utils/customerSearch': search }).default;
+    const html = renderToString(React.createElement(Picker, { customers: [], selectedName: 'Emma Customer', selectedPhone: '0700123456', onSelect() {}, onClear() {}, onCreate() {} }));
+    assert.match(html, /role="combobox"/);
+    assert.match(html, /autoComplete="off"/);
+    assert.match(html, /enterKeyHint="search"/);
+    assert.match(html, /Emma Customer/);
+    assert.match(html, /0700123456/);
+    assert.match(html, /Remove selected customer/);
+});
+
+test('invoice product picker renders an accessible search field without an unbounded select list', () => {
+    const search = load('../utils/productSearch.ts');
+    const Picker = load('../components/InvoiceProductPicker.tsx', { '../utils/productSearch': search }).default;
+    const html = renderToString(React.createElement(Picker, { products: [{ id: 'p1', name: 'T528 NEW', stockQuantity: 2, selling_price: 65500 }], items: [], priceFor: product => product.selling_price, onAdd() {} }));
+    assert.match(html, /Add product/);
+    assert.match(html, /role="combobox"/);
+    assert.match(html, /Search product name or brand/);
+    assert.doesNotMatch(html, /<select/);
 });

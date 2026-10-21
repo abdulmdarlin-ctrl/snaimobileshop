@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
+import { lockBodyScroll } from '../utils/scrollLock';
 
 interface ModalProps {
     isOpen: boolean;
@@ -16,29 +17,25 @@ interface ModalProps {
 
 const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, ariaLabel, children, maxWidth = 'md', noPadding = false, contentClassName = 'overflow-y-auto custom-scrollbar' }) => {
     const [mounted, setMounted] = useState(false);
+    const close = useRef(onClose);
+    close.current = onClose;
 
     useEffect(() => {
         setMounted(true);
-        return () => setMounted(false);
     }, []);
 
     // Close on escape key
     useEffect(() => {
         const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && !document.querySelector('.confirmation-layer')) onClose();
+            if (e.key === 'Escape' && !document.querySelector('.confirmation-layer')) close.current();
         };
         if (isOpen) window.addEventListener('keydown', handleEsc);
         return () => window.removeEventListener('keydown', handleEsc);
-    }, [isOpen, onClose]);
+    }, [isOpen]);
 
     // Prevent body scroll when modal is open
     useEffect(() => {
-        if (isOpen) {
-            document.body.style.overflow = 'hidden';
-        } else {
-            document.body.style.overflow = 'unset';
-        }
-        return () => { document.body.style.overflow = 'unset'; };
+        if (isOpen) return lockBodyScroll();
     }, [isOpen]);
 
     if (!mounted || !isOpen) return null;

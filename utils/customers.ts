@@ -52,6 +52,7 @@ export function findCustomerMatches(customers: Customer[], draft: Partial<Custom
     const name = (draft.name || '').trim().replace(/\s+/g, ' ').toLowerCase();
     const email = (draft.email || '').trim().toLowerCase();
     const phone = normalizeCustomerPhone(draft.phone);
+    if (!name && !email && !phone) return [];
     return customers.filter(c => !excludeId || c.id !== excludeId).map(customer => ({
         customer,
         phoneMatch: !!phone && normalizeCustomerPhone(customer.phone) === phone,

@@ -1,4 +1,5 @@
 import { cancelDialogs } from './utils/dialog';
+import { watchMobileViewport } from './utils/mobileViewport';
 import { activeStaffProfile } from './utils/staff';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
@@ -55,14 +56,7 @@ const App: React.FC = () => {
   }, []);
 
   const mainScrollRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    const update = () => {
-      if (!viewport || viewport.scale === 1) document.documentElement.style.setProperty('--app-viewport-height', `${Math.round(viewport?.height || window.innerHeight)}px`);
-    };
-    update(); window.addEventListener('resize', update); viewport?.addEventListener('resize', update);
-    return () => { window.removeEventListener('resize', update); viewport?.removeEventListener('resize', update); document.documentElement.style.removeProperty('--app-viewport-height'); };
-  }, []);
+  useEffect(() => watchMobileViewport(), []);
   const [settings, setSettings] = useState<AppSettings | null>(null);
 
   // Initialize page - all users start on dashboard

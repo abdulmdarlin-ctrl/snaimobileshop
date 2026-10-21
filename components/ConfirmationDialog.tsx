@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Check, Info, X } from 'lucide-react';
 import { cancelDialogs, currentDialog, DialogRequest, resolveDialog, subscribeDialogs } from '../utils/dialog';
+import { lockBodyScroll } from '../utils/scrollLock';
 
 function DialogContent({ request }: { request: DialogRequest }) {
     const panel = useRef<HTMLDivElement>(null);
@@ -11,8 +12,7 @@ function DialogContent({ request }: { request: DialogRequest }) {
     const dismiss = () => resolveDialog(request.id, request.kind === 'input' ? null : false);
     useEffect(() => {
         const previousFocus = document.activeElement as HTMLElement | null;
-        const previousOverflow = document.body.style.overflow;
-        document.body.style.overflow = 'hidden';
+        const unlock = lockBodyScroll();
         const portal = panel.current?.closest('.confirmation-layer');
         const siblings = Array.from(document.body.children).filter(node => node !== portal && node instanceof HTMLElement) as HTMLElement[];
         const previousInert = siblings.map(node => node.inert);
@@ -30,7 +30,7 @@ function DialogContent({ request }: { request: DialogRequest }) {
         document.addEventListener('keydown', onKey, true);
         return () => {
             document.removeEventListener('keydown', onKey, true);
-            document.body.style.overflow = previousOverflow;
+            unlock();
             siblings.forEach((node, index) => { node.inert = previousInert[index]; });
             if (previousFocus?.isConnected) previousFocus.focus();
         };
