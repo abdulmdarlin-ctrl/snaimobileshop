@@ -2,6 +2,7 @@ import React, { memo, useDeferredValue, useEffect, useId, useMemo, useRef, useSt
 import { Search, UserRound, X } from 'lucide-react';
 import type { Customer } from '../types';
 import { indexCustomers, searchCustomers } from '../utils/customerSearch';
+import { registeredCustomerIssue } from '../utils/customers';
 
 interface Props {
     customers: Customer[];
@@ -33,7 +34,7 @@ export default memo(function CheckoutCustomerPicker({ customers, selectedName, s
         return () => document.removeEventListener('pointerdown', outside);
     }, [open]);
     const select = (customer?: Customer) => {
-        if (!customer?.id || customer.status === 'Inactive' || customer.status === 'Blacklisted') return;
+        if (registeredCustomerIssue(customer)) return;
         setQuery(customer.name); setOpen(false); setActive(-1);
         input.current?.blur();
         onSelect(customer);
@@ -47,17 +48,17 @@ export default memo(function CheckoutCustomerPicker({ customers, selectedName, s
                 onKeyDown={event => {
                     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                     if (event.key === 'Escape') { event.stopPropagation(); setOpen(false); setActive(-1); return; }
-                    const eligible = matches.map((customer, position) => customer.id && customer.status !== 'Inactive' && customer.status !== 'Blacklisted' ? position : -1).filter(position => position >= 0);
+                    const eligible = matches.map((customer, position) => !registeredCustomerIssue(customer) ? position : -1).filter(position => position >= 0);
                     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true); if (!pending && eligible.length) { const current = eligible.indexOf(active); setActive(eligible[event.key === 'ArrowDown' ? Math.min(eligible.length - 1, current + 1) : current <= 0 ? eligible.length - 1 : current - 1]); } }
                     if (event.key === 'Enter') { event.preventDefault(); if (visible && !pending && eligible.length) select(matches[eligible.includes(active) ? active : eligible[0]]); }
                 }} />
             {query && <button type="button" aria-label="Clear customer search" onClick={() => { setQuery(''); setActive(-1); setOpen(true); onClear(); input.current?.focus(); }}><X size={17} /></button>}
         </div>
         {visible && <div className="checkout-customer-results" id={listId} role="listbox" aria-label="Matching customers" aria-busy={pending}>
-            {pending ? <p role="status">Searching customers...</p> : matches.length ? matches.map((customer, position) => <button type="button" role="option" aria-selected={position === active} id={`${listId}-${position}`} key={customer.id || `${customer.phone}-${position}`} disabled={!customer.id || customer.status === 'Inactive' || customer.status === 'Blacklisted'} onMouseDown={event => event.preventDefault()} onClick={() => select(customer)}>
-                <strong>{customer.name}</strong><span>{customer.phone}{customer.address ? ` / ${customer.address}` : ''}</span>{(customer.status === 'Inactive' || customer.status === 'Blacklisted') && <small>{customer.status} account</small>}
+            {pending ? <p role="status">Searching customers...</p> : matches.length ? matches.map((customer, position) => <button type="button" role="option" aria-selected={position === active} id={`${listId}-${position}`} key={customer.id || `${customer.phone}-${position}`} disabled={!!registeredCustomerIssue(customer)} onMouseDown={event => event.preventDefault()} onClick={() => select(customer)}>
+                <strong>{customer.name}</strong><span>{customer.phone || 'Phone not recorded'}{customer.address ? ` / ${customer.address}` : ''}</span>{registeredCustomerIssue(customer) && <small>{registeredCustomerIssue(customer)}</small>}
             </button>) : <div className="checkout-customer-empty"><p role="status">No matching customer found.</p><button type="button" onClick={() => { input.current?.blur(); setOpen(false); onCreate(); }}>Create a customer</button></div>}
         </div>}
-        {selectedName && <div className="checkout-customer-selected"><UserRound size={18} aria-hidden="true" /><div><strong>{selectedName}</strong><span>{selectedPhone}</span></div><button type="button" aria-label="Remove selected customer" onClick={() => { setQuery(''); setOpen(false); setActive(-1); onClear(); }}><X size={18} /></button></div>}
+        {selectedName && <div className="checkout-customer-selected"><UserRound size={18} aria-hidden="true" /><div><strong>{selectedName}</strong><span>{selectedPhone || 'Phone not recorded'}</span></div><button type="button" aria-label="Remove selected customer" onClick={() => { setQuery(''); setOpen(false); setActive(-1); onClear(); }}><X size={18} /></button></div>}
     </div>;
 });

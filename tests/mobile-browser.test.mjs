@@ -62,7 +62,7 @@ test('documents distinguish goods invoiced from individual payments and print th
 test('checkout picker shows the selected customer and a dedicated keyboard-friendly search input', () => {
     const customers = load('../utils/customers.ts');
     const search = load('../utils/customerSearch.ts', { './customers': customers });
-    const Picker = load('../components/CheckoutCustomerPicker.tsx', { '../utils/customerSearch': search }).default;
+    const Picker = load('../components/CheckoutCustomerPicker.tsx', { '../utils/customerSearch': search, '../utils/customers': customers }).default;
     const html = renderToString(React.createElement(Picker, { customers: [], selectedName: 'Emma Customer', selectedPhone: '0700123456', onSelect() {}, onClear() {}, onCreate() {} }));
     assert.match(html, /role="combobox"/);
     assert.match(html, /autoComplete="off"/);
@@ -80,4 +80,15 @@ test('invoice product picker renders an accessible search field without an unbou
     assert.match(html, /role="combobox"/);
     assert.match(html, /Search product name or brand/);
     assert.doesNotMatch(html, /<select/);
+});
+
+
+test('checkout picker visibly identifies a selected customer with no recorded phone', () => {
+    const customers = load('../utils/customers.ts');
+    const search = load('../utils/customerSearch.ts', { './customers': customers });
+    const Picker = load('../components/CheckoutCustomerPicker.tsx', { '../utils/customerSearch': search, '../utils/customers': customers }).default;
+    const html = renderToString(React.createElement(Picker, { customers: [{ id: 'c1', name: 'MSAWO RASHIDA' }], selectedName: 'MSAWO RASHIDA', selectedPhone: '', onSelect() {}, onClear() {}, onCreate() {} }));
+    assert.match(html, /MSAWO RASHIDA/);
+    assert.match(html, /Phone not recorded/);
+    assert.match(html, /Remove selected customer/);
 });

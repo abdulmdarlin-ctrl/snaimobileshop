@@ -370,7 +370,7 @@ export const db = {
       if (sale.walkInName.trim().length > 100) throw new Error('Enter a customer name of up to 100 characters.');
       if (sale.customerPhone?.trim()) validateCustomerContact(sale.walkInName, sale.customerPhone);
       if (saleType !== 'Cash sale') throw new Error('Walk-in sales must be paid in full. Select a registered customer for debt or partial sales.');
-    } else if (!sale.customerId || !sale.customerName?.trim() || !sale.customerPhone?.trim()) throw new Error('Select a customer with a name and phone number before saving any sale.');
+    } else if (!sale.customerId) throw new Error('Select a registered customer before saving any sale.');
     const amountDue = outstandingAmount({ total: totals.total, amountPaid: sale.amountPaid });
     const cleanSale = sanitizeData({ ...sale, ...totals, saleType, customerKind: walkIn ? 'Walk-in' : 'Registered', invoiceNo: sale.invoiceNo || sale.receiptNo,
       ...(walkIn ? { customerId: null, customerName: 'Walk-in', walkInName: sale.walkInName!.trim() } : { walkInName: null }),
@@ -385,11 +385,11 @@ export const db = {
       if (mode === 'create' && existing.exists()) return { ...existing.data(), id: existing.id } as Sale;
       if (!walkIn) {
         const customer = await transaction.get(doc(dbInstance, COLLECTIONS.customers, sale.customerId!));
-        if (!customer.exists() || customer.data().status === 'Blacklisted') throw new Error('Select an existing customer who is not blacklisted.');
-        if (mode === 'create' && customer.data().status === 'Inactive') throw new Error('This customer is inactive. Reactivate the account before creating a new sale.');
-        if (!customer.data().name?.trim() || !customer.data().phone?.trim()) throw new Error('Update the customer name and phone before completing the sale.');
-        cleanSale.customerName = customer.data().name;
-        cleanSale.customerPhone = customer.data().phone;
+        if (!customer.exists() || customerStatus(customer.data().status) === 'Blacklisted') throw new Error('Select an existing customer who is not blacklisted.');
+        if (mode === 'create' && customerStatus(customer.data().status) === 'Inactive') throw new Error('This customer is inactive. Reactivate the account before creating a new sale.');
+        if (typeof customer.data().name !== 'string' || !customer.data().name.trim()) throw new Error('Update the customer name before completing the sale.');
+        cleanSale.customerName = customer.data().name.trim();
+        cleanSale.customerPhone = String(customer.data().phone ?? '').trim();
       }
       if (mode === 'edit' && !existing.exists()) throw new Error('This sale no longer exists. Refresh sales history.');
       if (mode === 'edit' && (existing.data()?.revision || 0) !== (sale.revision || 0)) throw new Error('This sale was changed elsewhere. Refresh history before editing.');

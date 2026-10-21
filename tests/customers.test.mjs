@@ -5,7 +5,7 @@ import ts from 'typescript';
 
 const source = await readFile(new URL('../utils/customers.ts', import.meta.url), 'utf8');
 const { outputText } = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 } });
-const { findCustomerMatches, customerStatus, getCustomerSales, normalizeCustomerPhone, escapeCustomerCSVCell, validateCustomerContact, customerAccountSummary } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
+const { findCustomerMatches, customerStatus, getCustomerSales, normalizeCustomerPhone, escapeCustomerCSVCell, validateCustomerContact, customerAccountSummary, resolveCheckoutCustomer, registeredCustomerIssue } = await import(`data:text/javascript;base64,${Buffer.from(outputText).toString('base64')}`);
 
 test('normalizes local, formatted and international Uganda numbers', () => {
     for (const phone of ['0700 123 456', '+256 700 123456', '00256700123456']) {
@@ -84,4 +84,34 @@ test('customer matching catches formatted phones, names and emails without match
     assert.equal(findCustomerMatches(customers, { email: ' alice@EXAMPLE.COM ' })[0].emailMatch, true);
     assert.deepEqual(findCustomerMatches(customers, {}), []);
     assert.deepEqual(findCustomerMatches(customers, { phone: '0700123456' }, 'one'), []);
+});
+
+
+test('registered checkout accepts existing customers without a phone and uses their account ID', () => {
+    const first = { id: 'c1', name: 'MSAWO RASHIDA', phone: '' };
+    const second = { id: 'c2', name: 'MSAWO RASHIDA', phone: null, status: 'Active' };
+    const customers = [first, second];
+    assert.equal(registeredCustomerIssue(first), '');
+    assert.equal(registeredCustomerIssue(second), '');
+    assert.equal(resolveCheckoutCustomer(customers, { customerId: 'c2', customerName: 'Old name', customerPhone: 'Old phone' }), second);
+    assert.equal(resolveCheckoutCustomer(customers, { customerId: 'deleted', customerName: first.name }), null);
+    assert.equal(resolveCheckoutCustomer(customers, { customerName: first.name }), null);
+    assert.equal(resolveCheckoutCustomer([first], { customerName: ' msawo rashida ' }), first);
+});
+
+test('legacy held checkout resolves formatted phones without guessing between duplicate names', () => {
+    const customers = [{ id: 'c1', name: 'Alice', phone: '0700123456' }, { id: 'c2', name: 'Alice', phone: '0770123456' }];
+    assert.equal(resolveCheckoutCustomer(customers, { customerName: 'Alice', customerPhone: '+256 770 123456' }), customers[1]);
+    assert.equal(resolveCheckoutCustomer(customers, { customerName: 'Alice', customerPhone: '0780123456' }), null);
+    assert.equal(resolveCheckoutCustomer(customers, {}), null);
+});
+
+test('checkout still explains missing selection, incomplete names and account restrictions', () => {
+    assert.match(registeredCustomerIssue(null), /Select a registered customer/);
+    assert.match(registeredCustomerIssue({ name: 'Alice' }), /Select a registered customer/);
+    assert.match(registeredCustomerIssue({ id: 'c1', name: ' ' }), /needs a name/);
+    assert.match(registeredCustomerIssue({ id: 'c1', name: 'Alice', status: ' Inactive ' }), /inactive/);
+    assert.match(registeredCustomerIssue({ id: 'c1', name: 'Alice', status: ' Blacklisted ' }), /blacklisted/);
+    assert.equal(normalizeCustomerPhone(null), '');
+    assert.equal(normalizeCustomerPhone(256700123456), '256700123456');
 });

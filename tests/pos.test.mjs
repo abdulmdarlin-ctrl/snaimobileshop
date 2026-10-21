@@ -632,3 +632,48 @@ test('phone inventory edits validate ownership but do not rewrite unchanged IMEI
     await assert.rejects(db.products.update('p1', { costPrice: 70 }), /sold/);
     assert.equal(records.get('products/p1').costPrice, 60);
 });
+
+
+test('checkout saves a legacy customer without a phone and retries without deducting stock twice', async () => {
+    for (const phone of [undefined, null, '']) {
+        const { db, records, sale } = database();
+        records.set('customers/c1', { name: 'MSAWO RASHIDA', phone });
+        const saved = await db.commitSale({ ...sale, customerName: '', customerPhone: '' });
+        assert.equal(saved.customerId, 'c1');
+        assert.equal(saved.customerName, 'MSAWO RASHIDA');
+        assert.equal(saved.customerPhone, '');
+        await db.commitSale(sale);
+        assert.equal(records.get('products/p1').stockQuantity, 2);
+        assert.equal(records.get('sales/s1').amountDue, 0);
+    }
+});
+
+test('phone-less accounts keep debt and partial payment balances linked to the selected ID', async () => {
+    for (const initial of [0, 25]) {
+        const { db, records, sale } = database();
+        const customer = { id: 'c2', name: 'Alice', phone: '' };
+        records.set('customers/c2', customer);
+        const saved = await db.commitSale({ ...sale, customerId: 'c2', customerName: 'Outdated name', customerPhone: 'Outdated phone', amountPaid: initial, saleType: initial ? 'Partial sale' : 'Debt' });
+        assert.equal(saved.customerId, 'c2');
+        assert.equal(saved.customerName, 'Alice');
+        assert.equal(saved.customerPhone, '');
+        assert.equal(saved.amountDue, 100 - initial);
+        const customers = [{ id: 'c1', ...records.get('customers/c1') }, customer];
+        assert.equal(customerTools.getCustomerSales([saved], customers[0], customers).length, 0);
+        assert.equal(customerTools.getCustomerSales([saved], customer, customers).length, 1);
+        const paid = await db.recordSalePayment(sale.id, { id: 'p1', amount: 100 - initial, method: 'Cash', reference: '', timestamp: 2, user: 'cashier' });
+        assert.equal(paid.amountPaid, 100);
+        assert.equal(paid.amountDue, 0);
+        assert.equal(records.get('products/p1').stockQuantity, 2);
+    }
+});
+
+test('phone-less customer checkout still enforces fresh account restrictions without changing stock', async () => {
+    for (const profile of [{ name: 'Alice', status: ' Inactive ' }, { name: 'Alice', status: ' Blacklisted ' }, { name: ' ' }]) {
+        const { db, records, sale } = database();
+        records.set('customers/c1', profile);
+        await assert.rejects(db.commitSale(sale), /customer|inactive/i);
+        assert.equal(records.get('products/p1').stockQuantity, 3);
+        assert.equal(records.has('sales/s1'), false);
+    }
+});

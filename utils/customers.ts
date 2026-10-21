@@ -4,11 +4,31 @@ import type { Customer, Sale } from '../types';
 export const customerStatus = (status?: string | null): Customer['status'] =>
     (status?.trim() || 'Active') as Customer['status'];
 
-export const normalizeCustomerPhone = (phone = '') => {
-    const digits = phone.replace(/\D/g, '');
+export const normalizeCustomerPhone = (phone: string | number | null | undefined = '') => {
+    const digits = String(phone ?? '').replace(/\D/g, '');
     if (digits.startsWith('00')) return digits.slice(2);
     return /^0\d{9}$/.test(digits) ? `256${digits.slice(1)}` : digits;
 };
+
+/** Stable account identity, including older customers without phone numbers. */
+export function resolveCheckoutCustomer(customers: Customer[], selection: { customerId?: string; customerName?: string; customerPhone?: string }) {
+    if (selection.customerId) return customers.find(customer => customer.id === selection.customerId) || null;
+    // Compatibility for held drafts created before checkout stored customer IDs.
+    const name = String(selection.customerName || '').trim().toLowerCase();
+    if (!name) return null;
+    const phone = normalizeCustomerPhone(selection.customerPhone);
+    const matches = customers.filter(customer => (customer.name || '').trim().toLowerCase() === name && (!phone || normalizeCustomerPhone(customer.phone) === phone));
+    return matches.length === 1 ? matches[0] : null;
+}
+
+export function registeredCustomerIssue(customer?: Customer | null): string {
+    if (!customer?.id) return 'Select a registered customer to complete this sale.';
+    if (!String(customer.name || '').trim()) return 'This customer profile needs a name. Update it in Customers before selling.';
+    const status = customerStatus(customer.status);
+    if (status === 'Inactive') return 'This customer is inactive. Reactivate the profile in Customers before selling.';
+    if (status === 'Blacklisted') return 'This customer is blacklisted. Review the account restriction in Customers before selling.';
+    return '';
+}
 
 // Prefer a non-empty phone. Legacy name-only sales must have an unambiguous owner.
 export const getCustomerSales = (sales: Sale[], customer: Customer, customers: Customer[]) => {

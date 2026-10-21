@@ -5,7 +5,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '../db';
 import { itemImeis, validateImeis } from '../utils/imei';
 import { calculateSaleTotals, money, validateItems, validatePayment, getSaleType, outstandingAmount } from '../utils/pos';
-import { findCustomerMatches, validateCustomerContact, normalizeCustomerPhone, escapeCustomerCSVCell } from '../utils/customers';
+import { findCustomerMatches, validateCustomerContact, normalizeCustomerPhone, escapeCustomerCSVCell, resolveCheckoutCustomer, registeredCustomerIssue } from '../utils/customers';
 import { Product, Sale, SaleItem, User, AppSettings, ProductType, UserRole, CustomerCategory, CustomerStatus, SaleType } from '../types';
 import {
    Search, ShoppingCart, Trash2, Plus, Minus, CreditCard,
@@ -138,6 +138,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [checkoutForm, setCheckoutForm] = useState({
       amountPaid: 0,
       paymentMethod: 'Cash' as Sale['paymentMethod'],
+      customerId: '',
       customerName: '',
       customerPhone: '',
       discountPercentage: 0,
@@ -244,7 +245,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setActiveHeldSaleId(null);
       saleIdRef.current = createId();
       setPaymentReference('');
-      setCheckoutForm({ amountPaid: 0, paymentMethod: 'Cash', customerName: '', customerPhone: '', discountPercentage: 0 });
+      setCheckoutForm({ amountPaid: 0, paymentMethod: 'Cash', customerId: '', customerName: '', customerPhone: '', discountPercentage: 0 });
       setIsHoldModalOpen(false);
       showToast("Sale put on hold", 'info');
       window.dispatchEvent(new Event('storage'));
@@ -266,6 +267,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       // Initialize checkout form with held data
       setCheckoutForm({
          amountPaid: heldSale.saleType === 'Partial sale' ? (heldSale.checkoutForm?.amountPaid || 0) : 0,
+         customerId: heldSale.checkoutForm?.customerId || '',
          customerName: heldSale.checkoutForm?.customerName || (heldSale.customerName === 'Walk-in' ? '' : heldSale.customerName),
          customerPhone: heldSale.checkoutForm?.customerPhone || '',
          discountPercentage: heldSale.checkoutForm?.discountPercentage || 0,
@@ -559,7 +561,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
       setActiveHeldSaleId(null);
       saleIdRef.current = createId();
       setPaymentReference('');
-      setCheckoutForm({ amountPaid: 0, paymentMethod: 'Cash', customerName: '', customerPhone: '', discountPercentage: 0 });
+      setCheckoutForm({ amountPaid: 0, paymentMethod: 'Cash', customerId: '', customerName: '', customerPhone: '', discountPercentage: 0 });
    };
 
    // --- CART EDITING ---
@@ -636,6 +638,9 @@ const POS: React.FC<POSProps> = ({ user }) => {
       }
    }, [isCheckoutOpen, total, hasManuallyAdjustedPayment, saleType]);
 
+   const checkoutCustomer = useMemo(() => resolveCheckoutCustomer(customers, checkoutForm), [customers, checkoutForm.customerId, checkoutForm.customerName, checkoutForm.customerPhone]);
+   const checkoutCustomerIssue = customerKind === 'Walk-in' ? (!checkoutForm.customerName.trim() ? 'Enter the walk-in customer name to complete this sale.' : '') : registeredCustomerIssue(checkoutCustomer);
+
    const validateCheckout = () => {
       validateItems(cart);
       for (const item of cart) {
@@ -648,9 +653,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          if (saleType !== 'Cash sale') throw new Error('Select a registered customer for debt or partial sales.');
          return;
       }
-      const customer = customers.find(c => c.name === checkoutForm.customerName && c.phone === checkoutForm.customerPhone);
-      if (!customer?.id || !customer.phone?.trim()) throw new Error('Select a customer with a phone number before completing the sale.');
-      if (customer?.status === CustomerStatus.BLACKLISTED || customer?.status === CustomerStatus.INACTIVE) throw new Error('This customer account is restricted. Select an active customer.');
+      if (checkoutCustomerIssue) throw new Error(checkoutCustomerIssue);
    };
 
    const handleInitiateConfirm = () => {
@@ -702,7 +705,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             receiptNo: `${settings?.invoicePrefix || 'INV'}-${Date.now()}-${saleIdRef.current.slice(0, 8)}`,
             taxPercentage: settings?.taxEnabled ? (settings.taxPercentage ?? 18) : 0,
             paymentReference: checkoutForm.paymentMethod === 'Cash' ? '' : paymentReference.trim(),
-            customerId: customerKind === 'Registered' ? customers.find(c => c.name === checkoutForm.customerName && c.phone === checkoutForm.customerPhone)?.id : undefined,
+            customerId: customerKind === 'Registered' ? checkoutCustomer?.id : undefined,
             customerKind,
             ...(customerKind === 'Walk-in' ? { walkInName: checkoutForm.customerName.trim() } : {}),
             saleType,
@@ -714,8 +717,8 @@ const POS: React.FC<POSProps> = ({ user }) => {
             amountPaid: checkoutForm.amountPaid,
             balance: Math.max(0, total - checkoutForm.amountPaid),
             paymentMethod: checkoutForm.paymentMethod,
-            customerName: customerKind === 'Walk-in' ? 'Walk-in' : checkoutForm.customerName,
-            customerPhone: checkoutForm.customerPhone,
+            customerName: customerKind === 'Walk-in' ? 'Walk-in' : checkoutCustomer?.name,
+            customerPhone: customerKind === 'Walk-in' ? checkoutForm.customerPhone : String(checkoutCustomer?.phone ?? ''),
             customerType: pricingMode,
             globalDiscountPercentage: checkoutForm.discountPercentage,
             cashierName: user.username,
@@ -742,6 +745,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          setCheckoutForm({
             amountPaid: 0,
             paymentMethod: 'Cash',
+            customerId: '',
             customerName: '',
             customerPhone: '',
             discountPercentage: 0
@@ -770,11 +774,13 @@ const POS: React.FC<POSProps> = ({ user }) => {
    };
 
    const handleSelectCustomer = (c: any) => {
-      if (c.status === CustomerStatus.BLACKLISTED || c.status === CustomerStatus.INACTIVE) return showToast('This customer account is restricted. Select an active customer.', 'error');
+      const issue = registeredCustomerIssue(c);
+      if (issue) return showToast(issue, 'error');
       setCheckoutForm(prev => ({
          ...prev,
-         customerName: c.name,
-         customerPhone: c.phone || ''
+         customerId: c.id || '',
+         customerName: String(c.name || '').trim(),
+         customerPhone: String(c.phone ?? '').trim()
       }));
    };
 
@@ -1328,7 +1334,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                      <select className="win-input mt-1" value={customerKind} onChange={event => {
                         const kind = event.target.value as 'Registered' | 'Walk-in';
                         setCustomerKind(kind); setIsCreatingCustomer(false);
-                        setCheckoutForm(previous => ({ ...previous, customerName: '', customerPhone: '', ...(kind === 'Walk-in' ? { amountPaid: total } : {}) }));
+                        setCheckoutForm(previous => ({ ...previous, customerId: '', customerName: '', customerPhone: '', ...(kind === 'Walk-in' ? { amountPaid: total } : {}) }));
                         if (kind === 'Walk-in') { setSaleType('Cash sale'); setHasManuallyAdjustedPayment(false); }
                      }}><option value="Registered">Registered customer</option><option value="Walk-in">Walk-in customer</option></select>
                   </label>
@@ -1347,7 +1353,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </div>
 
                   {!isCreatingCustomer ? (
-                     <CheckoutCustomerPicker customers={customers} selectedName={checkoutForm.customerName} selectedPhone={checkoutForm.customerPhone} onSelect={handleSelectCustomer} onClear={() => setCheckoutForm(previous => ({ ...previous, customerName: '', customerPhone: '' }))} onCreate={() => setIsCreatingCustomer(true)} />
+                     <CheckoutCustomerPicker customers={customers} selectedName={checkoutCustomer?.name || checkoutForm.customerName} selectedPhone={String(checkoutCustomer?.phone ?? checkoutForm.customerPhone)} onSelect={handleSelectCustomer} onClear={() => setCheckoutForm(previous => ({ ...previous, customerId: '', customerName: '', customerPhone: '' }))} onCreate={() => setIsCreatingCustomer(true)} />
                   ) : (
                      <div className="bg-slate-50 p-4 rounded-2xl space-y-4   border border-slate-100">
                         <div className="flex justify-between items-center mb-1">
@@ -1411,9 +1417,13 @@ const POS: React.FC<POSProps> = ({ user }) => {
                   </>}
                </section>
 
+               {checkoutCustomerIssue && <p id="checkout-customer-issue" role="status" className="text-sm text-amber-700">{checkoutCustomerIssue}</p>}
+               {!checkoutCustomerIssue && customerKind === 'Registered' && !String(checkoutCustomer?.phone ?? '').trim() && <p className="text-sm text-slate-500">This customer has no phone number recorded. The sale will be linked to their existing customer account.</p>}
+               {(loading || dataError) && <p role="status" className="text-sm text-amber-700">{loading ? 'Loading stock and customers...' : 'Refresh stock and customer details before completing this sale.'}</p>}
                <button
                   onClick={handleInitiateConfirm}
-                  disabled={processingPayment || cart.length === 0 || !checkoutForm.customerName.trim() || (customerKind === 'Registered' && !checkoutForm.customerPhone)}
+                  aria-describedby={checkoutCustomerIssue ? 'checkout-customer-issue' : undefined}
+                  disabled={processingPayment || cart.length === 0 || loading || dataError || !!checkoutCustomerIssue}
                   className="w-full py-4 bg-emerald-600 text-white rounded-2xl text-xs font-black uppercase tracking-[3px]   hover:bg-emerald-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3 "
                >
                   {processingPayment ? <Loader2 className="animate-spin" strokeWidth={1.75} /> : <Check size={20} strokeWidth={1.75} />}

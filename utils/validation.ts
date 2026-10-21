@@ -3,7 +3,7 @@ const requiredFields: Record<string, string[]> = {
     expenses: ['description', 'category'], expenseCategories: ['name'],
     repairs: ['customerName', 'customerPhone', 'deviceModel', 'issue'],
     agents: ['name', 'phone'], loans: ['customerName', 'customerPhone', 'deviceModel', 'imei'],
-    users: ['username'], sales: ['customerId', 'customerName', 'customerPhone']
+    users: ['username'], sales: ['customerId', 'customerName']
 };
 const nonnegative = new Set(['costPrice', 'selling_price', 'minSellingPrice', 'middleManPrice', 'price', 'amount', 'amountPaid', 'estimatedCost', 'depositPaid', 'deposit', 'totalLoanAmount', 'dailyInstallment', 'remittedAmount', 'reorderLevel']);
 
