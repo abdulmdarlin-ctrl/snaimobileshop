@@ -1,7 +1,8 @@
+import { isCompactDocumentNumber } from './documentNumbers';
 import type { Sale } from '../types';
 import { money, receivedAmount, saleReceipts } from './pos';
 
-export const invoiceNumber = (sale: Sale) => sale.invoiceNo || sale.receiptNo;
+export const invoiceNumber = (sale: Sale) => sale.documentNumbers?.invoice || sale.invoiceNo || sale.receiptNo;
 export const customerDisplayName = (sale: Sale) => sale.customerKind === 'Walk-in' ? sale.walkInName || 'Walk-in customer' : sale.customerName || 'Walk-in customer';
 export const receiptNumber = (saleId: string, paymentId = 'initial') => `RCT-${saleId}-${paymentId}`;
 
@@ -15,7 +16,17 @@ export function paymentReceipts(sale: Sale) {
         const payment = initial > 0 && index === 0 ? undefined : later[index - (initial > 0 ? 1 : 0)];
         cumulative = money(cumulative + row.amount);
         return { ...row, id: payment?.id || 'initial',
-            receiptNo: payment?.receiptNo || (payment ? receiptNumber(sale.id || sale.receiptNo, payment.id) : sale.initialReceiptNo || receiptNumber(sale.id || sale.receiptNo)),
+            receiptNo: sale.documentNumbers?.receipts?.[payment?.id || 'initial'] || payment?.receiptNo || (payment ? receiptNumber(sale.id || sale.receiptNo, payment.id) : sale.initialReceiptNo || receiptNumber(sale.id || sale.receiptNo)),
             balanceAfter: payment?.balanceAfter ?? (!payment ? sale.initialBalanceAfter : undefined) ?? money(Math.max(0, sale.total - cumulative)) };
     });
+}
+
+export function missingDocumentNumbers(sale: Sale) {
+    return { invoice: !isCompactDocumentNumber(invoiceNumber(sale)),
+        receipts: paymentReceipts(sale).filter(row => !isCompactDocumentNumber(row.receiptNo)).map(row => row.id) };
+}
+
+export function saleDocumentReferences(sale: Sale) {
+    return [...new Set([sale.receiptNo, sale.invoiceNo, invoiceNumber(sale), sale.initialReceiptNo,
+        ...(sale.payments || []).map(payment => payment.receiptNo), ...paymentReceipts(sale).map(receipt => receipt.receiptNo)].filter((value): value is string => typeof value === 'string' && !!value))];
 }

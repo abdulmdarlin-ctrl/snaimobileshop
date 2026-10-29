@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { activateDialog } from '../utils/dialogSurface';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   LayoutDashboard, ShoppingCart, Wrench, BarChart3, Settings as SettingsIcon,
   X, LogOut, ChevronLeft, ChevronRight, Truck, Package, Layers, ReceiptText, Users, HandCoins, ContactRound
@@ -26,20 +27,9 @@ const Sidebar: React.FC<SidebarProps> = ({ user, currentPage, setCurrentPage, is
     query.addEventListener('change', update);
     return () => query.removeEventListener('change', update);
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!mobile || !isOpen) return;
-    const previous = document.activeElement as HTMLElement | null;
-    panelRef.current?.querySelector<HTMLButtonElement>('button')?.focus();
-    const keydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); toggleSidebar(); }
-      if (event.key !== 'Tab') return;
-      const controls = Array.from(panelRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || []);
-      const first = controls[0], last = controls[controls.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-    };
-    document.addEventListener('keydown', keydown);
-    return () => { document.removeEventListener('keydown', keydown); if (previous?.isConnected) previous.focus(); };
+    if (panelRef.current) return activateDialog(panelRef.current, toggleSidebar);
   }, [mobile, isOpen]);
 
   // RBAC Configuration for Menu

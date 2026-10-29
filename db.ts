@@ -1,3 +1,4 @@
+import { validateSaleDetails } from './utils/saleDetails';
 import { customerStatus, normalizeCustomerPhone, validateCustomerContact, getCustomerSales } from './utils/customers';
 
 import {
@@ -6,7 +7,8 @@ import {
 import { dbInstance, createSecondaryUser } from './firebaseConfig';
 import { validateRecord } from './utils/validation';
 import { createDatabaseReadCache, ReadOptions } from './utils/databaseReadCache';
-import { receiptNumber } from './utils/saleDocuments';
+import { missingDocumentNumbers } from './utils/saleDocuments';
+import { allocateDocumentNumbers, documentSeries, documentCounterFloors } from './utils/documentNumbers';
 import { validateImeis, itemImeis } from './utils/imei';
 import { calculateSaleTotals, money, stockChanges, validateItems, validatePayment, getSaleType, outstandingAmount } from './utils/pos';
 import { Customer, Product, Sale, SaleItem, Repair, Supplier, User, AppSettings, UserRole, Expense, ExpenseCategory, StockLog, AuditLog, Purchase, Loan, Agent } from './types';
@@ -26,6 +28,7 @@ const COLLECTIONS = {
   users: 'users',
   suppliers: 'suppliers',
   purchases: 'purchases',
+  documentCounters: 'documentCounters',
   customers: 'customers'
 };
 
@@ -358,7 +361,7 @@ export const db = {
     return { status: entry.status || 'Not found', ...(product?.exists() ? { productName: product.data().name } : {}) };
   },
   // Sale and inventory writes commit together, using fresh stock inside the transaction.
-  commitSale: async (sale: Sale, allowNegativeStock = false, mode: 'create' | 'edit' = 'create', actor = sale.cashierName) => {
+  commitSale: async (sale: Sale, allowNegativeStock = false, mode: 'create' | 'edit' = 'create', actor = sale.cashierName, invoicePrefix = 'INV') => {
     if (!sale.id || !dbInstance) throw new Error('Sale reference or database is unavailable.');
     validateItems(sale.items);
     const totals = calculateSaleTotals(sale.items, sale.globalDiscountPercentage ?? 0, sale.taxPercentage ?? 0);
@@ -374,15 +377,25 @@ export const db = {
     const amountDue = outstandingAmount({ total: totals.total, amountPaid: sale.amountPaid });
     const cleanSale = sanitizeData({ ...sale, ...totals, saleType, customerKind: walkIn ? 'Walk-in' : 'Registered', invoiceNo: sale.invoiceNo || sale.receiptNo,
       ...(walkIn ? { customerId: null, customerName: 'Walk-in', walkInName: sale.walkInName!.trim() } : { walkInName: null }),
-      ...(sale.amountPaid > 0 ? { initialReceiptNo: receiptNumber(sale.id), initialBalanceAfter: amountDue } : {}),
+      ...(sale.amountPaid > 0 ? { initialBalanceAfter: amountDue } : {}),
       amountPaid: money(Math.min(sale.amountPaid, totals.total)), amountDue, balance: amountDue, changeDue: money(Math.max(0, sale.amountPaid - totals.total)),
       items: sale.items.map(item => ({ ...item, ...(item.imeis ? { imeis: itemImeis(item) } : {}), total: money(item.price * item.quantity) })) });
+    const numberTime = Date.now();
     const saleRef = doc(dbInstance, COLLECTIONS.sales, sale.id);
     let committedStock: Product[] = [];
     return runTransaction(dbInstance, async transaction => {
       committedStock = [];
       const existing = await transaction.get(saleRef);
       if (mode === 'create' && existing.exists()) return { ...existing.data(), id: existing.id } as Sale;
+      const counterRef = mode === 'create' ? doc(dbInstance, 'documentCounters', documentSeries(numberTime).counterId) : null;
+      const counter = counterRef ? await transaction.get(counterRef) : null;
+      const numbers = counter ? allocateDocumentNumbers(counter.exists() ? counter.data() : {}, true, sale.amountPaid > 0 ? 1 : 0, numberTime, invoicePrefix) : null;
+      if (numbers) {
+        cleanSale.invoiceNo = cleanSale.receiptNo = numbers.invoiceNo;
+        if (numbers.receipts.length) cleanSale.initialReceiptNo = numbers.receipts[0];
+        else delete cleanSale.initialReceiptNo;
+        delete cleanSale.documentNumbers;
+      }
       if (!walkIn) {
         const customer = await transaction.get(doc(dbInstance, COLLECTIONS.customers, sale.customerId!));
         if (!customer.exists() || customerStatus(customer.data().status) === 'Blacklisted') throw new Error('Select an existing customer who is not blacklisted.');
@@ -390,6 +403,7 @@ export const db = {
         if (typeof customer.data().name !== 'string' || !customer.data().name.trim()) throw new Error('Update the customer name before completing the sale.');
         cleanSale.customerName = customer.data().name.trim();
         cleanSale.customerPhone = String(customer.data().phone ?? '').trim();
+        cleanSale.customerAddress = String(customer.data().address ?? '').trim();
       }
       if (mode === 'edit' && !existing.exists()) throw new Error('This sale no longer exists. Refresh sales history.');
       if (mode === 'edit' && (existing.data()?.revision || 0) !== (sale.revision || 0)) throw new Error('This sale was changed elsewhere. Refresh history before editing.');
@@ -400,6 +414,8 @@ export const db = {
         if (sale.amountPaid !== previous.amountPaid || JSON.stringify(sale.payments || []) !== JSON.stringify(previous.payments || [])) throw new Error('Use Record payment to change payments. Editing an invoice cannot rewrite payment history.');
         cleanSale.receiptNo = previous.receiptNo;
         cleanSale.invoiceNo = previous.invoiceNo || previous.receiptNo;
+        if (previous.documentNumbers) cleanSale.documentNumbers = previous.documentNumbers;
+        else delete cleanSale.documentNumbers;
         if (previous.initialReceiptNo) cleanSale.initialReceiptNo = previous.initialReceiptNo;
         cleanSale.initialBalanceAfter = previous.initialBalanceAfter ?? money(Math.max(0, previous.total - Math.max(0, received - (previous.payments || []).reduce((sum, payment) => sum + payment.amount, 0))));
         if (walkIn !== (previous.customerKind === 'Walk-in')) throw new Error('The customer type of a completed sale cannot be changed.');
@@ -454,6 +470,7 @@ export const db = {
         if (!allowNegativeStock && quantity < 0) throw new Error(`Insufficient stock for ${product.name}. Available: ${product.stockQuantity}.`);
         stockUpdates.push({ ref, quantity, product: { ...product, id, stockQuantity: quantity, ...(availableImeis ? { imeis: availableImeis } : {}) }, ...(availableImeis ? { imeis: availableImeis } : {}) });
       }
+      if (counterRef && numbers) transaction.set(counterRef, numbers.counter);
       for (const { ref, quantity, imeis } of stockUpdates) transaction.update(ref, { stockQuantity: quantity, ...(imeis ? { imeis } : {}) });
       for (const write of imeiWrites) transaction.set(write.ref, write.data);
       committedStock = stockUpdates.map(update => update.product);
@@ -471,10 +488,63 @@ export const db = {
       return result;
     });
   },
+  restoreDocumentCounters: async (counters: { id?: string; invoice?: number; receipt?: number }[], sales: Sale[] = []) => {
+    if (!dbInstance) throw new Error('Database is unavailable.');
+    const floors = documentCounterFloors(counters, sales);
+    for (const floor of floors) await runTransaction(dbInstance, async transaction => {
+      const ref = doc(dbInstance, COLLECTIONS.documentCounters, floor.id);
+      const snapshot = await transaction.get(ref);
+      const current = snapshot.exists() ? snapshot.data() : {};
+      allocateDocumentNumbers(current, false, 0); // Validate stored sequence before merging.
+      transaction.set(ref, { invoice: Math.max(current.invoice || 0, floor.invoice), receipt: Math.max(current.receipt || 0, floor.receipt) });
+    });
+  },
+  ensureSaleDocumentNumbers: async (id: string) => {
+    if (!id || !dbInstance) throw new Error('Sale reference or database is unavailable.');
+    const now = Date.now();
+    return runTransaction(dbInstance, async transaction => {
+      const ref = doc(dbInstance, COLLECTIONS.sales, id);
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists()) throw new Error('This sale no longer exists.');
+      const sale = { ...snapshot.data(), id } as Sale;
+      const missing = missingDocumentNumbers(sale);
+      if (!missing.invoice && !missing.receipts.length) return sale;
+      const counterRef = doc(dbInstance, 'documentCounters', documentSeries(now).counterId);
+      const counter = await transaction.get(counterRef);
+      const numbers = allocateDocumentNumbers(counter.exists() ? counter.data() : {}, missing.invoice, missing.receipts.length, now);
+      const documentNumbers = { invoice: numbers.invoiceNo || sale.documentNumbers?.invoice || sale.invoiceNo || sale.receiptNo,
+        receipts: { ...(sale.documentNumbers?.receipts || {}) } };
+      missing.receipts.forEach((paymentId, index) => { documentNumbers.receipts[paymentId] = numbers.receipts[index]; });
+      // Printing references do not change financial revision, amounts, or payment history.
+      transaction.update(ref, { documentNumbers });
+      transaction.set(counterRef, numbers.counter);
+      return { ...sale, documentNumbers };
+    });
+  },
+  updateSaleDetails: async (id: string, revision: number, details: { dueDate: string; notes: string }, actor: string) => {
+    if (!id || !dbInstance) throw new Error('Sale reference or database is unavailable.');
+    return runTransaction(dbInstance, async transaction => {
+      const ref = doc(dbInstance, COLLECTIONS.sales, id);
+      const snapshot = await transaction.get(ref);
+      if (!snapshot.exists()) throw new Error('This sale no longer exists. Refresh sales history.');
+      const sale = { ...snapshot.data(), id } as Sale;
+      if ((sale.revision || 0) !== revision) throw new Error('This sale was changed elsewhere. Refresh sales history before saving details.');
+      const terms = validateSaleDetails(sale, details.dueDate, details.notes);
+      const updated = { ...sale, ...terms, revision: (sale.revision || 0) + 1 };
+      transaction.update(ref, { ...terms, revision: updated.revision });
+      transaction.set(doc(collection(dbInstance, COLLECTIONS.auditLogs)), {
+        action: 'Sale details updated', entityType: 'Sale', entityId: id, user: actor, timestamp: Date.now(),
+        details: `${sale.receiptNo}: due date ${terms.dueDate || 'not set'}`,
+        previousDetails: { dueDate: sale.dueDate || '', notes: sale.notes || '' }
+      });
+      return updated;
+    });
+  },
   recordSalePayment: async (id: string, payment: { id: string; amount: number; method: string; reference: string; timestamp: number; user: string }) => {
     if (!dbInstance) throw new Error('Database is unavailable.');
     if (!payment.id || !Number.isFinite(payment.amount) || money(payment.amount) <= 0) throw new Error('Enter a positive payment amount.');
     if (!['Cash', 'Mobile Money', 'Bank'].includes(payment.method)) throw new Error('Choose a valid payment method.');
+    const numberTime = Date.now();
     return runTransaction(dbInstance, async transaction => {
       const ref = doc(dbInstance, COLLECTIONS.sales, id);
       const snapshot = await transaction.get(ref);
@@ -483,11 +553,15 @@ export const db = {
       if (sale.payments?.some(entry => entry.id === payment.id)) return sale;
       const amount = money(payment.amount);
       if (amount > outstandingAmount(sale)) throw new Error('Payment exceeds the current outstanding balance. Refresh and try again.');
+      const counterRef = doc(dbInstance, 'documentCounters', documentSeries(numberTime).counterId);
+      const counter = await transaction.get(counterRef);
+      const numbers = allocateDocumentNumbers(counter.exists() ? counter.data() : {}, false, 1, numberTime);
       const amountPaid = money(sale.amountPaid + amount);
       const amountDue = outstandingAmount({ ...sale, amountPaid });
       const updated = { ...sale, amountPaid, amountDue, balance: amountDue, changeDue: sale.changeDue || 0,
         saleType: getSaleType({ ...sale, amountPaid }), revision: (sale.revision || 0) + 1,
-        payments: [...(sale.payments || []), { ...payment, receiptNo: receiptNumber(id, payment.id), balanceAfter: amountDue, amount }] };
+        payments: [...(sale.payments || []), { ...payment, receiptNo: numbers.receipts[0], balanceAfter: amountDue, amount }] };
+      transaction.set(counterRef, numbers.counter);
       transaction.set(ref, sanitizeData(updated));
       transaction.set(doc(collection(dbInstance, COLLECTIONS.auditLogs)), {
         action: 'Sale payment received', entityType: 'Sale', entityId: id, user: payment.user,
@@ -542,6 +616,7 @@ export const db = {
   settings: createCollectionHelper<AppSettings>(COLLECTIONS.settings),
   suppliers: createCollectionHelper<Supplier>(COLLECTIONS.suppliers),
   purchases: createCollectionHelper<Purchase>(COLLECTIONS.purchases),
+  documentCounters: createCollectionHelper<any>(COLLECTIONS.documentCounters),
   customers: createCollectionHelper<any>(COLLECTIONS.customers),
   users: {
     ...createCollectionHelper<User>(COLLECTIONS.users),

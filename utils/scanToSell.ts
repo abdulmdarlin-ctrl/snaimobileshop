@@ -30,3 +30,12 @@ export function addScannedSaleItem(products: Product[], cart: SaleItem[], raw: s
     return { cart: existing ? cart.map(entry => entry.productId === product.id ? item : entry) : [...cart, item],
         label: `${product.name}${isSerial ? ` / IMEI ${code}` : ` / Qty ${quantity}`}` };
 }
+
+// Restore this invoice's own units to a temporary scan pool. No inventory is written here.
+export function invoiceScanStock(products: Product[], originalItems: SaleItem[]) {
+    return products.map(product => {
+        const sold = originalItems.filter(item => item.productId === product.id);
+        return { ...product, stockQuantity: product.stockQuantity + sold.reduce((sum, item) => sum + item.quantity, 0),
+            imeis: [...new Set([...(product.imeis || []), ...sold.flatMap(itemImeis)])] };
+    });
+}

@@ -380,6 +380,63 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
 
     // --- VIEWS ---
 
+    const agentEditor = isAgentModalOpen ? (
+<Modal isOpen={isAgentModalOpen} onClose={() => setIsAgentModalOpen(false)} busy={isSaving}
+                    title={editingId ? 'Edit agent profile' : 'New agent profile'} description="Agent contact and account details" maxWidth="md">
+                        <form onSubmit={handleSaveAgent} className="space-y-4">
+                            <div className="space-y-1.5">
+                                <label className="win-label">Full Name</label>
+                                <input required className="win-input h-10 font-bold" value={agentForm.name} onChange={e => setAgentForm({ ...agentForm, name: e.target.value })} placeholder="e.g. John Doe" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="win-label">Email Address</label>
+                                <input type="email" className="win-input h-10" value={agentForm.email || ''} onChange={e => setAgentForm({ ...agentForm, email: e.target.value })} placeholder="agent@example.com" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="win-label">Phone Number</label>
+                                <input required className="win-input h-10" value={agentForm.phone} onChange={e => setAgentForm({ ...agentForm, phone: e.target.value })} placeholder="+256..." />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="win-label">ID / NIN</label>
+                                <input className="win-input h-10 uppercase" value={agentForm.nin || ''} onChange={e => setAgentForm({ ...agentForm, nin: e.target.value })} placeholder="National ID" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="win-label">Region / Location</label>
+                                <input className="win-input h-10" value={agentForm.location || ''} onChange={e => setAgentForm({ ...agentForm, location: e.target.value })} placeholder="e.g. Kampala Central" />
+                            </div>
+                            {/* Status Field added here */}
+                            <div className="space-y-1.5">
+                                <label className="win-label">Account Status</label>
+                                <select
+                                    className="win-input h-10 font-bold"
+                                    value={agentForm.status}
+                                    onChange={e => setAgentForm({ ...agentForm, status: e.target.value as 'Active' | 'Inactive' })}
+                                >
+                                    <option value="Active">Active</option>
+                                    <option value="Inactive">Inactive</option>
+                                </select>
+                            </div>
+                            <div className="pt-4">
+                                <button disabled={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm  hover:bg-black transition-all flex items-center justify-center gap-2">
+                                    {isSaving && <Loader2 className="animate-spin" size={14} strokeWidth={1.75} />} {isSaving ? 'Saving...' : 'Save Agent Profile'}
+                                </button>
+                            </div>
+                        </form>
+                </Modal>
+    ) : null;
+    const agentDeleteDialog = (agentToDelete && (
+                <Modal isOpen={!!agentToDelete} onClose={() => setAgentToDelete(null)} busy={isDeleting} title="Delete agent?" maxWidth="sm"
+                    footer={<>
+                        <button type="button" onClick={() => setAgentToDelete(null)} disabled={isDeleting} className="dialog-button">Cancel</button>
+                        <button type="button" onClick={confirmDeleteAgent} disabled={isDeleting} className="dialog-button dialog-button-danger">
+                            {isDeleting && <Loader2 className="animate-spin" size={16} />}{isDeleting ? 'Deleting...' : 'Delete agent'}
+                        </button>
+                    </>}>
+                    <p className="dialog-message">Permanently delete agent <strong>{agentToDelete.name}</strong>? This action cannot be undone.</p>
+                </Modal>
+            )
+    );
+
     if (view === 'directory') {
         return (
             <div className="space-y-6 pb-20 font-sans">
@@ -451,47 +508,8 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
                 </div>
 
                 {/* --- REGISTER AGENT MODAL --- */}
-                <Modal
-                    isOpen={isAgentModalOpen}
-                    onClose={() => setIsAgentModalOpen(false)}
-                    title={editingId ? 'Edit Profile' : 'New Agent Profile'}
-                    maxWidth="md"
-                >
-                    <form onSubmit={handleSaveAgent} className="space-y-4">
-                        <div className="space-y-1.5">
-                            <label className="win-label">Full Name</label>
-                            <input required className="win-input h-10 font-bold" value={agentForm.name} onChange={e => setAgentForm({ ...agentForm, name: e.target.value })} placeholder="e.g. John Doe" />
-                        </div>
-                        <div className="space-y-1.5">
-                            <label className="win-label">Phone Number</label>
-                            <input required className="win-input h-10" value={agentForm.phone} onChange={e => setAgentForm({ ...agentForm, phone: e.target.value })} placeholder="+256..." />
-                        </div>
-                        <div className="space-y-1.5">
-                            <label className="win-label">ID / NIN</label>
-                            <input className="win-input h-10 uppercase" value={agentForm.nin || ''} onChange={e => setAgentForm({ ...agentForm, nin: e.target.value })} placeholder="National ID" />
-                        </div>
-                        <div className="space-y-1.5">
-                            <label className="win-label">Region / Location</label>
-                            <input className="win-input h-10" value={agentForm.location || ''} onChange={e => setAgentForm({ ...agentForm, location: e.target.value })} placeholder="e.g. Kampala Central" />
-                        </div>
-                        <div className="space-y-1.5">
-                            <label className="win-label">Account Status</label>
-                            <select
-                                className="win-input h-10 font-bold"
-                                value={agentForm.status}
-                                onChange={e => setAgentForm({ ...agentForm, status: e.target.value as 'Active' | 'Inactive' })}
-                            >
-                                <option value="Active">Active</option>
-                                <option value="Inactive">Inactive</option>
-                            </select>
-                        </div>
-                        <div className="pt-4">
-                            <button disabled={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm  hover:bg-black transition-all flex items-center justify-center gap-2">
-                                {isSaving && <Loader2 className="animate-spin" size={14} strokeWidth={1.75} />} {isSaving ? 'Saving...' : 'Save Agent Profile'}
-                            </button>
-                        </div>
-                    </form>
-                </Modal>
+                {agentEditor}
+                {agentDeleteDialog}
             </div>
         );
     }
@@ -975,78 +993,10 @@ const Loans: React.FC<LoansProps> = ({ user }) => {
             </Modal>
 
             {/* --- REGISTER AGENT MODAL --- */}
-            {isAgentModalOpen && (
-                <div className="adaptive-dialog-layer fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
-                    <div className="adaptive-dialog-panel bg-white w-full max-w-md rounded-2xl  overflow-hidden border border-white/20">
-                        <div className="p-6 border-b border-slate-100 flex justify-between items-center">
-                            <h2 className="text-lg font-bold text-slate-900">{editingId ? 'Edit Profile' : 'New Agent Profile'}</h2>
-                            <button onClick={() => setIsAgentModalOpen(false)}><X size={20} className="text-slate-400 hover:text-slate-900" strokeWidth={1.75} /></button>
-                        </div>
-                        <form onSubmit={handleSaveAgent} className="p-6 space-y-4">
-                            <div className="space-y-1.5">
-                                <label className="win-label">Full Name</label>
-                                <input required className="win-input h-10 font-bold" value={agentForm.name} onChange={e => setAgentForm({ ...agentForm, name: e.target.value })} placeholder="e.g. John Doe" />
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="win-label">Email Address</label>
-                                <input type="email" className="win-input h-10" value={agentForm.email || ''} onChange={e => setAgentForm({ ...agentForm, email: e.target.value })} placeholder="agent@example.com" />
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="win-label">Phone Number</label>
-                                <input required className="win-input h-10" value={agentForm.phone} onChange={e => setAgentForm({ ...agentForm, phone: e.target.value })} placeholder="+256..." />
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="win-label">ID / NIN</label>
-                                <input className="win-input h-10 uppercase" value={agentForm.nin || ''} onChange={e => setAgentForm({ ...agentForm, nin: e.target.value })} placeholder="National ID" />
-                            </div>
-                            <div className="space-y-1.5">
-                                <label className="win-label">Region / Location</label>
-                                <input className="win-input h-10" value={agentForm.location || ''} onChange={e => setAgentForm({ ...agentForm, location: e.target.value })} placeholder="e.g. Kampala Central" />
-                            </div>
-                            {/* Status Field added here */}
-                            <div className="space-y-1.5">
-                                <label className="win-label">Account Status</label>
-                                <select
-                                    className="win-input h-10 font-bold"
-                                    value={agentForm.status}
-                                    onChange={e => setAgentForm({ ...agentForm, status: e.target.value as 'Active' | 'Inactive' })}
-                                >
-                                    <option value="Active">Active</option>
-                                    <option value="Inactive">Inactive</option>
-                                </select>
-                            </div>
-                            <div className="pt-4">
-                                <button disabled={isSaving} className="w-full py-3 bg-slate-900 text-white rounded-lg font-bold text-sm  hover:bg-black transition-all flex items-center justify-center gap-2">
-                                    {isSaving && <Loader2 className="animate-spin" size={14} strokeWidth={1.75} />} {isSaving ? 'Saving...' : 'Save Agent Profile'}
-                                </button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
+            {agentEditor}
 
             {/* DELETE AGENT CONFIRMATION */}
-            {agentToDelete && (
-                <div className="adaptive-dialog-layer fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
-                    <div className="adaptive-dialog-panel bg-white w-full max-w-sm rounded-[2.5rem]  p-8 text-center space-y-6 border border-white/20">
-                        <div className="w-20 h-20 bg-red-50 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-100">
-                            <AlertTriangle size={32} strokeWidth={1.75} />
-                        </div>
-                        <div>
-                            <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight">Confirm Deletion</h3>
-                            <p className="text-sm text-slate-500 font-medium mt-2 leading-relaxed">
-                                Are you sure you want to permanently delete agent <span className="text-slate-900 font-bold">"{agentToDelete.name}"</span>?
-                            </p>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                            <button onClick={() => setAgentToDelete(null)} disabled={isDeleting} className="py-4 bg-slate-100 text-slate-600 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-slate-200 transition-all">Cancel</button>
-                            <button onClick={confirmDeleteAgent} disabled={isDeleting} className="py-4 bg-red-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest   hover:bg-red-700 transition-all flex items-center justify-center gap-2">
-                                {isDeleting ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : null} {isDeleting ? 'Deleting...' : 'Yes, Delete'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            {agentDeleteDialog}
 
         </div>
     );

@@ -505,22 +505,15 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
          {/* Product Edit/Add Modal */}
          {isModalOpen && (
-            <div className="inventory-editor-layer fixed inset-0 bg-slate-900/60 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm ">
-               <div role="dialog" aria-modal="true" aria-label={editingProduct ? 'Edit product' : 'New product'} className="inventory-editor-panel bg-white w-full max-w-2xl rounded-2xl  overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
-                  <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-white shrink-0">
-                     <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
-                           <Package size={20} strokeWidth={1.75} />
-                        </div>
-                        <div>
-                           <h2 className="text-lg font-bold text-slate-900">{editingProduct ? 'Edit Product' : 'New Product'}</h2>
-                           <p className="text-xs text-slate-500 font-bold uppercase tracking-wide mt-0.5">Inventory Control</p>
-                        </div>
-                     </div>
-                     <button aria-label="Close product editor" onClick={() => setIsModalOpen(false)} className="p-2 text-slate-400 hover:text-slate-900 rounded-lg hover:bg-slate-100 transition-all"><X size={20} strokeWidth={1.75} /></button>
-                  </div>
-
-                  <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-8 space-y-6">
+            <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} busy={isSaving}
+               title={editingProduct ? 'Edit product' : 'New product'} description="Inventory control" maxWidth="2xl" noPadding
+               contentClassName="inventory-editor-body" footer={<>
+                  <button type="button" onClick={() => setIsModalOpen(false)} disabled={isSaving} className="dialog-button">Cancel</button>
+                  <button type="submit" form="inventory-product-form" disabled={isSaving} className="dialog-button dialog-button-primary">
+                     {isSaving ? <><Loader2 className="animate-spin" size={16} />Saving...</> : editingProduct ? 'Update product' : 'Add product'}
+                  </button>
+               </>}>
+                  <form id="inventory-product-form" onSubmit={handleSave} className="inventory-product-form space-y-6">
                      {/* Basic Info */}
                      <div className="space-y-4">
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-2">Basic Information</h3>
@@ -606,14 +599,7 @@ const Inventory: React.FC<InventoryProps> = ({ user }) => {
 
                   </form>
 
-                  <div className="p-5 border-t border-slate-100 bg-slate-50 flex gap-3 justify-end shrink-0">
-                     <button onClick={() => setIsModalOpen(false)} className="px-6 py-2.5 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold uppercase tracking-wide hover:bg-slate-100 transition-all">Cancel</button>
-                     <button onClick={handleSave} disabled={isSaving} className="px-6 py-2.5 bg-rose-600 text-white rounded-lg text-xs font-bold uppercase tracking-wide  hover:bg-rose-700 transition-all flex items-center gap-2">
-                        {isSaving ? <Loader2 className="animate-spin" size={14} strokeWidth={1.75} /> : (editingProduct ? 'Update Product' : 'Add Product')}
-                     </button>
-                  </div>
-               </div>
-            </div>
+            </Modal>
          )}
 
          {/* Stock Adjust Modal */}

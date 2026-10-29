@@ -10,7 +10,7 @@ function load(file, dependencies = {}) {
     return exports;
 }
 const scanner = load('../utils/imeiScanner.ts'), imei = load('../utils/imei.ts');
-const { addScannedSaleItem } = load('../utils/scanToSell.ts', { './imeiScanner': scanner, './imei': imei });
+const { addScannedSaleItem, invoiceScanStock } = load('../utils/scanToSell.ts', { './imeiScanner': scanner, './imei': imei });
 const { parseSupplierImeis } = scanner;
 const first = '490154203237518', second = '354910793340623';
 const list = value => [...value.imeis];
@@ -67,4 +67,22 @@ test('only available unique phone IMEIs can be scanned for sale', () => {
     assert.throws(() => addScannedSaleItem([phone], [], first, () => NaN), /price/);
     assert.throws(() => addScannedSaleItem([phone], [], `${first}\n${second}`, price), /15|one/);
     assert.throws(() => addScannedSaleItem([{ ...phone, stockQuantity: 0 }], [], first, price, true), /Only 0/);
+});
+
+
+test('invoice scans include its own sold units without mutating stock or adding a phone twice', () => {
+    const sold = '490154203237518', available = '356938035643809';
+    const products = [{ id: 'p1', name: 'Phone', type: 'Phone', stockQuantity: 1, selling_price: 100, imeis: [available] }];
+    const original = [{ productId: 'p1', name: 'Phone', quantity: 1, price: 90, total: 90, imeis: [sold] }];
+    const pool = invoiceScanStock(products, original);
+    assert.equal(products[0].stockQuantity, 1);
+    assert.deepEqual(products[0].imeis, [available]);
+    assert.equal(pool[0].stockQuantity, 2);
+    const added = addScannedSaleItem(pool, original, available, () => 100);
+    assert.equal(added.cart[0].quantity, 2);
+    assert.equal(added.cart[0].price, 90);
+    assert.throws(() => addScannedSaleItem(pool, added.cart, available, () => 100), /already in/);
+    const restored = addScannedSaleItem(pool, [], sold, () => 100);
+    assert.equal(restored.cart[0].imeis[0], sold);
+    assert.equal(original[0].quantity, 1);
 });

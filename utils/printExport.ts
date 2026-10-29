@@ -1,3 +1,4 @@
+import { afterPdfPaint, exportFastDocumentPdf } from './fastDocumentPdf';
 import { notifyDialog } from './dialog';
 
 import { jsPDF } from 'jspdf';
@@ -34,6 +35,7 @@ export const printSection = (selector: string, callback?: () => void) => {
 
   // Get content
   const content = element.outerHTML;
+  const thermalDocument = element.classList.contains('receipt-mode');
 
   // Get all stylesheets from the main document to inject them into the iframe
   const styles = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
@@ -51,7 +53,7 @@ export const printSection = (selector: string, callback?: () => void) => {
         <title>Print - SNA! Mobile ERP</title>
         ${styles}
         <style>
-          body { 
+          body {
             font-family: 'Inter', sans-serif; /* Fallback font */
             background: white; /* Ensure white background for printing */
             color: black;
@@ -60,7 +62,7 @@ export const printSection = (selector: string, callback?: () => void) => {
           }
 
           .whitespace-pre-wrap { white-space: pre-wrap !important; }
-          
+
           /* Thermal Mode specific styling */
           .receipt-mode {
              font-family: 'Courier New', Courier, monospace;
@@ -75,14 +77,14 @@ export const printSection = (selector: string, callback?: () => void) => {
              max-width: 210mm;
              margin: 0 auto;
           }
-          
+
           /* Barcode and QR sizing fixes */
           svg, img { max-width: 100%; height: auto; }
-          
+
           @media print {
-            @page { 
-              margin: 0.24in !important; 
-              size: auto; 
+            @page {
+              margin: ${thermalDocument ? '0' : '0.24in'} !important;
+              size: auto;
             }
             body { padding: 0 !important; margin: 0 !important; }
             .no-print { display: none !important; }
@@ -137,12 +139,15 @@ export const exportSectionToPDF = async (selector: string, filename: string = 'S
   document.body.style.cursor = 'wait';
 
   try {
+    await afterPdfPaint();
+    if (await exportFastDocumentPdf(element, filename)) return;
     const isA4 = element.classList.contains('receipt-a4-mode');
 
     // Use html2canvas to capture the element as an image
     const canvas = await html2canvas(element, {
       scale: 2, // Slightly lower scale for better performance on mobile
       useCORS: true,
+      imageTimeout: 1500,
       logging: false,
       backgroundColor: '#ffffff',
       // These properties help capture content beyond the visible viewport
@@ -199,11 +204,15 @@ export const exportSectionToPDF = async (selector: string, filename: string = 'S
       const isThermal = element.classList.contains('receipt-mode');
 
       if (isThermal) {
-        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: [80, 297] });
-        const thermalMargin = 4; // 4mm margin for 72mm content on 80mm paper
-        const contentWidthMm = 80 - (thermalMargin * 2);
-        const contentHeightMm = (canvas.height * contentWidthMm) / canvas.width;
-        pdf.addImage(imgData, 'PNG', thermalMargin, thermalMargin, contentWidthMm, contentHeightMm, undefined, 'FAST');
+        const paperWidthMm = element.dataset.paperWidth === '58' ? 58 : 80;
+        const contentHeightMm = (canvas.height * paperWidthMm) / canvas.width;
+        // The document includes its paper margins; keep the complete content and totals.
+        const pageHeightMm = Math.min(3000, Math.max(paperWidthMm, contentHeightMm));
+        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: [paperWidthMm, pageHeightMm] });
+        for (let offset = 0; offset < contentHeightMm; offset += pageHeightMm) {
+          if (offset) pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, -offset, paperWidthMm, contentHeightMm, 'thermal-document', 'FAST');
+        }
         pdf.save(filename);
       } else {
         // Standard A4 single page, scaled to fit

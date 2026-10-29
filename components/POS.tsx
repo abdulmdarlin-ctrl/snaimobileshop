@@ -22,10 +22,11 @@ import Modal from './Modal';
 import ImeiScanner from './ImeiScanner';
 import CheckoutCustomerPicker from './CheckoutCustomerPicker';
 import InvoiceProductPicker from './InvoiceProductPicker';
-import { addScannedSaleItem } from '../utils/scanToSell';
+import { addScannedSaleItem, invoiceScanStock } from '../utils/scanToSell';
 import SaleDocumentDialog from './SaleDocumentDialog';
+import SaleDetailsDialog from './SaleDetailsDialog';
 import PhoneSaleLookup from './PhoneSaleLookup';
-import { paymentReceipts } from '../utils/saleDocuments';
+import { customerDisplayName, paymentReceipts, saleDocumentReferences } from '../utils/saleDocuments';
 
 const calculateWarrantyEndDate = (warrantyString: string): Date | null => {
    const now = new Date();
@@ -128,7 +129,22 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const HISTORY_ITEMS_PER_PAGE = 20;
    const [statementCurrentPage, setStatementCurrentPage] = useState(1);
    const [isPrintingStatement, setIsPrintingStatement] = useState(false);
-   const [expandedSaleId, setExpandedSaleId] = useState<string | null>(null);
+   const [detailSaleId, setDetailSaleId] = useState<string | null>(null);
+   const detailSale = salesHistory.find(sale => sale.id === detailSaleId);
+   const [editFocus, setEditFocus] = useState<string | null>(null);
+   const [editScannerOpen, setEditScannerOpen] = useState(false);
+   const liveEditedSale = useRef<Sale | null>(null);
+   liveEditedSale.current = saleToEdit;
+   useEffect(() => {
+      if (!isEditModalOpen || !editFocus || editScannerOpen) return;
+      const timer = setTimeout(() => {
+         const target = document.getElementById(editFocus);
+         target?.scrollIntoView({ block: 'nearest' });
+         target?.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true });
+      }, 60);
+      return () => clearTimeout(timer);
+   }, [isEditModalOpen, editFocus, editScannerOpen]);
+   useEffect(() => { if (detailSaleId && !historyLoading && !detailSale) setDetailSaleId(null); }, [detailSaleId, detailSale, historyLoading]);
    const [editItemForm, setEditItemForm] = useState({
       price: 0,
       quantity: 1
@@ -165,11 +181,11 @@ const POS: React.FC<POSProps> = ({ user }) => {
    const [lastSale, setLastSale] = useState<Sale | null>(null);
    const searchInputRef = useRef<HTMLInputElement>(null);
 
-   const openSaleDocument = (sale: Sale, mode?: 'invoice' | 'receipt') => {
+   const openSaleDocument = (sale: Sale, mode?: 'invoice' | 'receipt', paymentId?: string) => {
       const receipts = paymentReceipts(sale);
       setLastSale(sale);
       setDocumentMode(mode === 'invoice' || !receipts.length ? 'invoice' : 'receipt');
-      setReceiptId(receipts[receipts.length - 1]?.id || 'initial');
+      setReceiptId(paymentId || receipts[receipts.length - 1]?.id || 'initial');
       setIsReceiptOpen(true);
    };
 
@@ -428,7 +444,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          const matchesPaymentMethod = reportPaymentMethod === 'All' || s.paymentMethod === reportPaymentMethod;
 
          const matchesSearch = historySearchTerm.trim() === '' ||
-            s.receiptNo.toLowerCase().includes(lowercasedTerm) ||
+            saleDocumentReferences(s).some(reference => reference.toLowerCase().includes(lowercasedTerm)) ||
             (s.customerName && s.customerName.toLowerCase().includes(lowercasedTerm)) ||
             (s.walkInName && s.walkInName.toLowerCase().includes(lowercasedTerm)) ||
             s.items.some(item => item.name.toLowerCase().includes(lowercasedTerm));
@@ -702,7 +718,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          });
          const sale: Sale = {
             id: saleIdRef.current,
-            receiptNo: `${settings?.invoicePrefix || 'INV'}-${Date.now()}-${saleIdRef.current.slice(0, 8)}`,
+            receiptNo: '', // Assigned atomically with stock and payment when saved.
             taxPercentage: settings?.taxEnabled ? (settings.taxPercentage ?? 18) : 0,
             paymentReference: checkoutForm.paymentMethod === 'Cash' ? '' : paymentReference.trim(),
             customerId: customerKind === 'Registered' ? checkoutCustomer?.id : undefined,
@@ -726,7 +742,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             wasHeld: !!activeHeldSaleId // Mark as held sale
          };
 
-         const result = await db.commitSale(sale, !!settings?.enableNegativeStock);
+         const result = await db.commitSale(sale, !!settings?.enableNegativeStock, 'create', user.username, settings?.invoicePrefix || 'INV');
          // The transaction is committed. Receipt delivery or refresh failures must not report a failed payment.
          if (activeHeldSaleId) {
             try { deleteHeldSale(activeHeldSaleId); }
@@ -955,12 +971,39 @@ const POS: React.FC<POSProps> = ({ user }) => {
       </label>
    ) : null;
 
-   const openSaleEdit = (sale: Sale) => {
+   const openSaleEdit = (sale: Sale, focus: string | null = null) => {
+      setEditFocus(focus);
       const candidates = customers.filter(customer => sale.customerPhone
          ? normalizeCustomerPhone(customer.phone) === normalizeCustomerPhone(sale.customerPhone)
          : !!sale.customerName && customer.name === sale.customerName);
       setSaleToEdit({ ...structuredClone(sale), customerId: sale.customerKind === 'Walk-in' ? undefined : sale.customerId || (candidates.length === 1 ? candidates[0].id : undefined) });
       setIsEditModalOpen(true);
+   };
+
+   const scanToEditedInvoice = (code: string) => {
+      if (user.role !== UserRole.ADMIN) throw new Error('Only an administrator can change invoice items.');
+      const draft = liveEditedSale.current;
+      const original = salesHistory.find(sale => sale.id === draft?.id);
+      if (!draft || !original) throw new Error('Reopen this invoice before scanning.');
+      const stockPool = invoiceScanStock(products, original.items);
+      const result = addScannedSaleItem(stockPool, draft.items, code, product => calculatePrice(product, draft.customerType || 'Retail'), !!settings?.enableNegativeStock);
+      const net = original.items.reduce((sum, item) => sum + item.price * item.quantity, 0) * (1 - (original.globalDiscountPercentage || 0) / 100);
+      const taxRate = original.taxPercentage ?? (net > 0 ? (original.tax || 0) / net * 100 : 0);
+      const totals = calculateSaleTotals(result.cart, draft.globalDiscountPercentage || 0, taxRate);
+      const updated = { ...draft, ...totals, items: result.cart, taxPercentage: taxRate, saleType: getSaleType({ total: totals.total, amountPaid: draft.amountPaid }), balance: outstandingAmount({ total: totals.total, amountPaid: draft.amountPaid }) };
+      liveEditedSale.current = updated; setSaleToEdit(updated);
+      return result.label;
+   };
+   const saveDetailTerms = async (sale: Sale, dueDate: string, notes: string) => {
+      if (user.role !== UserRole.ADMIN) throw new Error('Only an administrator can change sale details.');
+      const updated = await db.updateSaleDetails(sale.id!, sale.revision || 0, { dueDate, notes }, user.username);
+      setSalesHistory(previous => previous.map(entry => entry.id === updated.id ? updated : entry));
+      showToast('Sale details saved.', 'success');
+   };
+   const openPaymentCollection = (sale: Sale) => {
+      collectionId.current = createId();
+      setCollectionForm({ amount: outstandingAmount(sale), method: 'Cash', reference: '' });
+      setPaymentSale(sale);
    };
 
    const catalog = useMemo(() => (
@@ -1212,6 +1255,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          <Modal
             isOpen={isCheckoutOpen}
             onClose={() => { if (!paymentLock.current) setIsCheckoutOpen(false); }}
+            busy={processingPayment}
             title="Checkout"
             maxWidth="lg"
             noPadding
@@ -1525,7 +1569,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             )
          }
 
-         {isReceiptOpen && lastSale && <SaleDocumentDialog sale={lastSale} settings={settings} onClose={() => setIsReceiptOpen(false)} initialMode={documentMode} initialReceiptId={receiptId} id="pos-receipt" />}
+         {isReceiptOpen && lastSale && <SaleDocumentDialog sale={lastSale} settings={settings} onClose={() => setIsReceiptOpen(false)} initialMode={documentMode} initialReceiptId={receiptId} id="pos-receipt" onPrepared={prepared => { setLastSale(prepared); setSalesHistory(rows => rows.map(row => row.id === prepared.id ? prepared : row)); }} />}
 
          {/* --- SELECT PRICING TYPE MODAL --- */}
          {
@@ -1566,7 +1610,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
          {/* --- HISTORY & REPORTS MODAL --- */}
          {/* --- HISTORY & REPORTS MODAL --- */}
          <Modal
-            isOpen={isHistoryModalOpen}
+            isOpen={isHistoryModalOpen && !detailSaleId && !isStatementModalOpen}
             onClose={() => setIsHistoryModalOpen(false)}
             maxWidth="6xl"
             noPadding
@@ -1776,7 +1820,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                              <div className="p-2 bg-slate-100 rounded-lg text-slate-500 group-hover:bg-slate-900 group-hover:text-white transition-colors">
                                                 <Receipt size={14} strokeWidth={1.75} />
                                              </div>
-                                             <span className="font-mono text-xs font-bold text-slate-700 group-hover:text-slate-900">{sale.receiptNo}</span>
+                                             <button type="button" className="sales-history-invoice-link font-mono text-xs font-bold text-slate-700 group-hover:text-slate-900" aria-label={`Open sale details ${sale.receiptNo}`} onClick={() => setDetailSaleId(sale.id!)}>{sale.receiptNo}</button>
                                           </div>
                                        </td>
                                        <td data-label="Date / time" className="px-6 py-4">
@@ -1787,7 +1831,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        </td>
                                        <td data-label="Customer" className="px-6 py-4">
                                           <div className="flex flex-col">
-                                             <span className="text-xs font-bold text-slate-900">{sale.customerName || 'Walk-in Customer'}</span>
+                                             <span className="text-xs font-bold text-slate-900">{customerDisplayName(sale)}</span>
                                              <span className="text-xs text-slate-400">{typeof sale.customerType === 'string' ? sale.customerType : 'Retail'}</span>
                                           </div>
                                        </td>
@@ -1809,16 +1853,16 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                        <td data-label="Actions" className="px-6 py-4 text-right no-print">
                                           <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                              <button
-                                                onClick={() => setExpandedSaleId(expandedSaleId === sale.id ? null : sale.id)}
+                                                onClick={() => setDetailSaleId(sale.id!)}
                                                 className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-slate-900 hover:border-slate-400 transition-all "
                                                 title="View Details"
                                              >
-                                                {expandedSaleId === sale.id ? <ChevronUp size={14} strokeWidth={1.75} /> : <ChevronDown size={14} strokeWidth={1.75} />}
+                                                <ArrowUpRight size={14} strokeWidth={1.75} />
                                              </button>
                                              <button
                                                 onClick={() => { openSaleDocument(sale, 'invoice'); }}
                                                 className="p-2 bg-white border border-slate-200 rounded-lg text-slate-500 hover:text-slate-900 hover:border-slate-400 transition-all "
-                                                title="Reprint Receipt"
+                                                title="View sales invoice"
                                              >
                                                 <Printer size={14} strokeWidth={1.75} />
                                              </button>
@@ -1842,28 +1886,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                                           </div>
                                        </td>
                                     </tr>
-                                    {expandedSaleId === sale.id && (
-                                       <tr className="sales-history-expanded bg-slate-50/50 duration-200">
-                                          <td colSpan={7} className="p-0">
-                                             <div className="p-4 m-4 bg-white rounded-lg border border-slate-200">
-                                                <h4 className="text-xs font-bold text-slate-500 uppercase mb-3">Items in this Sale</h4>
-                                                <div className="space-y-2">
-                                                   {sale.items.map((item, index) => (
-                                                      <div key={index} className="flex justify-between items-center text-xs border-b border-slate-100 last:border-0 pb-2 last:pb-0">
-                                                         <div>
-                                                            <p className="font-bold text-slate-800">{item.name}</p>
-                                                            <p className="text-xs text-slate-400">
-                                                               {item.quantity} x {item.price.toLocaleString()}
-                                                            </p>
-                                                         </div>
-                                                         <p className="font-bold text-slate-800">{item.total.toLocaleString()}</p>
-                                                      </div>
-                                                   ))}
-                                                </div>
-                                             </div>
-                                          </td>
-                                       </tr>
-                                    )}
                                  </React.Fragment>
                               );
                            });
@@ -1918,20 +1940,16 @@ const POS: React.FC<POSProps> = ({ user }) => {
          {/* --- STATEMENT MODAL --- */}
          {
             isStatementModalOpen && (
-               <div className="adaptive-dialog-layer fixed inset-0 bg-slate-900/60 z-[10000] flex items-center justify-center p-4 backdrop-blur-sm ">
-                  <div className="adaptive-dialog-panel bg-white w-full max-w-4xl rounded-2xl  overflow-hidden border border-white/20 flex flex-col max-h-[90vh]">
-                     <div className="p-5 border-b border-slate-100 flex items-center justify-between no-print bg-slate-50 shrink-0">
-                        <div>
-                           <h2 className="text-lg font-bold text-slate-900">Sales Statement</h2>
-                           <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5">Period: {reportStartDate} to {reportEndDate}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                           <button onClick={() => setIsPrintingStatement(true)} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase hover:bg-black transition-all flex items-center gap-2  ">
-                              <Printer size={14} strokeWidth={1.75} /> Print
-                           </button>
-                           <button onClick={() => setIsStatementModalOpen(false)} className="p-2 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors"><X size={20} strokeWidth={1.75} /></button>
-                        </div>
+               <Modal isOpen={isStatementModalOpen} onClose={() => setIsStatementModalOpen(false)} title="Sales statement"
+                  description={`Period: ${reportStartDate} to ${reportEndDate}`} maxWidth="4xl" noPadding contentClassName="statement-dialog"
+                  footer={<div className="statement-dialog-actions">
+                     <button type="button" onClick={() => setIsPrintingStatement(true)} className="dialog-button dialog-button-primary"><Printer size={16} />Print statement</button>
+                     <div className="statement-dialog-pagination">
+                        <button type="button" className="dialog-button" disabled={statementCurrentPage === 1} onClick={() => setStatementCurrentPage(page => Math.max(1, page - 1))}>Previous</button>
+                        <span>Page {statementCurrentPage} of {Math.max(1, statementPages.length)}</span>
+                        <button type="button" className="dialog-button" disabled={statementCurrentPage >= statementPages.length} onClick={() => setStatementCurrentPage(page => Math.min(statementPages.length, page + 1))}>Next</button>
                      </div>
+                  </div>}>
                      <div className="document-preview-scroll flex-1 overflow-y-auto bg-white">
                         <div id="sales-statement" className="receipt-a4-mode p-12 w-full max-w-[210mm] mx-auto">
                            {/* Report Header */}
@@ -1985,7 +2003,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
 
                            {/* Transaction Table */}
                            {statementPages.map((pageItems, pageIndex) => (
-                              <div key={pageIndex} className="mb-8" style={pageIndex < statementPages.length - 1 ? { pageBreakAfter: 'always' } : {}}>
+                              <div key={pageIndex} ref={element => { statementPageRefs.current[pageIndex] = element; }} hidden={!isPrintingStatement && statementCurrentPage !== pageIndex + 1} className="mb-8" style={pageIndex < statementPages.length - 1 ? { pageBreakAfter: 'always' } : {}}>
                                  {pageIndex === 0 && (
                                     <h3 className="text-xs font-black uppercase tracking-widest border-b border-slate-200 pb-2 mb-4 text-slate-500">Transaction Details</h3>
                                  )}
@@ -2049,201 +2067,6 @@ const POS: React.FC<POSProps> = ({ user }) => {
                            </div>
                         </div>
                      </div>
-                     {/* Pagination Footer for Statement */}
-                     <div className="shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center no-print">
-                        <div>
-                           <p className="text-xs font-bold text-slate-500">
-                              Total Transactions: <span className="text-slate-900">{filteredHistory.length}</span>
-                           </p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                           <button
-                              onClick={() => setStatementCurrentPage(p => Math.max(1, p - 1))}
-                              disabled={statementCurrentPage === 1}
-                              className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold uppercase text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                           >
-                              Previous
-                           </button>
-                           <span className="text-xs font-bold text-slate-600">Page {statementCurrentPage} of {statementPages.length}</span>
-                           <button
-                              onClick={() => setStatementCurrentPage(p => Math.min(statementPages.length, p + 1))}
-                              disabled={statementCurrentPage >= statementPages.length}
-                              className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold uppercase text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                           >
-                              Next
-                           </button>
-                        </div>
-                     </div>
-                  </div>
-               </div>
-            )
-         }
-
-         {/* --- STATEMENT MODAL --- */}
-         {
-            isStatementModalOpen && (
-               <Modal
-                  isOpen={isStatementModalOpen}
-                  onClose={() => setIsStatementModalOpen(false)}
-                  title="Sales Statement"
-                  maxWidth="4xl"
-                  noPadding
-                  contentClassName="flex-1 flex flex-col min-h-0"
-               >
-                  <div className="p-5 border-b border-slate-100 flex items-center justify-between no-print bg-slate-50 shrink-0">
-                     <div>
-                        <h2 className="text-lg font-bold text-slate-900">Sales Statement</h2>
-                        <p className="text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5">Period: {reportStartDate} to {reportEndDate}</p>
-                     </div>
-                     <div className="flex items-center gap-2">
-                        <button onClick={() => setIsPrintingStatement(true)} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold uppercase hover:bg-black transition-all flex items-center gap-2  ">
-                           <Printer size={14} strokeWidth={1.75} /> Print
-                        </button>
-                        <button onClick={() => setIsStatementModalOpen(false)} className="p-2 rounded-lg hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors"><X size={20} strokeWidth={1.75} /></button>
-                     </div>
-                  </div>
-                  <div className="flex-1 overflow-y-auto bg-white">
-                     <div id="sales-statement" className="receipt-a4-mode p-12 w-full max-w-[210mm] mx-auto">
-                        {/* Report Header */}
-                        <div className="flex justify-between items-start mb-8 border-b border-slate-900 pb-6">
-                           <div>
-                              <h1 className="text-2xl font-black uppercase tracking-tight mb-2">Sales Report</h1>
-                              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Period: {reportStartDate} to {reportEndDate}</p>
-                              <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">SNA Mobile ERP System</p>
-                           </div>
-                           <div className="text-right">
-                              {settings?.logo && (
-                                 <img src={settings.logo} className="h-20 object-contain ml-auto mb-3" alt="Logo" />
-                              )}
-                              <h2 className="text-lg font-bold text-slate-900 uppercase">{settings?.businessName || 'SNA! MOBILE SHOP'}</h2>
-                              <p className="text-xs text-slate-500">{settings?.address || 'KYAZANGA OPP STABEX PETROL STATION'}</p>
-                              <p className="text-xs text-slate-500">Tel: {settings?.phone || '+256 756337888 | +256 778413197'}</p>
-                              <p className="text-xs text-slate-500 mt-1">Generated: {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</p>
-                           </div>
-                        </div>
-
-                        {/* Executive Summary Cards */}
-                        <div className="grid grid-cols-3 gap-6 mb-10">
-                           <div className="p-4 border border-slate-200 rounded-lg">
-                              <div className="flex items-center gap-2 mb-2 text-slate-400">
-                                 <DollarSign size={14} strokeWidth={1.75} />
-                                 <p className="text-xs font-bold uppercase tracking-wider">Sales value (includes unpaid)</p>
-                              </div>
-                              <p className="text-2xl font-black text-slate-900">
-                                 {reportData.totals.revenue.toLocaleString()}
-                              </p>
-                           </div>
-                           <div className="p-4 border border-slate-200 rounded-lg bg-slate-50">
-                              <div className="flex items-center gap-2 mb-2 text-slate-400">
-                                 <Receipt size={14} strokeWidth={1.75} />
-                                 <p className="text-xs font-bold uppercase tracking-wider">Transactions</p>
-                              </div>
-                              <p className="text-2xl font-black text-slate-900">
-                                 {reportData.totals.count}
-                              </p>
-                           </div>
-                           <div className="p-4 border border-slate-200 rounded-lg bg-slate-50">
-                              <div className="flex items-center gap-2 mb-2 text-slate-400">
-                                 <TrendingUpIcon size={14} strokeWidth={1.75} />
-                                 <p className="text-xs font-bold uppercase tracking-wider">Avg Ticket</p>
-                              </div>
-                              <p className="text-2xl font-black text-slate-900">
-                                 {Math.round(reportData.totals.avgTicket).toLocaleString()}
-                              </p>
-                           </div>
-                        </div>
-
-                        {/* Transaction Table */}
-                        {statementPages.map((pageItems, pageIndex) => (
-                           <div key={pageIndex} className="mb-8" style={pageIndex < statementPages.length - 1 ? { pageBreakAfter: 'always' } : {}}>
-                              {pageIndex === 0 && (
-                                 <h3 className="text-xs font-black uppercase tracking-widest border-b border-slate-200 pb-2 mb-4 text-slate-500">Transaction Details</h3>
-                              )}
-                              <table className="w-full text-left text-xs">
-                                 <thead>
-                                    <tr className="border-b border-slate-200">
-                                       <th className="py-2 font-bold text-slate-500 uppercase">Date</th>
-                                       <th className="py-2 font-bold text-slate-500 uppercase">Invoice #</th>
-                                       <th className="py-2 font-bold text-slate-500 uppercase">Customer</th>
-                                       <th className="py-2 font-bold text-slate-500 uppercase">Cashier</th>
-                                       <th className="py-2 font-bold text-slate-500 uppercase text-right">Method</th>
-                                       <th className="py-2 font-bold text-slate-500 uppercase text-right">Amount</th>
-                                    </tr>
-                                 </thead>
-                                 <tbody className="divide-y divide-slate-100">
-                                    {pageItems.map((sale, idx) => (
-                                       <tr key={idx}>
-                                          <td className="py-3 font-mono text-slate-600">{new Date(sale.timestamp).toLocaleDateString()}</td>
-                                          <td className="py-3 font-bold text-slate-900">{sale.receiptNo}</td>
-                                          <td className="py-3 text-slate-700">{sale.customerName || '-'}</td>
-                                          <td className="py-3 text-slate-500">{sale.cashierName}</td>
-                                          <td className="py-3 text-right text-slate-500">{getSaleType(sale)} · {sale.paymentMethod}<br />Paid: {sale.amountPaid.toLocaleString()} · Due: {outstandingAmount(sale).toLocaleString()}</td>
-                                          <td className="py-3 text-right font-bold text-slate-900">{sale.total.toLocaleString()}</td>
-                                       </tr>
-                                    ))}
-                                 </tbody>
-                                 {/* Grand Total Footer only on the last page */}
-                                 {pageIndex === statementPages.length - 1 && (
-                                    <tfoot className="border-t-2 border-slate-200">
-                                       <tr>
-                                          <td colSpan={5} className="py-3 text-right font-black text-sm uppercase">Grand Total</td>
-                                          <td className="py-3 text-right font-black text-sm">{reportData.totals.revenue.toLocaleString()}</td>
-                                       </tr>
-                                    </tfoot>
-                                 )}
-                              </table>
-                              {/* Page Number Footer */}
-                              {statementPages.length > 1 && (
-                                 <div className="text-center text-xs text-slate-400 mt-4 print:block hidden">
-                                    Page {pageIndex + 1} of {statementPages.length}
-                                 </div>
-                              )}
-                           </div>
-                        ))}
-
-                        {/* Footer / Signatures */}
-                        <div className="mt-16 pt-8 border-t-2 border-slate-100">
-                           <div className="flex justify-between gap-12">
-                              <div className="flex-1">
-                                 <div className="h-12 border-b border-slate-900 border-dashed mb-2"></div>
-                                 <p className="text-xs font-bold text-slate-900 uppercase">Prepared By</p>
-                              </div>
-                              <div className="flex-1">
-                                 <div className="h-12 border-b border-slate-900 border-dashed mb-2"></div>
-                                 <p className="text-xs font-bold text-slate-900 uppercase">Authorized Signature</p>
-                              </div>
-                           </div>
-                           <p className="text-xs text-center text-slate-400 mt-8">
-                              End of Report • {new Date().getFullYear()} © SNA Mobile Shop
-                           </p>
-                        </div>
-                     </div>
-                  </div>
-                  {/* Pagination Footer for Statement */}
-                  <div className="shrink-0 p-4 border-t border-slate-100 bg-slate-50/50 flex justify-between items-center no-print">
-                     <div>
-                        <p className="text-xs font-bold text-slate-500">
-                           Total Transactions: <span className="text-slate-900">{filteredHistory.length}</span>
-                        </p>
-                     </div>
-                     <div className="flex items-center gap-2">
-                        <button
-                           onClick={() => setStatementCurrentPage(p => Math.max(1, p - 1))}
-                           disabled={statementCurrentPage === 1}
-                           className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold uppercase text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                           Previous
-                        </button>
-                        <span className="text-xs font-bold text-slate-600">Page {statementCurrentPage} of {statementPages.length}</span>
-                        <button
-                           onClick={() => setStatementCurrentPage(p => Math.min(statementPages.length, p + 1))}
-                           disabled={statementCurrentPage >= statementPages.length}
-                           className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold uppercase text-slate-600 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                           Next
-                        </button>
-                     </div>
-                  </div>
                </Modal>
             )
          }
@@ -2410,7 +2233,7 @@ const POS: React.FC<POSProps> = ({ user }) => {
             )
          }
 
-         <Modal isOpen={!!paymentSale} onClose={() => { if (!collectionLock.current) setPaymentSale(null); }} title="Record customer payment" maxWidth="md">
+         <Modal isOpen={!!paymentSale} busy={collecting} onClose={() => { if (!collectionLock.current) setPaymentSale(null); }} title="Record customer payment" maxWidth="md">
             {paymentSale && <form onSubmit={collectPayment} className="space-y-4">
                <p className="text-sm">{paymentSale.customerName} · {paymentSale.receiptNo}</p>
                <p className="font-semibold">Outstanding: UGX {outstandingAmount(paymentSale).toLocaleString()}</p>
@@ -2427,13 +2250,20 @@ const POS: React.FC<POSProps> = ({ user }) => {
             </form>}
          </Modal>
          <PhoneSaleLookup isOpen={imeiLookupOpen} onClose={() => setImeiLookupOpen(false)} onDocument={(sale, mode) => { setImeiLookupOpen(false); openSaleDocument(sale, mode); }} />
+         {detailSale && <SaleDetailsDialog key={detailSale.id} sale={detailSale} isOpen={!isEditModalOpen && !paymentSale && !isReceiptOpen} canEdit={user.role === UserRole.ADMIN}
+            onClose={() => setDetailSaleId(null)} onEdit={(sale, index) => openSaleEdit(sale, index === undefined ? null : `invoice-edit-item-${index}`)}
+            onAddItem={sale => openSaleEdit(sale, 'invoice-add-product')}
+            onScanItem={sale => { openSaleEdit(sale); setEditScannerOpen(true); }}
+            onPayment={openPaymentCollection} onDocument={openSaleDocument} onSaveDetails={saveDetailTerms} />}
+         {editScannerOpen && isEditModalOpen && <ImeiScanner purpose="sale" onSaleScan={scanToEditedInvoice} onClose={() => setEditScannerOpen(false)} />}
          {/* --- EDIT SALE MODAL --- */}
          {
             isEditModalOpen && saleToEdit && (
                <Modal
-                  isOpen={isEditModalOpen}
+                  isOpen={isEditModalOpen && !editScannerOpen}
                   onClose={() => setIsEditModalOpen(false)}
                   title={<div className="invoice-editor-heading"><h2>Edit invoice</h2><p>{saleToEdit.receiptNo}</p></div>}
+                  busy={isUpdating}
                   ariaLabel={`Edit invoice ${saleToEdit.receiptNo}`}
                   maxWidth="2xl"
                   noPadding
@@ -2451,15 +2281,16 @@ const POS: React.FC<POSProps> = ({ user }) => {
                         </select>
                      </label>
                      </>}
+                     <div id="invoice-add-product"><div className="flex justify-between items-center gap-3 mb-2"><span className="text-sm font-semibold">Add items to invoice</span><button type="button" className="sale-details-button" disabled={isUpdating} onClick={() => setEditScannerOpen(true)}><ScanBarcode size={16} />Scan IMEI</button></div>
                      <InvoiceProductPicker products={products} items={saleToEdit.items} disabled={isUpdating} priceFor={product => calculatePrice(product, saleToEdit.customerType || 'Retail')} onAdd={product => {
                            const existing = saleToEdit.items.find(item => item.productId === product.id);
                            const price = calculatePrice(product, saleToEdit.customerType || 'Retail');
                            recalculateEditedSale(existing ? saleToEdit.items.map(item => item.productId === product.id ? { ...item, quantity: item.quantity + 1, total: money((item.quantity + 1) * item.price) } : item) : [...saleToEdit.items, { productId: product.id, name: product.name, price, originalPrice: price, costPrice: product.costPrice, quantity: 1, total: price }]);
-                     }} />
+                     }} /></div>
                      {saleToEdit.items.length === 0 && <p role="alert" className="text-sm text-red-600">Add at least one item before saving.</p>}
                      <div className="invoice-editor-items">
                         {saleToEdit.items.map((item, idx) => (
-                           <div key={idx} className="sale-edit-line">
+                           <div key={idx} id={`invoice-edit-item-${idx}`} className="sale-edit-line">
                               <div className="sale-edit-product">
                                  <p className="sale-edit-product-name">{item.name}</p>
                                  {imeiInput(item, imeis => setSaleToEdit({ ...saleToEdit, items: saleToEdit.items.map((entry, index) => index === idx ? { ...entry, imeis } : entry) }))}

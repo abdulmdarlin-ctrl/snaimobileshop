@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { activateDialog } from '../utils/dialogSurface';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Camera, X, Trash2, Flashlight, ImagePlus, Check, Pause, RotateCcw } from 'lucide-react';
 import type { BrowserMultiFormatReader } from '@zxing/browser';
@@ -44,23 +45,13 @@ export default function ImeiScanner({ existing = [], onApply, onClose, purpose =
         onClose();
     }
     closeRef.current = () => { void close(); };
+    useLayoutEffect(() => panel.current ? activateDialog(panel.current, () => closeRef.current()) : undefined, []);
     useEffect(() => {
         alive.current = true;
-        const previous = document.activeElement as HTMLElement | null;
-        panel.current?.querySelector<HTMLButtonElement>('button')?.focus();
-        const keyboard = (event: KeyboardEvent) => {
-            if (document.querySelector('.confirmation-layer')) return;
-            if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeRef.current(); }
-            if (event.key !== 'Tab') return;
-            const controls = Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled)') || []).filter(el => el.getClientRects().length);
-            const first = controls[0], end = controls[controls.length - 1];
-            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); end?.focus(); }
-            else if (!event.shiftKey && document.activeElement === end) { event.preventDefault(); first?.focus(); }
-        };
         const visibility = () => { if (document.hidden) stop(); };
-        document.addEventListener('keydown', keyboard, true); document.addEventListener('visibilitychange', visibility);
+        document.addEventListener('visibilitychange', visibility);
         if (liveCameraSupported) startRef.current();
-        return () => { alive.current = false; stop(); document.removeEventListener('keydown', keyboard, true); document.removeEventListener('visibilitychange', visibility); if (previous?.isConnected) previous.focus(); };
+        return () => { alive.current = false; stop(); document.removeEventListener('visibilitychange', visibility); };
     }, []);
     useEffect(() => {
         if (previousTarget.current === target) return;
@@ -223,7 +214,7 @@ export default function ImeiScanner({ existing = [], onApply, onClose, purpose =
         zoomTimer.current = setTimeout(() => { zoomTimer.current = null; void cameraSetting({ zoom: value }, revision); }, 150);
     }
     const zoomRange = capabilities.zoom && capabilities.zoom.max > capabilities.zoom.min ? capabilities.zoom : null;
-    return createPortal(<div className="imei-scanner-layer"><div ref={panel} className="imei-scanner-panel" role="dialog" aria-modal="true" aria-labelledby="imei-scanner-title">
+    return createPortal(<div className="imei-scanner-layer"><div ref={panel} className="dialog-surface imei-scanner-panel" role="dialog" aria-modal="true" aria-labelledby="imei-scanner-title">
         <header><div><h2 id="imei-scanner-title">{isSale ? 'Scan to sell' : 'Scan phone IMEIs'}</h2><p>{isSale ? 'Add products or specific phones to the current order' : isSheet ? 'Supplier Total code / bulk IMEI intake' : 'Position one IMEI1 barcode in the center'}</p></div><button type="button" onClick={() => void close()} aria-label="Close IMEI scanner"><X size={22} /></button></header>
         <div className="imei-scanner-body">
             {!isSale && <div className="imei-scan-modes" aria-label="Code type"><button type="button" aria-pressed={target === 'unit'} onClick={() => { if (target !== 'unit') { stop(); setTarget('unit'); } }}>One phone / IMEI1</button><button type="button" aria-pressed={target === 'sheet'} onClick={() => { if (target !== 'sheet') { stop(); setTarget('sheet'); } }}>Supplier Total code</button></div>}

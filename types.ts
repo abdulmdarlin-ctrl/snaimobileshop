@@ -175,6 +175,10 @@ export interface SaleItem {
 export type SaleType = 'Cash sale' | 'Debt' | 'Partial sale';
 
 export interface Sale {
+  dueDate?: string; // Date-only payment terms in YYYY-MM-DD format.
+  notes?: string;
+  documentNumbers?: { invoice?: string; receipts?: Record<string, string> }; // Short print references for legacy records.
+  customerAddress?: string;
   customerKind?: 'Registered' | 'Walk-in';
   walkInName?: string;
   invoiceNo?: string;

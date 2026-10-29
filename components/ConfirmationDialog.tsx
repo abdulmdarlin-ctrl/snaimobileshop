@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { AlertTriangle, Check, Info, X } from 'lucide-react';
 import { cancelDialogs, currentDialog, DialogRequest, resolveDialog, subscribeDialogs } from '../utils/dialog';
-import { lockBodyScroll } from '../utils/scrollLock';
+import { activateDialog } from '../utils/dialogSurface';
 
 function DialogContent({ request }: { request: DialogRequest }) {
     const panel = useRef<HTMLDivElement>(null);
@@ -10,30 +10,8 @@ function DialogContent({ request }: { request: DialogRequest }) {
     const input = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
     const [value, setValue] = useState('');
     const dismiss = () => resolveDialog(request.id, request.kind === 'input' ? null : false);
-    useEffect(() => {
-        const previousFocus = document.activeElement as HTMLElement | null;
-        const unlock = lockBodyScroll();
-        const portal = panel.current?.closest('.confirmation-layer');
-        const siblings = Array.from(document.body.children).filter(node => node !== portal && node instanceof HTMLElement) as HTMLElement[];
-        const previousInert = siblings.map(node => node.inert);
-        siblings.forEach(node => { node.inert = true; });
-        (request.kind === 'input' ? input.current : cancel.current)?.focus();
-        const onKey = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); dismiss(); }
-            if (event.key === 'Tab') {
-                const nodes = Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]') || []);
-                const first = nodes[0], last = nodes[nodes.length - 1];
-                if (event.shiftKey && (document.activeElement === first || !panel.current?.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
-                else if (!event.shiftKey && (document.activeElement === last || !panel.current?.contains(document.activeElement))) { event.preventDefault(); first?.focus(); }
-            }
-        };
-        document.addEventListener('keydown', onKey, true);
-        return () => {
-            document.removeEventListener('keydown', onKey, true);
-            unlock();
-            siblings.forEach((node, index) => { node.inert = previousInert[index]; });
-            if (previousFocus?.isConnected) previousFocus.focus();
-        };
+    useLayoutEffect(() => {
+        if (panel.current) return activateDialog(panel.current, dismiss, () => request.kind === 'input' ? input.current : cancel.current);
     }, [request.id]);
     const danger = request.tone === 'danger';
     const valid = request.kind !== 'input' || (request.requiredText ? value === request.requiredText : !!value.trim());
@@ -42,7 +20,7 @@ function DialogContent({ request }: { request: DialogRequest }) {
         if (valid) resolveDialog(request.id, request.kind === 'input' ? value.trim() : true);
     };
     return <div className="confirmation-layer">
-        <div ref={panel} role={request.kind === 'input' ? 'dialog' : 'alertdialog'} aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-description" className="confirmation-panel">
+        <div ref={panel} role={request.kind === 'input' ? 'dialog' : 'alertdialog'} aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-description" className="dialog-surface confirmation-panel">
             <form onSubmit={submit}>
                 <header className="confirmation-header">
                     <span className={`confirmation-icon ${danger ? 'is-danger' : ''}`}>

@@ -15,6 +15,7 @@ function load(relative, dependencies = {}) {
     return exports;
 }
 const pos = load('../utils/pos.ts');
+const documentNumbers = load('../utils/documentNumbers.ts');
 const customerTools = load('../utils/customers.ts');
 const validation = load('../utils/validation.ts');
 const imeiTools = load('../utils/imei.ts');
@@ -85,7 +86,7 @@ function database() {
             return result;
         }
     };
-    const { db, safeStringify } = load('../db.ts', { 'firebase/firestore': firestore, './firebaseConfig': { dbInstance: {} }, './types': {}, './utils/pos': pos, './utils/saleDocuments': load('../utils/saleDocuments.ts', { './pos': pos }), './utils/validation': validation, './utils/databaseReadCache': load('../utils/databaseReadCache.ts'), './utils/imei': imeiTools, './utils/customers': customerTools });
+    const { db, safeStringify } = load('../db.ts', { 'firebase/firestore': firestore, './firebaseConfig': { dbInstance: {} }, './types': {}, './utils/pos': pos, './utils/documentNumbers': documentNumbers, './utils/saleDetails': load('../utils/saleDetails.ts'), './utils/saleDocuments': load('../utils/saleDocuments.ts', { './pos': pos, './documentNumbers': documentNumbers }), './utils/validation': validation, './utils/databaseReadCache': load('../utils/databaseReadCache.ts'), './utils/imei': imeiTools, './utils/customers': customerTools });
     const sale = { id: 's1', receiptNo: 'INV-1', items: [item()], amountPaid: 100, paymentMethod: 'Cash', cashierName: 'cashier', timestamp: 1, customerId: 'c1', customerName: 'Alice', customerPhone: '0700123456' };
     return { db, safeStringify, records, sale, reads, subscriptions, transactionReads, commits, setReadError: error => { readError = error; }, setCommitError: error => { commitError = error; }, fail: () => { failCommit = true; } };
 }
@@ -121,12 +122,12 @@ test('editing uses stock delta and rejects stale revisions', async () => {
 });
 test('deletion restores stock only once and keeps an audit snapshot', async () => {
     const { db, records, sale } = database();
-    await db.commitSale(sale);
+    const saved = await db.commitSale(sale);
     await db.deleteSale(sale.id, 'admin');
     await db.deleteSale(sale.id, 'admin');
     assert.equal(records.get('products/p1').stockQuantity, 3);
     assert.equal(records.has('sales/s1'), false);
-    assert.ok([...records.values()].some(value => value.saleSnapshot?.receiptNo === sale.receiptNo));
+    assert.ok([...records.values()].some(value => value.saleSnapshot?.receiptNo === saved.receiptNo));
 });
 
 test('debt and partial sale rules reject contradictory payments', () => {
@@ -466,7 +467,7 @@ test('checkout refresh reads only distinct sold products', async () => {
     assert.deepEqual(reads, ['products/p1']);
 });
 
-const documents = load('../utils/saleDocuments.ts', { './pos': pos });
+const documents = load('../utils/saleDocuments.ts', { './pos': pos, './documentNumbers': documentNumbers });
 test('walk-in cash sales store the entered name separately without a customer profile', async () => {
     const { db, sale, records } = database();
     const saved = await db.commitSale({ ...sale, customerKind: 'Walk-in', customerId: undefined, customerName: '', customerPhone: '', walkInName: '  Visiting Customer  ', amountPaid: 150 });
@@ -477,8 +478,8 @@ test('walk-in cash sales store the entered name separately without a customer pr
     assert.equal(saved.changeDue, 50);
     assert.equal(documents.customerDisplayName(saved), 'Visiting Customer');
     assert.equal([...records.keys()].filter(key => key.startsWith('customers/')).length, 1);
-    assert.equal(documents.invoiceNumber(saved), 'INV-1');
-    assert.equal(documents.paymentReceipts(saved)[0].receiptNo, 'RCT-s1-initial');
+    assert.match(documents.invoiceNumber(saved), /^INV-\d{2}-000001$/);
+    assert.match(documents.paymentReceipts(saved)[0].receiptNo, /^RCT-\d{2}-000001$/);
     assert.equal(documents.paymentReceipts(saved)[0].amount, 100);
 });
 test('walk-in customers require a name and cannot owe money', async () => {
@@ -501,7 +502,7 @@ test('debt has no receipt; each actual collection gets a distinct stable payment
     const paid = await db.recordSalePayment(sale.id, { id: 'pay-1', amount: 40, method: 'Cash', reference: '', timestamp: 20, user: 'cashier' });
     const again = await db.recordSalePayment(sale.id, { id: 'pay-1', amount: 40, method: 'Cash', reference: '', timestamp: 20, user: 'cashier' });
     assert.equal(again.amountPaid, 40);
-    assert.equal(documents.paymentReceipts(paid)[0].receiptNo, 'RCT-s1-pay-1');
+    assert.match(documents.paymentReceipts(paid)[0].receiptNo, /^RCT-\d{2}-000001$/);
     assert.equal(documents.paymentReceipts(paid)[0].balanceAfter, 60);
     const updated = await db.recordSalePayment(sale.id, { id: 'pay-2', amount: 25, method: 'Bank', reference: 'BANK-123', timestamp: 30, user: 'manager' });
     const receipts = documents.paymentReceipts(updated);
@@ -676,4 +677,100 @@ test('phone-less customer checkout still enforces fresh account restrictions wit
         assert.equal(records.get('products/p1').stockQuantity, 3);
         assert.equal(records.has('sales/s1'), false);
     }
+});
+
+
+test('sale detail terms save with an audit record without changing items, payments, or stock', async () => {
+    const { db, records, sale, commits } = database();
+    const original = await db.commitSale({ ...sale, timestamp: Date.UTC(2026, 9, 29, 10), amountPaid: 25, saleType: 'Partial sale' });
+    const stock = JSON.stringify(records.get('products/p1'));
+    const updated = await db.updateSaleDetails(sale.id, original.revision, { dueDate: '2026-11-05', notes: ' Deliver to shop ' }, 'admin');
+    assert.equal(updated.dueDate, '2026-11-05');
+    assert.equal(updated.notes, 'Deliver to shop');
+    assert.equal(updated.revision, original.revision + 1);
+    assert.equal(updated.amountPaid, 25);
+    assert.equal(updated.total, 100);
+    assert.equal(updated.amountDue, 75);
+    assert.equal(JSON.stringify(updated.items), JSON.stringify(original.items));
+    assert.equal(JSON.stringify(records.get('products/p1')), stock);
+    assert.ok(commits.at(-1).every(key => key === 'sales/s1' || key.startsWith('auditLogs/')));
+    assert.ok([...records.values()].some(entry => entry.action === 'Sale details updated' && entry.user === 'admin'));
+    await assert.rejects(db.updateSaleDetails(sale.id, original.revision, { dueDate: '', notes: 'stale' }, 'admin'), /changed elsewhere/);
+    const cleared = await db.updateSaleDetails(sale.id, updated.revision, { dueDate: '', notes: '' }, 'admin');
+    assert.equal(cleared.dueDate, '');
+});
+
+test('due date validation, deleted sales, and concurrent payments cannot corrupt sale terms', async () => {
+    const { db, records, sale } = database();
+    const original = await db.commitSale({ ...sale, timestamp: Date.UTC(2026, 9, 29, 10), amountPaid: 0, saleType: 'Debt' });
+    for (const dueDate of ['2026-02-30', '2026-10-28', 'invalid']) {
+        await assert.rejects(db.updateSaleDetails(sale.id, original.revision, { dueDate, notes: '' }, 'admin'), /date/);
+        assert.equal(records.get('sales/s1').revision, original.revision);
+    }
+    await assert.rejects(db.updateSaleDetails(sale.id, original.revision, { dueDate: '', notes: 'x'.repeat(2001) }, 'admin'), /2,000/);
+    const paid = await db.recordSalePayment(sale.id, { id: 'p1', amount: 20, method: 'Cash', reference: '', timestamp: Date.now(), user: 'cashier' });
+    await assert.rejects(db.updateSaleDetails(sale.id, original.revision, { dueDate: '2026-11-05', notes: '' }, 'admin'), /changed elsewhere/);
+    assert.equal(records.get('sales/s1').amountPaid, paid.amountPaid);
+    await assert.rejects(db.updateSaleDetails('missing', 0, { dueDate: '', notes: '' }, 'admin'), /no longer exists/);
+});
+
+
+test('document numbers are short, distinct and allocated once with the successful sale', async () => {
+    const { db, records, sale, transactionReads } = database();
+    const first = await db.commitSale(sale);
+    const counterKey = [...records.keys()].find(key => key.startsWith('documentCounters/'));
+    assert.equal(JSON.stringify(records.get(counterKey)), JSON.stringify({ invoice: 1, receipt: 1 }));
+    const readCount = transactionReads.length;
+    const again = await db.commitSale(sale);
+    assert.equal(again.invoiceNo, first.invoiceNo);
+    assert.equal(transactionReads.length - readCount, 1, 'retry reads only the existing sale');
+    const second = await db.commitSale({ ...sale, id: 's2' });
+    assert.notEqual(first.invoiceNo, second.invoiceNo);
+    assert.notEqual(first.initialReceiptNo, second.initialReceiptNo);
+    assert.ok(first.invoiceNo.length <= 13 && first.initialReceiptNo.length <= 13);
+    assert.equal(JSON.stringify(records.get(counterKey)), JSON.stringify({ invoice: 2, receipt: 2 }));
+    const beforePayment = JSON.stringify(records.get(counterKey));
+    await assert.rejects(db.recordSalePayment(first.id, { id: 'overpay', amount: 1, method: 'Cash', timestamp: 20, user: 'cashier', reference: '' }), /exceeds/);
+    assert.equal(JSON.stringify(records.get(counterKey)), beforePayment);
+});
+
+test('failed sales do not reserve a document number or partly change the ledger', async () => {
+    const { db, records, sale, fail } = database(); fail();
+    await assert.rejects(db.commitSale(sale), /Simulated/);
+    assert.equal([...records.keys()].some(key => key.startsWith('documentCounters/')), false);
+    assert.equal(records.has('sales/s1'), false);
+});
+
+test('legacy print numbers preserve original references, amounts, payments and revision', async () => {
+    const { db, records, sale } = database();
+    const legacy = { ...sale, revision: 3, receiptNo: 'INV-1792240509917-818450a9', invoiceNo: 'INV-1792240509917-818450a9', total: 100, subtotal: 100, discount: 0, amountPaid: 60, saleType: 'Partial sale', initialReceiptNo: 'RCT-long-internal-sale-id-initial', payments: [{ id: 'later', receiptNo: 'RCT-long-internal-sale-id-long-payment-id', amount: 20, method: 'Bank', reference: 'B123', timestamp: 2, user: 'cashier' }] };
+    records.set('sales/s1', legacy);
+    const numbered = await db.ensureSaleDocumentNumbers('s1');
+    assert.equal(numbered.receiptNo, legacy.receiptNo); assert.equal(numbered.invoiceNo, legacy.invoiceNo);
+    assert.equal(JSON.stringify(numbered.payments), JSON.stringify(legacy.payments));
+    assert.equal(numbered.revision, legacy.revision); assert.equal(numbered.amountPaid, 60);
+    assert.match(documents.invoiceNumber(numbered), /^INV-\d{2}-000001$/);
+    const receipts = documents.paymentReceipts(numbered);
+    assert.match(receipts[0].receiptNo, /^RCT-\d{2}-000001$/);
+    assert.match(receipts[1].receiptNo, /^RCT-\d{2}-000002$/);
+    const counterKey = [...records.keys()].find(key => key.startsWith('documentCounters/'));
+    const before = JSON.stringify(records.get(counterKey));
+    await db.ensureSaleDocumentNumbers('s1'); assert.equal(JSON.stringify(records.get(counterKey)), before);
+    const references = documents.saleDocumentReferences(numbered);
+    for (const ref of [legacy.receiptNo, legacy.initialReceiptNo, legacy.payments[0].receiptNo, documents.invoiceNumber(numbered), receipts[0].receiptNo, receipts[1].receiptNo]) assert.ok(references.includes(ref));
+    // An editor opened before numbering must not erase the newly allocated aliases.
+    const edited = await db.commitSale(legacy, false, 'edit');
+    assert.equal(JSON.stringify(edited.documentNumbers), JSON.stringify(numbered.documentNumbers));
+});
+
+test('restoring an older backup never rewinds numbers and restored high numbers reserve the next sequence', async () => {
+    const { db, sale, records } = database();
+    await db.commitSale(sale);
+    const id = documentNumbers.documentSeries().counterId;
+    await db.restoreDocumentCounters([{ id, invoice: 0, receipt: 0 }]);
+    assert.equal(records.get(`documentCounters/${id}`).invoice, 1);
+    await db.restoreDocumentCounters([{ id, invoice: 848, receipt: 512 }]);
+    const next = await db.commitSale({ ...sale, id: 's2' });
+    assert.match(next.invoiceNo, /-000849$/);
+    assert.match(next.initialReceiptNo, /-000513$/);
 });

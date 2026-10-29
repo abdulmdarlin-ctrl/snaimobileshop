@@ -46,7 +46,7 @@ const safeStringify = (obj: any, indent = 0) => {
 // Mock data for receipt preview
 const mockSaleForPreview: Sale = {
    id: 'preview-123',
-   receiptNo: 'INV-PREVIEW-001', initialReceiptNo: 'RCT-PREVIEW-001',
+   receiptNo: 'INV-26-000848', initialReceiptNo: 'RCT-26-000512',
    items: [
       { productId: 'p1', name: 'Sample Smartphone', quantity: 1, price: 1200000, originalPrice: 1200000, total: 1200000 },
       { productId: 'p2', name: 'Protective Case', quantity: 1, price: 50000, originalPrice: 60000, total: 50000 },
@@ -330,7 +330,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
       try {
          const [
             settingsData, products, sales, usersData,
-            repairs, suppliers, expenses, expenseCategories, stockLogs, auditLogsData
+            repairs, suppliers, expenses, expenseCategories, stockLogs, auditLogsData, documentCounters
          ] = await Promise.all([
             db.settings.toCollection().first(),
             db.products.toArray(),
@@ -341,7 +341,8 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
             db.expenses.toArray(),
             db.expenseCategories.toArray(),
             db.stockLogs.toArray(),
-            db.auditLogs.toArray()
+            db.auditLogs.toArray(),
+            db.documentCounters.toArray({ fresh: true })
          ]);
 
          const backupData = {
@@ -360,7 +361,8 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                expenses,
                expenseCategories,
                stockLogs,
-               auditLogs: auditLogsData
+               auditLogs: auditLogsData,
+               documentCounters
             }
          };
 
@@ -392,6 +394,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
 
             if (!data) throw new Error("Invalid backup format");
 
+            await db.restoreDocumentCounters(data.documentCounters || [], data.sales || []);
             if (data.products) await Promise.all(data.products.map((p: any) => db.products.add(p)));
             if (data.sales) await Promise.all(data.sales.map((s: any) => db.sales.add(s)));
             if (data.repairs) await Promise.all(data.repairs.map((r: any) => db.repairs.add(r)));
@@ -1073,13 +1076,13 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                            </div>
                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                               <div className="col-span-full space-y-2">
-                                 <label className="win-label">Receipt Header</label>
+                                 <label className="win-label">Service receipt header</label>
                                  <textarea
                                     className="win-input p-4 h-24 resize-none"
                                     value={settings.receiptHeader}
                                     onChange={e => setSettings(s => s ? { ...s, receiptHeader: e.target.value } : null)}
                                     placeholder="Enter business name and branch details..."
-                                 />
+                                 /><p className="text-xs text-slate-500">Sales documents use fixed INVOICE and RECEIPT headings with separate numbers.</p>
                               </div>
                               <div className="space-y-2">
                                  <label className="win-label">Tax ID / TIN</label>
@@ -1092,7 +1095,7 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                                     value={settings.receiptFormat || 'thermal'}
                                     onChange={e => setSettings(s => s ? { ...s, receiptFormat: e.target.value as any } : null)}
                                  >
-                                    <option value="thermal">Thermal (80mm)</option>
+                                    <option value="thermal">Thermal (configured paper width)</option>
                                     <option value="a4">A4</option>
                                  </select>
                               </div>
@@ -1120,16 +1123,13 @@ const Settings: React.FC<SettingsProps> = ({ user: currentUser, onNavigate, onSe
                               </div>
                            </div>
                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-6 mt-6 border-t border-slate-100">
+                              <p className="text-xs text-slate-500">Sales documents use the simple dashed-line layout. Set 58mm or 80mm paper in Hardware.</p>
                               <div className="flex items-center justify-between">
-                                 <label className="text-sm font-bold text-slate-700">Show Logo</label>
-                                 <ToggleSwitch checked={settings.receiptShowLogo ?? true} onChange={v => setSettings(s => s ? { ...s, receiptShowLogo: v } : null)} />
-                              </div>
-                              <div className="flex items-center justify-between">
-                                 <label className="text-sm font-bold text-slate-700">Show Cashier</label>
+                                 <label className="text-sm font-bold text-slate-700">Show payment attendant</label>
                                  <ToggleSwitch checked={settings.receiptShowCashier ?? true} onChange={v => setSettings(s => s ? { ...s, receiptShowCashier: v } : null)} />
                               </div>
                               <div className="flex items-center justify-between">
-                                 <label className="text-sm font-bold text-slate-700">Show Tax Detail</label>
+                                 <label className="text-sm font-bold text-slate-700">Show invoice tax detail</label>
                                  <ToggleSwitch checked={settings.receiptShowTaxDetail ?? true} onChange={v => setSettings(s => s ? { ...s, receiptShowTaxDetail: v } : null)} />
                               </div>
                            </div>
